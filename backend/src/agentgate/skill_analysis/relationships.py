@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from itertools import combinations
 from typing import Any, Literal
 
@@ -59,8 +60,16 @@ _SYSTEM_PROMPT = (
     "Return exactly one JSON object with no markdown or commentary. "
     "Required fields: relationship, confidence, reason, ambiguous_examples, "
     "suggestion. relationship must be none, overlap, ambiguous, conflict, or "
-    "duplicate. confidence must be between 0 and 1. ambiguous_examples must "
-    "contain at most three short user requests. suggestion must be a string or null. "
+    "duplicate. confidence is your certainty in the selected relationship, NOT "
+    "a signed similarity score or a risk score. It must be a JSON number between "
+    "0 and 1 inclusive, NEVER negative, including when relationship is none. "
+    "For example, a confident no-overlap assessment is "
+    '{"relationship":"none","confidence":0.95,"reason":"职责清晰且不同。",'
+    '"ambiguous_examples":[],"suggestion":null}. '
+    "reason must be nonblank and at most 600 characters. ambiguous_examples must "
+    "contain at most three nonblank user requests of at most 300 characters each. "
+    "suggestion must be null when no change is needed, otherwise a nonblank "
+    "string of at most 600 characters. Check these constraints before responding. "
     "Write reason, ambiguous_examples, and suggestion in Simplified Chinese. "
     "Keep JSON field names, relationship enum values, and technical identifiers unchanged."
 )
@@ -284,7 +293,34 @@ def analyze_skill_relationships(
             timeout_seconds=float(timeout_seconds),
         )
         try:
-            assessment = _parse_assessment(model_client.complete(request).text)
+            text = model_client.complete(request).text
+            try:
+                assessment = _parse_assessment(text)
+            except SkillRelationshipContractError as invalid:
+                # One model-side correction; never coerce invalid judgments locally.
+                fields = []
+                if isinstance(invalid.__cause__, ValidationError):
+                    fields = [
+                        ".".join(str(part) for part in item["loc"])
+                        for item in invalid.__cause__.errors(include_input=False)
+                    ]
+                request = replace(
+                    request,
+                    user_prompt=json.dumps({
+                        "original_task": json.loads(request.user_prompt),
+                        "validation_feedback": {
+                            "error": str(invalid),
+                            "invalid_fields": fields,
+                            "instruction": (
+                                "Re-evaluate the original task and return a fresh valid JSON object. "
+                                "confidence measures certainty, not risk: for none use e.g. 0.95, "
+                                "never -0.95. Do not negate the confidence for none. "
+                                "All natural-language explanations must be in Simplified Chinese."
+                            ),
+                        },
+                    }, ensure_ascii=False, sort_keys=True),
+                )
+                assessment = _parse_assessment(model_client.complete(request).text)
         except Exception as error:
             errors.append(
                 {

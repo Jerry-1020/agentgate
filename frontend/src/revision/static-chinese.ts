@@ -1,5 +1,21 @@
 // Exact-text Chinese translations of existing historical report content; raw reports remain unchanged.
 const translations:Record<string,string>={
+  "Both skills involve processing loan applications, but with distinct primary responsibilities: Credit Inquiry focuses on retrieving risk classification, while Loan Approval involves assessing and choosing an approval action. The latter may implicitly require or include risk classification, creating an intersection, but routing can be clear based on whether the user specifically requests risk retrieval or a broader assessment/decision.": "两个技能都处理贷款申请，但主要职责不同：征信查询负责获取风险分类，贷款审批负责评估并选择审批动作。贷款审批可能隐含需要风险分类，因此职责存在交集；可根据用户需要的是风险查询还是综合评估与决策来明确路由。",
+  "Clarify if Loan Approval always includes a risk classification step, or if Credit Inquiry is a sub-task. Consider routing based on explicit user intent: specific risk requests to Credit Inquiry, and general assessment/approval requests to Loan Approval.": "明确贷款审批是否总是包含风险分类步骤，以及征信查询是否为其子任务。按用户的明确意图路由：风险查询交给征信查询，综合评估或审批请求交给贷款审批。",
+  "What's the risk level for my loan application?": "我的贷款申请风险等级是多少？",
+  "Can you evaluate my loan application?": "可以评估我的贷款申请吗？",
+  "Should my loan be approved based on risk?": "根据风险情况，我的贷款是否应获批准？",
+  "Both skills involve processing loan applications, but their core responsibilities are distinct: one focuses on approval decisions, the other on calculating repayment installments. However, a user request like 'process my loan application' could ambiguously relate to either, indicating an intersection in their domains.": "两个技能都处理贷款申请，但核心职责不同：一个负责审批决策，另一个计算还款分期。不过，“处理我的贷款申请”这样的请求可能指向任一技能，说明两者的业务范围存在交集。",
+  "Clarify descriptions to specify that Loan Approval handles approval decisions and Repayment Plan focuses on installment calculations after approval.": "在职责描述中明确：贷款审批负责审批决策，还款计划专注于审批后的分期计算。",
+  "Process my loan application": "处理我的贷款申请",
+  "What's next for my loan?": "我的贷款下一步是什么？",
+  "Review my loan details": "查看我的贷款详情",
+  "Both skills involve processing loan applications, but the left skill focuses on retrieving a risk classification, while the right skill involves assessing the application and choosing an approval action. The right skill may require the risk classification as part of its assessment, indicating an intersection in responsibilities, but routing can remain clear if the left skill is used for a specific data retrieval step and the right skill for a broader decision-making process.": "两个技能都处理贷款申请：征信查询侧重获取风险分类，贷款审批侧重评估申请并选择审批动作。审批评估可能需要风险分类，因此职责存在交集；若将征信查询定位为独立的数据查询步骤、贷款审批定位为综合决策过程，路由仍可保持清晰。",
+  "Clarify that Credit Inquiry is for retrieving risk classification data only, while Loan Approval is for making approval decisions based on assessment, which may include risk classification.": "明确征信查询仅获取风险分类数据；贷款审批依据评估作出审批决策，评估中可能包含风险分类信息。",
+  "Check my loan application status.": "查看我的贷款申请状态。",
+  "Both skills involve processing a loan application, but their core responsibilities are distinct: one focuses on approval decisions, the other on calculating repayment terms. However, a user request like 'process my loan application' could be ambiguous without further context, as it might involve either or both steps.": "两个技能都处理贷款申请，但核心职责不同：一个负责审批决策，另一个计算还款条件。如果缺少上下文，“处理我的贷款申请”这样的请求可能涉及其中一个或两个步骤，因而存在歧义。",
+  "Clarify routing by specifying if the user needs approval assessment or repayment calculation, or consider a combined skill for end-to-end loan processing.": "通过明确用户需要审批评估还是还款计算来区分路由，也可考虑由组合技能处理端到端贷款流程。",
+  "Handle my loan request": "处理我的贷款请求",
   "Both skills involve processing loan applications, but their declared responsibilities are distinct: one retrieves a risk classification, while the other assesses the application and chooses an approval action. The assessment in 'Loan Approval' likely depends on the risk classification from 'Credit Inquiry', indicating a sequential or dependent relationship rather than a direct conflict or duplication.": "两个技能都处理贷款申请，但声明的职责不同：一个查询风险分类，另一个评估申请并选择审批动作。“贷款审批”的评估可能依赖“征信查询”的风险分类，说明两者可能存在先后或依赖关系，而非直接冲突或重复。",
   "Clarify that 'Credit Inquiry' is a sub-step or input for 'Loan Approval', or specify that risk classification retrieval is a separate, preliminary service.": "明确“征信查询”是“贷款审批”的子步骤或输入，或说明风险分类查询是独立的前置服务。",
   "What's the risk level for this loan?": "这笔贷款的风险等级是什么？",
@@ -23,4 +39,3 @@ const translations:Record<string,string>={
 }
 export const staticChinese=(text:string)=>translations[text]??text
 export const skillChinese=(text:string)=>({ 'Credit Inquiry':'征信查询','Loan Approval':'贷款审批','Repayment Plan':'还款计划','Complaint':'投诉处理','credit_inquiry':'征信查询','loan_approval':'贷款审批','repayment_plan':'还款计划','complaint':'投诉处理'} as Record<string,string>)[text]??text
-

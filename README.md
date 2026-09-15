@@ -83,6 +83,6 @@ uv run pytest -q
 
 ## 上游与许可证
 
-后端来源：[open-fin/agentgate，refactor-1](https://github.com/open-fin/agentgate/tree/refactor-1)，基础提交 `e3760d16602c9423b54be968ea97839a5144d691`。后端本地变更仅为两处模型提示词增加简体中文输出要求。完整后端源码纳入本仓库，不是 Git 子模块。
+后端来源：[open-fin/agentgate，refactor-1](https://github.com/open-fin/agentgate/tree/refactor-1)，基础提交 `e3760d16602c9423b54be968ea97839a5144d691`。本地增加模型中文输出要求，并修复 Skill 静态分析的置信度语义：格式不合格时允许一次模型纠错，仍严格校验，不在本地修改分数。包含对应回归测试。完整后端源码纳入本仓库，不是 Git 子模块。
 
 上游后端采用 Apache-2.0，保留在 [backend/LICENSE](backend/LICENSE)。新增前端的许可范围未另行声明，请勿将上游后端许可自动视为覆盖全部新增内容。后端内的 README 和设计文档为上游资料，本仓库默认启动方式以本文件为准。
