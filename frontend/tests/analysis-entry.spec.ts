@@ -1,0 +1,41 @@
+import {test,expect} from '@playwright/test'
+
+test('static analysis defaults to the real service and keeps the demo a secondary returnable entry',async({page})=>{
+ let analysisWrites=0
+ await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{configured:false,reason:'未配置分析模型，无法发起新分析。'}}))
+ page.on('request',r=>{if(r.method()!=='GET'&&/\/api\/(evaluations\/skill-analysis|skill-analysis\/reports)/.test(r.url()))analysisWrites++})
+ await page.goto('/#analysis')
+ const entry=page.locator('.page-head').getByRole('button',{name:'查看演示样例',exact:true})
+ await expect(entry).toHaveClass('secondary')
+ await expect(page.getByRole('button',{name:'服务端分析',exact:true})).toHaveCount(0)
+ await expect(page.getByRole('button',{name:'交互样例（Mock）',exact:true})).toHaveCount(0)
+ await expect(page.getByText('未配置分析模型，无法发起新分析。',{exact:true})).toBeVisible()
+ await page.getByLabel('检查对象',{exact:true}).selectOption('loan-agent-v1-risky')
+ await expect(page.getByRole('button',{name:'运行分析',exact:true})).toBeDisabled()
+ await page.screenshot({path:'../runtime/browser-tests/static-default-entry.png',fullPage:true})
+
+ await entry.click()
+ await expect(page.getByText('演示模式',{exact:true})).toBeVisible()
+ await expect(page.getByText('预设样例，不调用模型，不保存报告或复核记录。',{exact:false})).toBeVisible()
+ await page.getByRole('button',{name:'展示样例',exact:true}).click()
+ const finding=page.locator('#analysis-item-mock-approval')
+ await expect(finding).toBeVisible()
+ await page.getByPlaceholder('填写姓名或工号（当前为人工声明）').fill('演示查看者')
+ await finding.locator('select').selectOption('confirmed')
+ await finding.getByRole('button',{name:'保存复核',exact:true}).click()
+ await expect(finding).toContainText('演示复核，仅本页展示，不写入服务端')
+ await page.screenshot({path:'../runtime/browser-tests/static-demo-entry.png',fullPage:true})
+
+ await page.locator('.page-head').getByRole('button',{name:'返回正式分析',exact:true}).click()
+ await expect(entry).toBeVisible()
+ await expect(finding).toHaveCount(0)
+ await expect(page.getByText('演示模式',{exact:true})).toHaveCount(0)
+ await expect(page.getByLabel('检查对象',{exact:true})).toHaveValue('loan-agent-v1-risky')
+ await expect(page.getByRole('button',{name:'运行分析',exact:true})).toBeDisabled()
+ expect(analysisWrites).toBe(0)
+
+ await entry.click()
+ await page.getByRole('button',{name:'展示样例',exact:true}).click()
+ await expect(finding.locator('select')).toHaveValue('')
+ await expect(finding).not.toContainText('演示复核，仅本页展示，不写入服务端')
+})
