@@ -7,8 +7,6 @@ set -e
 
 PROJECT_DIR="/Users/eric/hw/xql/pythonwork/agentgate"
 VENV_PYTHON="$PROJECT_DIR/.venv/bin/python"
-DB_PATH="$PROJECT_DIR/agentgate-demo.db"
-REDIS_URL="redis://127.0.0.1:6379/0"
 ENV_FILE="$PROJECT_DIR/.env"
 
 # ---- Read dispatcher type from .env ----
@@ -23,9 +21,21 @@ fi
 echo "Task dispatcher type: $DISPATCHER_TYPE"
 
 # ---- Export shared env ----
-export AGENTGATE_DB="$DB_PATH"
-export AGENTGATE_REDIS_URL="$REDIS_URL"
 export PYTHONPATH="$PROJECT_DIR/src"
+
+# ---- Export all active variables from .env ----
+if [ -f "$ENV_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        key=$(echo "$line" | cut -d= -f1 | tr -d '[:space:]')
+        val=$(echo "$line" | cut -d= -f2-)
+        if [ -n "$key" ]; then
+            export "$key=$val"
+        fi
+    done < "$ENV_FILE"
+fi
 
 # ---- 1. Redis (only for celery) ----
 if [ "$DISPATCHER_TYPE" = "celery" ]; then
