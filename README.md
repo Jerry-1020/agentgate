@@ -1,4 +1,8 @@
-# AgentGate Web NH
+# AgentGate 统一评测任务开发副本
+
+本副本基于已整理版本 `018dbf7`，开发分支为 `feature/unified-evaluation-tasks`。原 5196 版本保持不变。统一创建表单及现有接口联调已实现；Git 分支、任务级凭据选择和后端任务关联持久化尚未完成。
+
+开发范围和确认进度见 [统一任务开发记录](docs/unified-evaluation-tasks.md)。
 
 智能体评测工作台，包含 Vue 前端和 AgentGate Python 后端。此仓库整理自 2026-09-15 的 5196 联调版本，保留当前功能，不包含本机数据库、真实密钥或安装依赖。
 
@@ -23,14 +27,13 @@
 准备 Node.js 22、npm、Python 3.11 或以上、uv 和 Redis。首次安装依赖需要联网。
 
 ```bash
-git clone https://github.com/open-fin-sub/agentgate-web-nh.git
-cd agentgate-web-nh
+# 在本开发副本根目录执行
 bash start-macos.command
 ```
 
 也可双击 `start-macos.command`。该脚本安装项目依赖，不安装系统软件；未安装 Node.js、uv 或 Redis 时会提示退出。
 
-启动后访问 [评测工作台](http://127.0.0.1:5196/)。前端端口 5196、API 8096、Redis 6396。端口占用时脚本拒绝启动，不停止已有服务。按 Ctrl+C 结束本次启动的进程。
+启动后访问 [评测工作台](http://127.0.0.1:5197/)。前端端口 5197、API 8097、Redis 6397。端口占用时脚本拒绝启动，不停止已有服务。按 Ctrl+C 结束本次启动的进程。
 
 日志和 SQLite 数据在首次启动后生成的 `runtime/`，该目录不会提交到 Git。新环境会初始化内置贷款 Demo；原电脑创建的评测集、历史报告及人工备注不在此代码仓库中。
 

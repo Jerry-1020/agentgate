@@ -29,10 +29,10 @@ def shutdown(*_):
         log.close()
 
 def main():
-    for port in (5196, 8096, 6396):
+    for port in (5197, 8097, 6397):
         with socket.socket() as probe:
             if probe.connect_ex(("127.0.0.1", port)) == 0:
-                raise RuntimeError(f"端口 {port} 已被占用。不会停止已有服务；如本副本已启动，请访问 http://127.0.0.1:5196/")
+                raise RuntimeError(f"端口 {port} 已被占用。不会停止已有服务；如本副本已启动，请访问 http://127.0.0.1:5197/")
     runtime = root / "runtime"
     runtime.mkdir(exist_ok=True)
     for name in ("redis", "api", "worker", "scheduler", "web"):
@@ -46,15 +46,15 @@ def main():
         if any(child.poll() is not None for child in children):
             raise RuntimeError("有服务启动失败，请检查 runtime 中的日志。")
         try:
-            urllib.request.urlopen("http://127.0.0.1:8096/health", timeout=1).close()
-            urllib.request.urlopen("http://127.0.0.1:5196/", timeout=1).close()
+            urllib.request.urlopen("http://127.0.0.1:8097/health", timeout=1).close()
+            urllib.request.urlopen("http://127.0.0.1:5197/", timeout=1).close()
             break
         except (OSError, ValueError):
             time.sleep(1)
     else:
         raise RuntimeError("服务启动超时，请检查 runtime 日志。")
-    print("已启动：http://127.0.0.1:5196/ ；按 Ctrl+C 停止本次启动的服务。", flush=True)
-    webbrowser.open("http://127.0.0.1:5196/")
+    print("已启动：http://127.0.0.1:5197/ ；按 Ctrl+C 停止本次启动的服务。", flush=True)
+    webbrowser.open("http://127.0.0.1:5197/")
     while True:
         if any(child.poll() is not None for child in children):
             raise RuntimeError("服务已退出，请检查 runtime 日志。")

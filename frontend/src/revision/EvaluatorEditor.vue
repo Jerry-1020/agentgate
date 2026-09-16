@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {computed, onMounted, ref, watch} from 'vue'
+import {evaluatorScenarios} from './evaluator-guidance'
 import {request, type Definition, type EvaluatorSummary} from './api'
 const props=defineProps<{modelValue:Definition;items:EvaluatorSummary[];disabled?:boolean}>()
 const emit=defineEmits<{ 'update:modelValue':[value:Definition] }>()
@@ -39,7 +40,18 @@ function addCriterion(){if(!criterion.value.trim()||!criterionText.value.trim())
 </script>
 <template>
  <fieldset class="evaluator-fields" :disabled="disabled">
-  <template v-if="value.kind==='llm_judge'">
+  <template v-if="value.kind==='rule'">
+   <section class="rule-design" aria-label="规则评估器设计">
+    <h3>规则设计</h3>
+    <div class="form-grid">
+     <div class="field full"><span>判定逻辑</span><strong>{{evaluatorScenarios[value.implementation_id]??'使用已注册的规则实现'}}</strong><small>实现：{{value.implementation_id}} · v{{value.implementation_version}}</small></div>
+     <label class="field">失败影响<select class="input" aria-label="失败影响" v-model="value.severity" @change="update"><option value="standard">普通检查</option><option value="blocking">阻断检查</option></select></label>
+     <div class="field"><span>评估指标</span><strong>{{value.metric}}</strong></div>
+    </div>
+    <p class="muted">具体期望值、必需／禁用工具及字段条件在评测用例中设置；此处复用后端已注册规则，不支持编写任意代码或新增自定义条件。</p>
+   </section>
+  </template>
+  <template v-else-if="value.kind==='llm_judge'">
    
    <div class="form-grid">
     <label class="field full">评估模型<select class="input" aria-label="评估模型" :value="selectedModel" @change="chooseModel(Number(($event.target as HTMLSelectElement).value))"><option :value="-1" disabled>{{value.config.model && (value.config.model as any).model_id?'原配置模型当前未接入':'请选择已接入模型'}}</option><option v-for="(m,i) in models" :key="modelKey(m)" :value="i">{{m.model_id}} · {{m.provider_id}}</option></select><small v-if="!models.length&&!modelError">暂无已接入模型，请在配置中查看接入状态。</small><small v-if="modelError" role="alert">{{modelError}}</small><span class="actions"><button type="button" class="link" @click="loadModels">刷新模型列表</button><a class="link" href="#settings" target="_blank" rel="noopener">查看配置 →</a></span></label>

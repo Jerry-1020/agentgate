@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import EvaluatorDiff from './EvaluatorDiff.vue'
 import {ref,onMounted,onUnmounted,watch} from 'vue'
 import {ElMessageBox,ElMessage} from 'element-plus'
 import {request,type EvaluatorDetail,type Definition} from './api'
-const props=defineProps<{item:EvaluatorDetail;unsaved:boolean;disabled:boolean;activeVersion?:string|null}>()
+const props=defineProps<{item:EvaluatorDetail;unsaved:boolean;disabled:boolean;allowCreate?:boolean;activeVersion?:string|null}>()
 const emit=defineEmits<{clone:[value:Definition];refresh:[];removed:[];busy:[value:boolean];select:[value:Definition|null]}>()
 const versions=ref<Definition[]>([]),version=ref(''),detail=ref<Definition|null>(props.item.draft?null:props.item.latest)
 watch(()=>props.activeVersion,v=>{if(v){version.value=v;detail.value=versions.value.find(x=>x.version===v)??detail.value}})
@@ -46,10 +45,9 @@ async function mutate(action:'discard'|'delete'|'draft'){
    </div>
   </div>
   <p v-if="error" role="alert">{{error}}</p>
-  <EvaluatorDiff :versions="versions"/>
   <section v-if="detail" aria-label="已发布版本详情（只读）">
    <p v-if="loading">正在读取版本…</p><p v-if="error" role="alert">{{error}}</p>
-   <button v-if="item.evaluator.source==='builtin'" class="primary" :disabled="disabled||busy||loading||unsaved" @click="emit('clone',detail)">复制为自定义草稿</button><button v-else-if="item.draft" class="primary" :disabled="disabled||busy||unsaved" @click="version='';view()">编辑草稿</button><button v-else class="primary" :disabled="disabled||busy||loading||unsaved" @click="mutate('draft')">基于此版本创建草稿</button><small v-if="item.evaluator.source==='builtin'" class="muted"> 内置定义只读；复制为自定义草稿后可编辑配置并发布。</small>
+   <template v-if="allowCreate!==false"><button v-if="item.evaluator.source==='builtin'" class="primary" :disabled="disabled||busy||loading||unsaved" @click="emit('clone',detail)">复制为自定义草稿</button><button v-else-if="item.draft" class="primary" :disabled="disabled||busy||unsaved" @click="version='';view()">编辑草稿</button><button v-else class="primary" :disabled="disabled||busy||loading||unsaved" @click="mutate('draft')">基于此版本创建草稿</button><small v-if="item.evaluator.source==='builtin'" class="muted"> 内置定义只读；复制为自定义草稿后可编辑配置并发布。</small></template>
   </section>
  </div>
 </template>

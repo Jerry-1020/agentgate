@@ -37,8 +37,7 @@ const actions:Record<string,[string,string,string]>={
  skill_routing_accuracy:['修正 Skill 路由条件','对照期望 Skill 与实际路由，核对触发条件和职责边界。','确认实际 Skill 符合期望，并回归相邻场景。']
 }
 const action=(metric:string)=>actions[metric]??['核对并修正执行配置',suggestion(metric),'使用同一评测集发布版本和评估器版本重跑关联样本，对比修复前后结果，并检查是否引入新的失败。']
-const expanded=ref<string|null>(null)
-watch(()=>props.report.run.id,()=>expanded.value=null)
+const evaluatorTitle=(id:string,name:string)=>({'final-state':'最终业务状态','forbidden-tool':'调用了禁用工具','policy-compliance':'策略合规','required-tool':'必需工具调用','skill-routing':'技能路由','tool-arguments':'工具参数','final-output':'最终输出'} as Record<string,string>)[id]??name
 const groups=computed(()=>{
  const map=new Map<string,{key:string;name:string;version:string;metric:string;items:EvaluationResult[]}>()
  for(const result of props.report.results.filter(r=>r.outcome==='fail')){
@@ -55,47 +54,54 @@ const reviews=computed(()=>props.report.results.filter(r=>r.outcome==='review').
 const caseName=(id:string)=>props.report.run.manifest.dataset.cases.find(c=>c.id===id)?.name??id
 const reason=(text:string)=>[...new Set(text.split(/[；;]/).map(t=>t.trim()).filter(Boolean))].join('；')
 const suggestion=(metric:string)=>guidance[metric]??'逐项核对下方期望值、实际值与 Trace；先确认样本约束是否正确，再排查智能体执行过程。'
+const groupKey=ref(''),caseKey=ref('')
+const activeGroup=computed(()=>groups.value.find(g=>g.key===groupKey.value)??groups.value[0])
+const caseIds=computed(()=>[...new Set(activeGroup.value?.items.map(r=>r.case_id)??[])])
+const selectedCase=computed({get:()=>caseIds.value.includes(caseKey.value)?caseKey.value:caseIds.value[0]??'',set:(v:string)=>caseKey.value=v})
+const caseResults=computed(()=>activeGroup.value?.items.filter(r=>r.case_id===selectedCase.value)??[])
+watch(()=>props.report.run.id,()=>{groupKey.value='';caseKey.value=''})
 </script>
 <template>
- <section class="card section-gap rule-analysis" aria-label="基于真实报告的规则分析">
-  <h2>分析结果</h2>
-  <p v-if="!failed.length">{{errors||reviews?'暂无未通过结果，请先处理异常或待复核项。':'本次没有未通过结果。'}}</p>
-  <article v-for="group in groups" :key="group.key" class="improvement-card">
-   <h3>{{group.metric==='forbidden_tool_compliance'?'调用了禁用工具':group.name}}<small>（{{group.items[0].evaluator_id}} · v{{group.version}}）</small></h3>
-   <button class="secondary" :aria-expanded="expanded===group.key" @click="expanded=expanded===group.key?null:group.key">{{expanded===group.key?'收起关联原因与建议':'查看关联原因与建议'}}</button>
-   <div class="failure-line"><p>{{reason(group.items[0].reason)}}</p><span class="muted">涉及 {{new Set(group.items.map(r=>r.case_id)).size}} 条样本 · {{group.items.length}} 条未通过结果</span></div>
-   <div class="sample-links"><button v-for="id in [...new Set(group.items.map(r=>r.case_id))]" :key="id" class="link sample-button" @click="reportCase=id">{{caseName(id)}} → 查看报告</button></div>
-   <section v-if="expanded===group.key" class="recommendation" aria-label="基于失败证据的改进建议">
-    <p><b>优先级：</b>{{group.items.some(r=>r.severity==='blocking')?'高（依据阻断检查）':'待确认'}} · <b>修改对象：</b>待根据 Trace 定位。</p>
-    <div class="advice-line"><h3>改进建议</h3><p><strong>{{action(group.metric)[0]}}</strong>：{{action(group.metric)[1]}}</p></div>
-    <div class="advice-line"><h4>如何验证</h4><p>{{action(group.metric)[2]}}</p></div>
-   </section>
-   <details>
-    <summary>查看期望与实际执行证据</summary>
-    <p v-if="group.metric==='forbidden_tool_compliance'" class="muted">期望为禁止调用约束；实际是 Trace 中的工具调用名称列表，并非智能体最终回答。</p>
-    <div v-for="(result,index) in group.items" :key="index" class="annotated-evidence">
-    <div class="checks-column"><h4>{{caseName(result.case_id)}}</h4>
-     <div class="table-wrap" v-if="result.checks.some(c=>c.outcome==='fail')"><table class="data-table"><thead><tr><th>检查项</th><th>期望</th><th>实际</th></tr></thead><tbody><tr v-for="check in result.checks.filter(c=>c.outcome==='fail')" :key="check.id"><td>{{check.name}}<small>{{check.reason}}</small></td><td><pre>{{pretty(check.expected)??'未提供'}}</pre></td><td><pre>{{check.actual_missing?'未记录实际值':pretty(check.actual)??'未提供'}}</pre></td></tr></tbody></table></div>
-     <p v-else>原报告未提供检查项明细，请查看原始报告。</p>
-    </div><AnalysisAnnotation :key="report.run.id+':'+result.case_id" :run-id="report.run.id" :case-id="result.case_id" :case-name="caseName(result.case_id)" :dataset-name="report.run.manifest.dataset.dataset_name" :model-value="annotations[result.case_id]??''" @update:model-value="annotations[result.case_id]=$event"/>
-    </div>
-   </details>
-  </article>
- </section>
- <el-dialog :model-value="!!reportCase" @close="reportCase=''" title="样本评测报告" width="min(1200px,94vw)" top="4vh" destroy-on-close>
-  <div class="report-dialog-body"><CaseReport v-if="sample" :key="reportCase" :sample="sample" :results="report.results.filter(r=>r.case_id===reportCase)" :primary-ids="report.run.manifest.primary_evaluator_ids" :trace="trace" :trace-error="traceError" :trace-loading="traceLoading" complete hide-analyze/></div>
- </el-dialog>
+<section class="card section-gap rule-analysis" aria-label="基于真实报告的规则分析">
+<h2>分析结果</h2>
+<p v-if="!failed.length">{{errors||reviews?'暂无未通过结果，请先处理异常或待复核项。':'本次没有未通过结果。'}}</p>
+<div v-if="activeGroup" class="tuning-workbench">
+<nav class="tuning-evaluators" aria-label="调优评估器"><h3>评估器</h3>
+<button v-for="group in groups" :key="group.key" class="evaluator-option" :class="{selected:activeGroup.key===group.key}" :aria-pressed="activeGroup.key===group.key" @click="groupKey=group.key">
+<b>{{evaluatorTitle(group.items[0].evaluator_id,group.name)}}</b><small>v{{group.version}} · {{new Set(group.items.map(r=>r.case_id)).size}} 条问题用例</small>
+</button></nav>
+<section class="tuning-cases" aria-label="测试用例与样本报告"><h3>测试用例与样本报告</h3>
+<label class="case-picker">测试用例<select v-model="selectedCase" aria-label="选择分析用例"><option v-for="id in caseIds" :key="id" :value="id">{{caseName(id)}}</option></select></label>
+<div class="case-heading"><h4>{{caseName(selectedCase)}}</h4><button class="link" @click="reportCase=selectedCase">查看完整样本评测报告 ↗</button></div>
+<p class="muted">当前展示所选评估器的未通过检查项。</p>
+<article v-for="(result,index) in caseResults" :key="index" class="case-result">
+<p>{{reason(result.reason)}}</p>
+<div v-for="check in result.checks.filter(c=>c.outcome==='fail')" :key="check.id" class="check-result">
+<b>{{check.name}}</b><small>{{check.reason}}</small>
+<div class="expected-actual"><div><h5>期望</h5><pre>{{pretty(check.expected)??'未提供'}}</pre></div><div><h5>实际</h5><pre>{{check.actual_missing?'未记录实际值':pretty(check.actual)??'未提供'}}</pre></div></div>
+</div><p v-if="!result.checks.some(c=>c.outcome==='fail')" class="muted">报告未提供检查项明细，可查看完整样本报告。</p>
+</article>
+<details class="recommendation"><summary>原因与改进建议</summary>
+<p><b>优先级：</b>{{activeGroup.items.some(r=>r.severity==='blocking')?'高':'待确认'}} · 修改对象待根据 Trace 定位。</p>
+<p><b>{{action(activeGroup.metric)[0]}}</b>：{{action(activeGroup.metric)[1]}}</p><p><b>如何验证：</b>{{action(activeGroup.metric)[2]}}</p>
+</details></section>
+<aside class="tuning-notes" aria-label="用例人工备注"><p class="note-context">{{caseName(selectedCase)}}</p>
+<AnalysisAnnotation :key="report.run.id+':'+selectedCase" :run-id="report.run.id" :case-id="selectedCase" :case-name="caseName(selectedCase)" :dataset-name="report.run.manifest.dataset.dataset_name" :model-value="annotations[selectedCase]??''" @update:model-value="annotations[selectedCase]=$event"/>
+</aside></div></section>
+<el-dialog :model-value="!!reportCase" @close="reportCase=''" title="样本评测报告" width="min(1200px,94vw)" top="4vh" destroy-on-close>
+<div class="report-dialog-body"><CaseReport v-if="sample" :key="reportCase" :sample="sample" :results="report.results.filter(r=>r.case_id===reportCase)" :primary-ids="report.run.manifest.primary_evaluator_ids" :trace="trace" :trace-error="traceError" :trace-loading="traceLoading" complete hide-analyze/></div>
+</el-dialog>
 </template>
 <style scoped>
-.annotated-evidence{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;margin-top:20px}.checks-column{min-width:0}.checks-column h4{margin-top:0}@media(max-width:1000px){.annotated-evidence{grid-template-columns:1fr}}
-
-.failure-line{display:flex;align-items:baseline;gap:24px;flex-wrap:wrap}.sample-links{margin:12px 0 20px}.sample-button{padding:8px 12px;border:1px solid #dce7e4;border-radius:6px;background:white}.advice-line{display:grid;grid-template-columns:100px minmax(0,1fr);align-items:baseline;gap:16px}.advice-line h3,.advice-line h4,.advice-line p{margin:10px 0}.report-dialog-body{max-height:78vh;overflow-y:auto}@media(max-width:600px){.advice-line{grid-template-columns:1fr;gap:0}}
-
-.sample-links{display:flex;flex-wrap:wrap;gap:16px}.recommendation{margin-top:20px}
-
-.improvement-card{border:1px solid #e3e8ee;border-radius:10px;padding:24px;margin-top:20px}.improvement-meta,.improvement-steps{display:grid;grid-template-columns:1fr 1fr;gap:24px}.improvement-steps{background:#f5f9f8;padding:16px;border-radius:8px}.improvement-card p,.improvement-card li{line-height:1.8}.improvement-card h4{margin:12px 0}.improvement-card li{margin-bottom:8px}.evidence-group{scroll-margin-top:24px}@media(max-width:700px){.improvement-meta,.improvement-steps{grid-template-columns:1fr;gap:8px}}
-
-.summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:24px 0}.summary-grid>div{background:#f5f9f8;border:1px solid #e3eae8;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:8px}.summary-grid strong{font-size:26px}.summary-grid span{font-size:13px;color:#64748b}
-.evidence-group{border-top:1px solid #e5e7eb;padding:20px 0}.evidence-group h3{margin-top:0}.recommendation{background:#f3f8f6;padding:14px;line-height:1.7}details{margin:16px 0;padding:14px;border:1px solid #e4e9e7;border-radius:8px}summary{cursor:pointer;color:#00846f}small{display:block;color:#64748b;font-size:12px;margin-top:6px}h3 small{display:inline}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:200px;font-size:12px;margin:0}td{vertical-align:top;width:33%}
-@media(max-width:700px){.summary-grid{grid-template-columns:repeat(2,1fr)}}
+.tuning-workbench{display:grid;grid-template-columns:minmax(160px,.7fr) minmax(0,2fr) minmax(220px,1fr);border:1px solid #e1e9e6;border-radius:10px;overflow:hidden}
+.tuning-evaluators,.tuning-cases,.tuning-notes{min-width:0;padding:20px}.tuning-evaluators{background:#f7faf9}.tuning-cases{border-inline:1px solid #e1e9e6}.tuning-workbench h3{font-size:16px;margin:0 0 20px}
+.evaluator-option{display:block;width:100%;text-align:left;border:1px solid transparent;border-radius:8px;background:transparent;padding:14px 10px;margin-bottom:8px;cursor:pointer;overflow-wrap:anywhere}.evaluator-option.selected{background:#e3f4ef;border-color:#9cd6c5;color:#007d68}
+small{display:block;color:#718096;font-size:12px;margin-top:6px;line-height:1.6}
+.case-picker{display:grid;gap:8px;font-size:13px;color:#64748b}.case-picker select{width:100%;padding:10px;border:1px solid #d3dbd8;border-radius:6px;background:white;color:#172333}
+.case-heading{margin-top:20px}.case-heading h4{margin:0 0 10px}.case-heading button{text-align:left;font-size:13px}
+.case-result{font-size:13px;line-height:1.7}.check-result{padding:14px 0;border-bottom:1px solid #e7eeeb}.expected-actual{display:grid;grid-template-columns:1fr 1fr;gap:10px}.expected-actual>div{min-width:0}h5{margin:10px 0 6px;color:#64748b}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f7f9fa;padding:10px;border-radius:6px;font-size:12px;margin:0;max-height:240px;overflow:auto}
+.recommendation{margin-top:20px;padding:12px;background:#f3f8f6;border-radius:6px;font-size:13px;line-height:1.8}summary{cursor:pointer;color:#00846f}
+.note-context{font-size:13px;color:#64748b;margin-top:0}.tuning-notes :deep(.annotation-panel){border:0;padding:0}.report-dialog-body{max-height:78vh;overflow:auto}
+@media(max-width:950px){.tuning-workbench{grid-template-columns:1fr}.tuning-cases{border-inline:0;border-block:1px solid #e1e9e6}.tuning-evaluators{display:flex;flex-wrap:wrap;gap:8px}.tuning-evaluators h3{width:100%}.evaluator-option{width:auto;margin:0}}
 </style>

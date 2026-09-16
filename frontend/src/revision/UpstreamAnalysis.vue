@@ -4,7 +4,8 @@ import {ElMessageBox} from 'element-plus'
 import {staticChinese,skillChinese} from './static-chinese'
 import ReportEvidenceAnalysis from './ReportEvidenceAnalysis.vue'
 import {api,request,pretty,type Report,type EvaluationRun} from './api'
-const props=defineProps<{mode:string;initialId?:string;runs:EvaluationRun[]}>()
+const props=defineProps<{mode:string;initialId?:string;preferredReportId?:string;lockTarget?:boolean;targetName?:string;runs:EvaluationRun[]}>()
+const analyzing=ref(false)
 const skills=ref<{external_id:string;label:string;version:string|null}[]>([])
 const selectedSkill=ref(''),loadingContext=ref(false)
 const filteredFindings=computed(()=>(data.value?.findings??[]).filter((f:any)=>!selectedSkill.value||(f.skill_ids??[]).includes(selectedSkill.value)))
@@ -17,7 +18,7 @@ const analysisStatus=(value:string)=>({completed:'已完成',partial:'部分完�
 const evidenceReport=ref<Report|null>(null)
 const decisions=ref<Record<string,string>>({}),comments=ref<Record<string,string>>({})
 let ticket=0
-const options=computed(()=>props.mode==='analysis'?versions.value.map(v=>({...v,label:({'Risky version':'旧方案','Fixed version':'修复方案'} as Record<string,string>)[v.label]??v.label})):props.runs.filter(r=>r.status==='completed').map(r=>({id:r.id,label:r.manifest.target.display_name+' · '+r.manifest.target.ref.external_version_id+' · '+r.id.slice(0,8)})))
+const options=computed(()=>props.mode==='analysis'?versions.value.filter(v=>!props.lockTarget||v.id===props.initialId).map(v=>({...v,label:({'Risky version':'旧方案','Fixed version':'修复方案'} as Record<string,string>)[v.label]??v.label})):props.runs.filter(r=>r.status==='completed').map(r=>({id:r.id,label:r.manifest.target.display_name+' · '+r.manifest.target.ref.external_version_id+' · '+r.id.slice(0,8)})))
 const message=computed(()=>{
  if(/invalid response/i.test(error.value))return '模型返回内容未通过结构化校验，未生成有效结论。可重试；若持续出现，请检查模型兼容性。'
  if(/timed out|超时/i.test(error.value))return '模型分析超时，未取得完整结论。请稍后重试，或检查服务端模型响应。'
@@ -43,20 +44,20 @@ async function loadContext(){
   const reports=await request<any[]>('/skill-analysis/reports?'+new URLSearchParams({target_descriptor_sha256:hash.value}))
   if(current!==ticket)return
   history.value=reports
-  if(reports.length){historyId.value=reports[0].id;await openHistory()}
+  if(reports.length){historyId.value=reports.find(r=>r.id===props.preferredReportId)?.id??reports[0].id;await openHistory()}
  }catch(e){if(current===ticket)error.value=String(e)}
  finally{if(selected.value===version)loadingContext.value=false}
 }
 async function loadHistory(){if(hash.value)history.value=await request<any[]>('/skill-analysis/reports?'+new URLSearchParams({target_descriptor_sha256:hash.value}))}
 async function analyze(){
  if(props.mode!=='analysis'||!hash.value||busy.value||loadingContext.value)return
- const current=++ticket;busy.value=true;error.value='';data.value=null
+ const current=++ticket;busy.value=true;analyzing.value=true;error.value='';data.value=null
  try{
   const result=await request<any>('/skill-analysis/reports','POST',{target_descriptor_sha256:hash.value},180000)
   if(current!==ticket)return
   data.value=result;reviews.value=[];decisions.value={};comments.value={}
   if(props.mode==='analysis'){hash.value=result.target_descriptor_sha256;historyId.value=result.id;await loadHistory()}
- }catch(e){if(current===ticket)error.value=String(e)}finally{if(current===ticket)busy.value=false}
+ }catch(e){if(current===ticket)error.value=String(e)}finally{if(current===ticket){busy.value=false;analyzing.value=false}}
 }
 async function openHistory(){
  const current=++ticket;if(!historyId.value)return
@@ -74,11 +75,11 @@ async function review(id:string){
   if(current===ticket)reviews.value=[saved,...reviews.value.filter(r=>r.finding_id!==id)]
  }catch(e){if(current===ticket&&e!=='cancel'&&e!=='close')error.value=String(e)}finally{if(current===ticket)busy.value=false}
 }
-onMounted(async()=>{if(props.mode==='optimizer'){if(selected.value)await loadEvidence();return}try{versions.value=await api.versions()}catch(e){error.value=String(e)}})
+onMounted(async()=>{if(props.mode==='optimizer'){if(selected.value)await loadEvidence();return}try{if(!props.lockTarget)versions.value=await api.versions();if(selected.value)await loadContext()}catch(e){error.value=String(e)}})
 onUnmounted(()=>ticket++)
 </script>
-<template><div class="page-head"><div><div v-if="mode==='optimizer'" class="analysis-return"><a v-if="initialId" class="link" :href="'#tasks/'+encodeURIComponent(initialId)">← 返回来源评测任务</a><a v-else-if="selected" class="link" :href="'#tasks/'+encodeURIComponent(selected)">← 查看所选评测任务</a><a class="link" href="#tasks">返回任务列表</a></div><h1 class="page-title">{{mode==='analysis'?'Skill 静态分析':'调优中心'}}</h1><p class="page-sub">{{mode==='analysis'?'按版本查看 Skill 关系、历史分析与复核结果。':'从失败证据定位问题，查看改进建议，再进入回归验证。'}}</p></div></div><section class="card"><h3 v-if="mode==='analysis'">第一步：选择要检查的智能体版本</h3><div :class="{'selection-row':mode==='analysis'}"><label class="field">{{mode==='analysis'?'智能体版本':'已完成任务'}}<select class="input" v-model="selected" :disabled="busy" aria-label="分析对象"><option value="">请选择</option><option v-for="o in options" :value="o.id">{{o.label}}</option></select></label><button v-if="mode==='analysis'" class="primary" :disabled="!hash||busy||loadingContext" @click="analyze()">{{busy?'处理中…':'运行分析'}}</button></div><p class="muted">{{mode==='optimizer'?'选择任务后自动展示分析结果。':'模型比较 Skill 职责关系，不运行评测用例。'}}</p><button v-if="mode==='optimizer'&&error" class="secondary" :disabled="busy" @click="loadEvidence()">重新加载</button><p v-if="busy" class="muted" role="status">{{mode==='optimizer'&&!evidenceReport?'正在读取评测报告…':'正在调用服务端模型，复杂任务可能需要 1–3 分钟，请勿重复提交。'}}</p><p v-if="error" role="alert">{{message}}</p><label v-if="history.length" class="field">历史报告<select class="input" v-model="historyId" :disabled="busy" @change="openHistory"><option v-for="r in history" :value="r.id">{{new Date(r.created_at).toLocaleString()}} · {{analysisStatus(r.status)}}</option></select></label>
- <template v-if="mode==='analysis'&&selected"><p v-if="loadingContext" role="status">正在读取版本与历史报告…</p><div v-if="skills.length" class="skill-context"><h3>第二步：确认要检查的 Skill</h3><table class="data-table"><thead><tr><th>Skill</th><th>版本</th></tr></thead><tbody><tr v-for="skill in skills" :key="skill.external_id"><td>{{skillChinese(skill.label)}}</td><td>{{skill.version??'未提供版本'}}</td></tr></tbody></table></div><p v-if="!loadingContext&&!history.length&&!error" class="muted">此版本暂无历史报告，可发起分析。</p></template>
+<template><div class="page-head"><div><div v-if="mode==='optimizer'" class="analysis-return"><a v-if="initialId" class="link" :href="'#tasks/'+encodeURIComponent(initialId)">← 返回来源评测任务</a><a v-else-if="selected" class="link" :href="'#tasks/'+encodeURIComponent(selected)">← 查看所选评测任务</a><a class="link" href="#tasks">返回任务列表</a></div><h1 class="page-title">{{mode==='analysis'?'Skill 静态分析':'调优中心'}}</h1><p class="page-sub">{{mode==='analysis'?'按版本查看 Skill 关系、历史分析与复核结果。':'从失败证据定位问题，查看改进建议，再进入回归验证。'}}</p></div></div><section class="card"><h3 v-if="mode==='analysis'">{{lockTarget?'本次任务评测对象':'第一步：选择要检查的智能体版本'}}</h3><div :class="{'selection-row':mode==='analysis'}"><div v-if="lockTarget" class="field task-target" aria-label="本次任务评测对象"><strong>{{targetName}}</strong><span>智能体版本：{{initialId}}</span><small class="muted">来自本次评测任务的运行配置，不可更换。</small></div><label v-else class="field">{{mode==='analysis'?'智能体版本':'已完成任务'}}<select class="input" v-model="selected" :disabled="busy" aria-label="分析对象"><option value="">请选择</option><option v-for="o in options" :value="o.id">{{o.label}}</option></select></label><button v-if="mode==='analysis'" class="primary" :disabled="!hash||busy||loadingContext" @click="analyze()">{{busy?(analyzing?'分析中…':'读取中…'):(data?'重新分析':'运行分析')}}</button></div><p class="muted">{{mode==='optimizer'?'选择任务后自动展示分析结果。':'模型比较 Skill 职责关系，不运行评测用例。'}}</p><button v-if="mode==='optimizer'&&error" class="secondary" :disabled="busy" @click="loadEvidence()">重新加载</button><p v-if="busy" class="muted" role="status">{{mode==='optimizer'&&!evidenceReport?'正在读取评测报告…':(analyzing?'正在调用服务端模型，复杂任务可能需要 1–3 分钟，请勿重复提交。':'正在读取已保存的报告…')}}</p><p v-if="error" role="alert">{{message}}</p><label v-if="history.length" class="field">历史报告<select class="input" v-model="historyId" :disabled="busy" @change="openHistory"><option v-for="r in history" :value="r.id">{{new Date(r.created_at).toLocaleString()}} · {{analysisStatus(r.status)}}</option></select></label>
+ <template v-if="mode==='analysis'&&selected"><p v-if="loadingContext" role="status">正在读取版本与历史报告…</p><div v-if="skills.length" class="skill-context"><h3>{{lockTarget?'本次版本包含的 Skill':'第二步：确认要检查的 Skill'}}</h3><table class="data-table"><thead><tr><th>Skill</th><th>版本</th></tr></thead><tbody><tr v-for="skill in skills" :key="skill.external_id"><td>{{skillChinese(skill.label)}}</td><td>{{skill.version??'未提供版本'}}</td></tr></tbody></table></div><p v-if="!loadingContext&&!history.length&&!error" class="muted">此版本暂无历史报告，可发起分析。</p></template>
  </section>
 <ReportEvidenceAnalysis v-if="mode==='optimizer'&&evidenceReport" :report="evidenceReport"/>
 <section v-if="data&&mode==='analysis'" class="card section-gap">
@@ -98,4 +99,4 @@ onUnmounted(()=>ticket++)
  <details><summary>原始报告</summary><pre>{{pretty(data)}}</pre></details>
 </section></template>
 
-<style scoped>.selection-row{display:flex;gap:24px;align-items:flex-end}.selection-row>.field{flex:1;margin-bottom:0}.selection-row>button{flex-shrink:0}.report-toolbar{display:flex;justify-content:space-between;gap:24px;align-items:center;flex-wrap:wrap}.reviewer,.skill-filter{width:240px}.review-controls{display:flex;gap:12px;align-items:flex-end}.review-controls label{width:160px}.analysis-errors{margin:12px 0}.finding-card pre{max-height:280px;overflow:auto;white-space:pre-wrap}.finding-card p,.finding-card li{line-height:1.7}@media(max-width:700px){.selection-row{flex-direction:column;align-items:stretch}.review-controls{flex-wrap:wrap}.reviewer,.skill-filter{width:100%}}.skill-context{margin-top:20px}.skill-list{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.skill-list>span{border:1px solid #dce8e3;border-radius:6px;padding:10px}.verification-entry{border-top:1px solid #e5e7eb;margin-top:20px}.static-report-body .field{margin:16px 0}.static-report-body textarea{margin:12px 0}.analysis-return{display:flex;gap:24px;margin-bottom:16px;flex-wrap:wrap}</style>
+<style scoped>.task-target{display:grid;gap:8px;padding:14px;background:#f5f9f8;border-radius:8px;overflow-wrap:anywhere}.selection-row{display:flex;gap:24px;align-items:flex-end}.selection-row>.field{flex:1;margin-bottom:0}.selection-row>button{flex-shrink:0}.report-toolbar{display:flex;justify-content:space-between;gap:24px;align-items:center;flex-wrap:wrap}.reviewer,.skill-filter{width:240px}.review-controls{display:flex;gap:12px;align-items:flex-end}.review-controls label{width:160px}.analysis-errors{margin:12px 0}.finding-card pre{max-height:280px;overflow:auto;white-space:pre-wrap}.finding-card p,.finding-card li{line-height:1.7}@media(max-width:700px){.selection-row{flex-direction:column;align-items:stretch}.review-controls{flex-wrap:wrap}.reviewer,.skill-filter{width:100%}}.skill-context{margin-top:20px}.skill-list{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.skill-list>span{border:1px solid #dce8e3;border-radius:6px;padding:10px}.verification-entry{border-top:1px solid #e5e7eb;margin-top:20px}.static-report-body .field{margin:16px 0}.static-report-body textarea{margin:12px 0}.analysis-return{display:flex;gap:24px;margin-bottom:16px;flex-wrap:wrap}</style>

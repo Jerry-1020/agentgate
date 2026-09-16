@@ -7,6 +7,7 @@ import ConfigurationDiff from './ConfigurationDiff.vue'
 import {api,request,score,statusLabel,metricLabel,type Report,type EvaluationRun,type Comparison} from './api'
 import {frozenEvaluators,reportComparisonIssues,comparisonErrorMessage} from './comparison-compatibility'
 
+const props=defineProps<{initialPair?:{a:string;b:string};embedded?:boolean}>()
 const mode=ref('history'),submitted=ref<{a:string;b:string}|null>(null)
 const pairStatus=ref<Record<string,string>>({}),pairError=ref('')
 let pairTimer:ReturnType<typeof setTimeout>|undefined,pairTicket=0
@@ -39,7 +40,8 @@ async function loadHistory(){
  }catch{if(ticket===historyTicket)historyError.value='已完成任务列表读取失败，请重试。'}
  finally{if(ticket===historyTicket)historyLoading.value=false}
 }
-onMounted(loadHistory)
+onMounted(()=>{void loadHistory();if(props.initialPair){created(props.initialPair.a,props.initialPair.b)}})
+watch(pairReady,ready=>{if(ready&&props.initialPair)showCreatedPair()})
 watch(mode,value=>{if(value==='history')void loadHistory()})
 
 const snapshotLoading=ref(false),snapshotError=ref(''),busy=ref(false),error=ref('')
@@ -92,10 +94,10 @@ const delta=(value:number|null)=>value==null?'—':(value>0?'+':'')+score(value)
 onUnmounted(()=>{pairTicket++;historyTicket++;snapshotTicket++;comparisonTicket++;clearTimeout(pairTimer)})
 </script>
 <template>
- <div class="page-head"><div><h1 class="page-title">A/B 实验</h1><p class="page-sub">{{mode==='history'?'查看最近 200 个已完成任务的结果差异，不会重新运行任务。':'使用相同评测集与评估器运行两个智能体版本'}}</p></div></div>
- <div class="tabs"><button :class="['tab',{active:mode==='new'}]" @click="mode='new'">创建实验并运行</button><button :class="['tab',{active:mode==='history'}]" @click="mode='history'">比较已有结果</button></div>
+ <div v-if="!embedded" class="page-head"><div><h1 class="page-title">A/B 实验</h1><p class="page-sub">{{mode==='history'?'查看最近 200 个已完成任务的结果差异，不会重新运行任务。':'使用相同评测集与评估器运行两个智能体版本'}}</p></div></div>
+ <div v-if="!embedded" class="tabs"><button :class="['tab',{active:mode==='new'}]" @click="mode='new'">创建实验并运行</button><button :class="['tab',{active:mode==='history'}]" @click="mode='history'">比较已有结果</button></div>
  <NewComparison v-if="mode==='new'" @created="created"/>
- <section v-if="mode==='new'&&submitted" class="card section-gap">
+ <section v-if="submitted&&(mode==='new'||embedded)&&!pairReady" class="card section-gap">
   <h2>两侧任务已提交</h2>
   <p><a class="link" :href="'#tasks/'+submitted.a">查看实验 A 执行进度 · {{statusLabel(pairStatus[submitted.a]??'pending')}} →</a></p>
   <p><a class="link" :href="'#tasks/'+submitted.b">查看实验 B 执行进度 · {{statusLabel(pairStatus[submitted.b]??'pending')}} →</a></p>
@@ -103,8 +105,8 @@ onUnmounted(()=>{pairTicket++;historyTicket++;snapshotTicket++;comparisonTicket+
   <button class="secondary" :disabled="!pairReady" @click="showCreatedPair">查看对比结果</button>
   <small class="muted">两侧均完成后可查看；执行异常或取消请先查看对应任务。</small>
  </section>
- <template v-if="mode==='history'">
-  <section class="card comparison-selection">
+ <template v-if="mode==='history'&&(!embedded||pairReady)">
+  <section v-if="!embedded" class="card comparison-selection">
    <div class="toolbar"><div><h2 class="section-title">选择已完成任务</h2><p class="section-note">实验A作为参考，实验B与之对比；选好后自动展示结果。</p></div><button class="link" :disabled="historyLoading" @click="loadHistory">{{historyLoading?'读取中…':'刷新任务'}}</button></div>
    <div v-if="historyError" class="notice error" role="alert">{{historyError}} <button class="link" @click="loadHistory">重试加载任务</button></div>
    <div class="history-sides">
