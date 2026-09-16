@@ -30,7 +30,7 @@ from agentgate.domain import (
     TargetSnapshot,
     TargetType,
 )
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_TARGET_DESCRIPTORS
 
 
 def demo_run(repository: SQLiteRepository, version: str = "loan-agent-v2-fixed"):
@@ -116,7 +116,7 @@ def test_run_lineage_rejects_unknown_run_or_descriptor(tmp_path) -> None:
     run = demo_run(repository)
     with sqlite3.connect(repository.path) as db:
         db.execute(
-            "DELETE FROM target_descriptors WHERE content_sha256=?",
+            f"DELETE FROM {_T_TARGET_DESCRIPTORS} WHERE content_sha256=?",
             (run.manifest.target.descriptor_sha256,),
         )
     with pytest.raises(LookupError, match="unknown TargetDescriptor"):

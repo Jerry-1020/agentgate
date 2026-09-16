@@ -5,7 +5,7 @@ import pytest
 
 from agentgate.domain.credential import ApiKeyMetadata, ApiKeyScope
 from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_API_KEYS
 
 
 MASTER_KEY = bytes(range(32))
@@ -46,7 +46,7 @@ def test_api_key_repository_persists_metadata_and_ciphertext_separately(
     assert reopened.get_encrypted_api_key("missing") is None
 
     with sqlite3.connect(path) as db:
-        stored = db.execute("SELECT * FROM api_keys WHERE id=?", (item.id,)).fetchone()
+        stored = db.execute(f"SELECT * FROM {_T_API_KEYS} WHERE id=?", (item.id,)).fetchone()
     assert stored is not None
     assert plaintext not in repr(stored)
     assert encrypted in stored

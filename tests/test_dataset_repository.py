@@ -6,7 +6,7 @@ import pytest
 
 from agentgate.application import DatasetManagement
 from agentgate.domain import Case, CaseTurn, Dataset, DatasetVersion, DatasetVersionStatus
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_DATASETS, _T_DATASET_VERSIONS, _T_RUNS
 
 
 def test_sqlite_connection_enforces_pragmas_and_closes(tmp_path):
@@ -31,18 +31,18 @@ def test_sqlite_initialization_enables_wal_and_schema_checks(tmp_path):
     with sqlite3.connect(repository.path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         connection.execute(
-            "INSERT INTO datasets VALUES(?,?,?,?,?)",
+            f"INSERT INTO {_T_DATASETS} VALUES(?,?,?,?,?)",
             ("dataset", "Dataset", 0, "2026-09-06T00:00:00+00:00", "{}"),
         )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
             connection.execute(
-                "INSERT INTO dataset_versions VALUES(?,?,?,?,?,?,?)",
+                f"INSERT INTO {_T_DATASET_VERSIONS} VALUES(?,?,?,?,?,?,?)",
                 ("draft", "dataset", 1, "draft", "now", "hash", "{}"),
             )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
                 connection.execute(
-                    """
-                    INSERT INTO runs(id,status,created_at,payload)
+                    f"""
+                    INSERT INTO {_T_RUNS}(id,status,created_at,payload)
                     VALUES(?,?,?,?)
                     """,
                     ("run", "unknown", "now", "{}"),
@@ -53,8 +53,8 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
     path = tmp_path / "legacy-runs.db"
     with sqlite3.connect(path) as connection:
         connection.execute(
-            """
-            CREATE TABLE runs (
+            f"""
+            CREATE TABLE {_T_RUNS} (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL CHECK(
                     status IN ('pending', 'running', 'completed', 'failed', 'cancelled')
@@ -65,7 +65,7 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
             """
         )
         connection.execute(
-            "INSERT INTO runs VALUES(?,?,?,?)",
+            f"INSERT INTO {_T_RUNS} VALUES(?,?,?,?)",
             ("existing", "pending", "2026-09-09T00:00:00+00:00", "{}"),
         )
 
@@ -73,14 +73,14 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
 
     with sqlite3.connect(path) as connection:
         columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+            row[1] for row in connection.execute(f"PRAGMA table_info({_T_RUNS})").fetchall()
         }
         assert "scheduled_for" in columns
         assert connection.execute(
-            "SELECT status FROM runs WHERE id='existing'"
+            f"SELECT status FROM {_T_RUNS} WHERE id='existing'"
         ).fetchone() == ("pending",)
         connection.execute(
-            "INSERT INTO runs VALUES(?,?,?,?,?)",
+            f"INSERT INTO {_T_RUNS} VALUES(?,?,?,?,?)",
             (
                 "scheduled",
                 "scheduled",
@@ -100,8 +100,8 @@ def test_sqlite_persists_catalog_and_enforces_one_draft(tmp_path):
         service.create_draft(dataset.id)
     assert repository.get_dataset_draft(dataset.id).id == first.id
     with sqlite3.connect(repository.path) as db:
-        assert db.execute("SELECT COUNT(*) FROM datasets").fetchone()[0] == 1
-        assert db.execute("SELECT COUNT(*) FROM dataset_versions").fetchone()[0] == 1
+        assert db.execute(f"SELECT COUNT(*) FROM {_T_DATASETS}").fetchone()[0] == 1
+        assert db.execute(f"SELECT COUNT(*) FROM {_T_DATASET_VERSIONS}").fetchone()[0] == 1
         assert db.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE name='business_state'"
         ).fetchone()[0] == 0

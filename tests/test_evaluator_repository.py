@@ -12,7 +12,7 @@ from agentgate.evaluator.versioning import (
     replace_evaluator_draft,
 )
 from agentgate.storage.repository import AgentGateRepository
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_EVALUATORS, _T_EVALUATOR_DRAFTS, _T_EVALUATOR_VERSIONS
 
 
 NOW = datetime(2026, 9, 8, 12, tzinfo=UTC)
@@ -95,19 +95,19 @@ def test_sqlite_initializes_evaluator_catalog_schema_idempotently(tmp_path) -> N
             for row in db.execute(
                 """
                 SELECT name FROM sqlite_master
-                WHERE type='table' AND name LIKE 'evaluator%'
+                WHERE type='table' AND name LIKE 'agentgate_evaluator%'
                 """
             )
         }
         assert tables == {
-            "evaluators",
-            "evaluator_drafts",
-            "evaluator_versions",
+            _T_EVALUATORS,
+            _T_EVALUATOR_DRAFTS,
+            _T_EVALUATOR_VERSIONS,
         }
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
             db.execute(
-                """
-                INSERT INTO evaluators(
+                f"""
+                INSERT INTO {_T_EVALUATORS}(
                     id,source,enabled,created_at,updated_at,payload
                 ) VALUES(?,?,?,?,?,?)
                 """,
@@ -323,8 +323,8 @@ def test_version_reads_detect_corrupt_indexed_columns(tmp_path) -> None:
 
     with sqlite3.connect(repository.path) as db:
         db.execute(
-            """
-            UPDATE evaluator_versions
+            f"""
+            UPDATE {_T_EVALUATOR_VERSIONS}
             SET content_sha256=?
             WHERE evaluator_id=? AND version=?
             """,
