@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from agentgate.server.app import create_app
 from agentgate.demo.targets import get_demo_target_descriptor
 from agentgate.domain import TargetDescriptor
+from agentgate.storage.sqlite import _T_TARGET_DESCRIPTORS
 
 
 def test_get_run_lineage(tmp_path) -> None:
@@ -45,7 +46,7 @@ def test_get_run_lineage_returns_conflict_for_missing_descriptor(tmp_path) -> No
     run = dependencies.execute_demo_run("loan-agent-v2-fixed")
     with sqlite3.connect(database_path) as database:
         database.execute(
-            "DELETE FROM target_descriptors WHERE content_sha256=?",
+            f"DELETE FROM {_T_TARGET_DESCRIPTORS} WHERE content_sha256=?",
             (run.manifest.target.descriptor_sha256,),
         )
 

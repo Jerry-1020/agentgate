@@ -12,7 +12,7 @@ from agentgate.domain import (
     RunStatus, TargetSnapshot, TargetType, transition_run,
 )
 from agentgate.demo.loan import LOAN_DATASET_VERSION
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_RUNS
 
 
 def manifest(repository: SQLiteRepository):
@@ -63,10 +63,10 @@ def test_repository_rejects_tampered_manifest(tmp_path):
     repository.save_run(run)
     with sqlite3.connect(repository.path) as db:
         payload = json.loads(db.execute(
-            "SELECT payload FROM runs WHERE id=?", (run.id,)
+            f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run.id,)
         ).fetchone()[0])
         payload["manifest"]["target"]["ref"]["external_version_id"] = "tampered"
-        db.execute("UPDATE runs SET payload=? WHERE id=?", (json.dumps(payload), run.id))
+        db.execute(f"UPDATE {_T_RUNS} SET payload=? WHERE id=?", (json.dumps(payload), run.id))
     with pytest.raises(ValueError, match="hash mismatch"):
         repository.get_run(run.id)
 

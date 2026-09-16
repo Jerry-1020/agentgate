@@ -234,6 +234,19 @@ def get_dependencies(request: Request) -> ServerDependencies:
     return dependencies
 
 
+def _select_dispatcher() -> JobDispatcher:
+    """Build the configured job dispatcher from the environment."""
+
+    dispatcher_type = os.getenv("AGENT_TASK_DISPATCHER_TYPE", "celery").lower()
+    if dispatcher_type == "bjs":
+        from agentgate.integrations.job_dispatchers.bjs_job_dispatcher import (
+            BjsJobDispatcher,
+        )
+
+        return BjsJobDispatcher()  # type: ignore[return-value]
+    return CeleryJobDispatcher()
+
+
 def build_dependencies(
     database_path: str | Path | None = None,
     dispatcher: JobDispatcher | None = None,
@@ -305,7 +318,7 @@ def build_dependencies(
                 if configured_api_key_encryptor is not None
                 else None
             ),
-            dispatcher=dispatcher or CeleryJobDispatcher(),
+            dispatcher=dispatcher or _select_dispatcher(),
             demo_state={},
             _judge_client=(
                 configured_judge.client if configured_judge is not None else None

@@ -18,7 +18,7 @@ from agentgate.demo.targets import (
     get_demo_target_descriptor,
 )
 from agentgate.domain import RunStatus, TargetType, content_sha256, transition_run
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_RUN_ASSET_REFS
 
 
 def create_demo_run(
@@ -84,7 +84,7 @@ def test_run_asset_references_are_created_once(tmp_path) -> None:
     run = create_demo_run(repository, "loan-agent-v2-fixed")
     with sqlite3.connect(repository.path) as database:
         initial_count = database.execute(
-            "SELECT COUNT(*) FROM run_asset_refs WHERE run_id=?", (run.id,)
+            f"SELECT COUNT(*) FROM {_T_RUN_ASSET_REFS} WHERE run_id=?", (run.id,)
         ).fetchone()[0]
 
     running = transition_run(run, RunStatus.RUNNING)
@@ -92,7 +92,7 @@ def test_run_asset_references_are_created_once(tmp_path) -> None:
 
     with sqlite3.connect(repository.path) as database:
         final_count = database.execute(
-            "SELECT COUNT(*) FROM run_asset_refs WHERE run_id=?", (run.id,)
+            f"SELECT COUNT(*) FROM {_T_RUN_ASSET_REFS} WHERE run_id=?", (run.id,)
         ).fetchone()[0]
     expected_count = (
         1
