@@ -22,5 +22,6 @@ case "${1:-}" in
   worker) cd "$revision_root/backend"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO ;;
   scheduler) cd "$revision_root/backend"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --queues=agentgate.scheduler --beat --schedule="$revision_root/runtime/scheduler-state" --hostname=unified-tasks-scheduler-20260915@%h --loglevel=INFO ;;
   web) cd "$revision_root/frontend"; exec npm run dev ;;
-  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web}\n'; exit 2 ;;
+  bank-agents) cd "$revision_root/tested-agents"; exec .venv/bin/python run.py --model-env "${AGENTGATE_MODEL_ENV_FILE:-$revision_root/.env}" --use-agentgate-model ;;
+  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web|bank-agents}\n'; exit 2 ;;
 esac

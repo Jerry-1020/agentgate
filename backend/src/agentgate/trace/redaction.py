@@ -32,6 +32,11 @@ _EMAIL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _CARD_PATTERN = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+_UUID_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+_CORRELATION_KEYS = frozenset({"request_id", "session_id", "trace_id", "span_id"})
 
 _DEFAULT_SENSITIVE_KEYS = frozenset(
     {
@@ -155,6 +160,8 @@ def _redact_object(
             key: (
                 REDACTION_MARKER
                 if _is_sensitive_key(key, sensitive_keys)
+                else item
+                if _is_correlation_uuid(key, item)
                 else _redact_value(item, sensitive_keys)
             )
             for key, item in value.items()
@@ -174,6 +181,18 @@ def _redact_value(value: Any, sensitive_keys: set[str]) -> Any:
 
 def _normalize_key(key: str) -> str:
     return _KEY_SEPARATOR_PATTERN.sub("_", key.casefold()).strip("_")
+
+
+def _is_correlation_uuid(key: str, value: Any) -> bool:
+    # UUID digit prefixes can pass Luhn. Exempt only full UUIDs in ID fields,
+    # after sensitive-key checks; arbitrary text in these fields stays protected.
+    if not isinstance(value, str) or _UUID_PATTERN.fullmatch(value) is None:
+        return False
+    normalized = _normalize_key(key)
+    return any(
+        normalized == correlation or normalized.endswith(f"_{correlation}")
+        for correlation in _CORRELATION_KEYS
+    )
 
 
 def _is_sensitive_key(key: str, sensitive_keys: set[str]) -> bool:

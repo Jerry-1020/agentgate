@@ -122,6 +122,7 @@ class ServerDependencies:
     ) -> EvaluationRun:
         """Create one POC Loan Agent Run and dispatch it when eligible."""
 
+        from agentgate.domain.evaluation_task import EvaluationTask
         run = self._create_demo_run(
             version,
             dataset_id=dataset_id,
@@ -132,7 +133,9 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            persist=False,
         )
+        self.repository.save_task_runs(EvaluationTask(id=run.id, kind="single", run_ids=(run.id,)), [run])
         if run.status is RunStatus.SCHEDULED:
             return run
         return self.runs.dispatch_run(run.id, self.dispatcher)
@@ -188,6 +191,24 @@ class ServerDependencies:
         finally:
             capture.shutdown()
 
+    def submit_stability_runs(self, version: str, repetitions: int, **settings):
+        from agentgate.domain.evaluation_task import EvaluationTask
+        if isinstance(repetitions, bool) or not 2 <= repetitions <= 20:
+            raise ValueError("repetitions must be 2 to 20")
+        template = self._create_demo_run(version, persist=False, **settings)
+        if template.status != RunStatus.PENDING:
+            raise ValueError("stability does not support scheduling")
+        runs = [template, *(EvaluationRun(manifest=template.manifest) for _ in range(repetitions - 1))]
+        task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
+        self.repository.save_task_runs(task, runs)
+        for run in runs:
+            try:
+                self.runs.dispatch_run(run.id, self.dispatcher)
+            except RuntimeError:
+                # Dispatch failures are persisted by RunManagement; retain the group for inspection.
+                continue
+        return task
+
     def _create_demo_run(
         self,
         version: str,
@@ -200,6 +221,7 @@ class ServerDependencies:
         max_parallel_cases: int,
         max_retries: int,
         scheduled_for: datetime | None = None,
+        persist: bool = True,
     ) -> EvaluationRun:
         target = self._resolve_demo_target(version)
         return self.runs.create_run(
@@ -212,6 +234,7 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            persist=persist,
         )
 
     def _resolve_demo_target(self, version: str) -> TargetSnapshot:

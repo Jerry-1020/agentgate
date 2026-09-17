@@ -1,5 +1,6 @@
 """Run the isolated upstream integration stack; never stop pre-existing services."""
 import os
+import argparse
 import signal
 import socket
 import subprocess
@@ -29,13 +30,17 @@ def shutdown(*_):
         log.close()
 
 def main():
-    for port in (5197, 8097, 6397):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--with-bank-agents', action='store_true', help='also supervise the independent tested-Agent service on 8107')
+    options = parser.parse_args()
+    for port in ((5197, 8097, 6397, 8107) if options.with_bank_agents else (5197, 8097, 6397)):
         with socket.socket() as probe:
             if probe.connect_ex(("127.0.0.1", port)) == 0:
                 raise RuntimeError(f"端口 {port} 已被占用。不会停止已有服务；如本副本已启动，请访问 http://127.0.0.1:5197/")
     runtime = root / "runtime"
     runtime.mkdir(exist_ok=True)
-    for name in ("redis", "api", "worker", "scheduler", "web"):
+    services = ("bank-agents", "redis", "api", "worker", "scheduler", "web") if options.with_bank_agents else ("redis", "api", "worker", "scheduler", "web")
+    for name in services:
         log = (runtime / (name + ".log")).open("a")
         logs.append(log)
         children.append(subprocess.Popen(["bash", str(root / "scripts/run.sh"), name],
@@ -48,11 +53,16 @@ def main():
         try:
             urllib.request.urlopen("http://127.0.0.1:8097/health", timeout=1).close()
             urllib.request.urlopen("http://127.0.0.1:5197/", timeout=1).close()
+            if options.with_bank_agents:
+                urllib.request.urlopen("http://127.0.0.1:8107/health", timeout=1).close()
             break
         except (OSError, ValueError):
             time.sleep(1)
     else:
         raise RuntimeError("服务启动超时，请检查 runtime 日志。")
+    if options.with_bank_agents:
+        subprocess.run([str(root / "backend/.venv/bin/python"),
+                        str(root / "scripts/seed-bank-agents.py")], cwd=root, check=True)
     print("已启动：http://127.0.0.1:5197/ ；按 Ctrl+C 停止本次启动的服务。", flush=True)
     webbrowser.open("http://127.0.0.1:5197/")
     while True:

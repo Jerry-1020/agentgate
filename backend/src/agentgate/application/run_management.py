@@ -60,6 +60,7 @@ class RunManagement:
         max_parallel_cases: int = 1,
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
+        persist: bool = True,
     ) -> EvaluationRun:
         """Resolve exact inputs and persist a pending or scheduled Run."""
 
@@ -107,10 +108,11 @@ class RunManagement:
             created_at=created_at,
             scheduled_for=normalized_schedule,
         )
-        self.repository.save_run(run)
+        if persist:
+            self.repository.save_run(run)
         return run
 
-    def create_rerun(self, source_run_id: str) -> EvaluationRun:
+    def create_rerun(self, source_run_id: str, *, persist: bool = True) -> EvaluationRun:
         """Create a pending Run from one terminal Run's exact manifest."""
 
         source = self.repository.get_run(source_run_id)
@@ -126,7 +128,8 @@ class RunManagement:
             )
 
         rerun = EvaluationRun(manifest=source.manifest)
-        self.repository.save_run(rerun)
+        if persist:
+            self.repository.save_run(rerun)
         return rerun
 
     def execute_run(

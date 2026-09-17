@@ -17,6 +17,7 @@ from agentgate.domain import (
 )
 from agentgate.evaluator.judge import JudgeRequest
 from agentgate.evaluator.judge.prompt import render_bounded_evidence
+from .root_cause_contract import MAX_REFERENCES_PER_FIELD, MAX_TITLE_CHARS, MAX_EXPLANATION_CHARS
 
 
 _SYSTEM_PROMPT = (
@@ -28,7 +29,15 @@ _SYSTEM_PROMPT = (
     "exactly one JSON object with no markdown or commentary. Required fields: "
     "cluster_id, category, title, explanation, confidence, result_ids, span_ids, "
     "static_finding_ids. confidence must be between 0 and 1; all three *_ids "
+    "fields use only the permitted references. Confidence is NONNEGATIVE certainty "
+    "in your hypothesis, not sentiment or whether the Agent passed. A confident "
+    "diagnosis of a failure or incorrect test expectation has positive confidence "
+    "(e.g. 0.9), never -0.9 or -1. Use 0.0 for no confidence. The three *_ids "
     "fields must be JSON arrays. Write title and explanation in Simplified Chinese. "
+    f"Each reference array must contain at most {MAX_REFERENCES_PER_FIELD} unique identifiers. "
+    "Cite only the smallest representative evidence subset needed to support your explanation; "
+    "do not copy the entire reference_ids inventory. Use empty arrays for absent optional evidence. "
+    f"title must not exceed {MAX_TITLE_CHARS} characters and explanation must not exceed {MAX_EXPLANATION_CHARS} characters. "
     "Keep JSON field names, category enum values, identifiers, tool names, and "
     "quoted evidence unchanged. The hypothesis requires human review."
 )
@@ -135,6 +144,8 @@ def build_root_cause_request(
     selected_results: dict[str, EvaluationResult] = {}
     selected_traces: dict[str, Trace] = {}
     for member in cluster.members:
+        if member.result_id not in cluster.representative_result_ids:
+            continue
         case = cases_by_id.get(member.case_id)
         if case is None:
             raise ValueError(f"missing Case evidence: {member.case_id}")
@@ -170,6 +181,7 @@ def build_root_cause_request(
                 span.span_id
                 for trace in selected_traces.values()
                 for span in trace.spans
+                if any(span.span_id in member.span_ids for member in cluster.members if member.result_id in result_ids)
             }
         )
     )
@@ -205,6 +217,15 @@ def build_root_cause_request(
     )
     user_prompt = (
         "Analyze this failure cluster and return one root-cause hypothesis.\n"
+        "Output contract: confidence is a probability, e.g. 0.85, never 85 or a percentage string. "
+        "Select up to 3 evidence references per array, copied character-for-character. "
+        "Cluster members outside the representative evidence are context, not additional citations.\n"
+        "Response shape example (replace category/title/explanation/confidence with your actual "
+        "analysis; never use a negative confidence):\n"
+        + canonical_json({"cluster_id": cluster.id, "category": "needs_investigation",
+                          "title": "待核验假设", "explanation": "填写基于证据的可能原因，不要照抄示例。",
+                          "confidence": 0.5, "result_ids": sorted(result_ids)[:1],
+                          "span_ids": [], "static_finding_ids": []}) + "\n"
         f"reference_ids:\n{canonical_json(reference_ids)}\n\n"
         f"evidence:\n{bounded_evidence}"
     )

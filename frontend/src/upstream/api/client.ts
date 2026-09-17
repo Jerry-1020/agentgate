@@ -35,6 +35,7 @@ export interface CheckResult {
   failure_span_id: string|null
 }
 export interface EvaluationResult {
+  id?: string
   trace_id: string
   case_id: string
   evaluator_id: string

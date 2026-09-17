@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {computed,ref,watch,onUnmounted} from 'vue'
-import {request,kindLabel,type EvaluatorSummary} from './api'
+import {request,kindLabel,type EvaluatorSummary,type TargetDescriptor} from './api'
 import {evaluatorScenarios,evaluatorRecommendationReasons,recommendEvaluators,recommendationReason} from './evaluator-guidance'
-const props=defineProps<{evaluators:EvaluatorSummary[];cases:any[];modelValue:string[];targetVersions?:string[];initialEvaluatorId?:string}>()
+const props=defineProps<{evaluators:EvaluatorSummary[];cases:any[];modelValue:string[];targetVersions?:string[];initialEvaluatorId?:string;targetDescriptors?:TargetDescriptor[]}>()
 const emit=defineEmits<{'update:modelValue':[ids:string[]]}>()
 const category=ref(props.initialEvaluatorId?'all':'recommended'),activeId=ref(props.initialEvaluatorId??''),confirmed=ref(false)
 const recommended=computed(()=>recommendEvaluators(props.evaluators,props.cases))
@@ -23,9 +23,10 @@ function toggle(id:string,checked:boolean){emit('update:modelValue',checked?[...
 
 const targetSkills=ref<Record<string,string[]>>({}),contextError=ref(''),contextLoading=ref(false)
 let contextTicket=0
-watch(()=>props.targetVersions,async versions=>{
+watch(()=>[props.targetVersions,props.targetDescriptors] as const,async ([versions,descriptors])=>{
  const ticket=++contextTicket;targetSkills.value={};contextError.value='';contextLoading.value=true
  try{
+  if(descriptors){targetSkills.value=Object.fromEntries(descriptors.map(d=>[d.display_name+' · '+d.ref.external_version_id,d.skills.map(s=>s.external_skill_id)]));return}
   const entries=await Promise.all((versions??[]).filter(Boolean).map(async version=>{
    const graph=await request<any>('/targets/agentgate-demo/agent/loan-agent/versions/'+encodeURIComponent(version)+'/lineage')
    const skillIds=graph.nodes.filter((n:any)=>n.kind==='skill'&&graph.edges.some((edge:any)=>edge.source_id===graph.root_node_id&&edge.target_id===n.id&&edge.relation==='includes_skill')).map((n:any)=>n.external_id)
@@ -84,7 +85,7 @@ function apply(){emit('update:modelValue',[...recommended.value]);category.value
       <dl><dt>Skill 路由</dt><dd>样本期望：{{internalContext.routes.join('、')||'未声明'}}<span v-for="(skills,version) in targetSkills" :key="version">{{version}}：{{internalContext.routes.length?internalContext.routes.map(id=>id+(skills.includes(id)?'（定义中已包含）':'（定义中未找到）')).join('、'):skills.join('、')}}</span></dd>
       <dt>Tool 调用</dt><dd>{{internalContext.tools.join('、')||'所选样本未声明工具约束'}}<span>对应样本中的必需／禁止调用及参数检查；实际是否调用由 Trace 验证。</span></dd>
       <dt>字段约束</dt><dd>{{internalContext.paths.join('、')||'所选样本未声明字段约束'}}</dd>
-      <dt>提示词</dt><dd>{{internalContext.prompt}}<span>接口未提供提示词正文，这是核对方向，不代表已检查正文。</span></dd></dl>
+      <dt>提示词</dt><dd>{{internalContext.prompt}}<span>{{targetDescriptors?.some(d=>d.prompt)?'所选目标提供了版本提示词；这里列出核对方向，不代表已执行模型检查。':'接口未提供提示词正文，这是核对方向，不代表已检查正文。'}}</span></dd></dl>
      </section>
      <div class="resource-note"><span aria-hidden="true">{{active.kind==='rule'?'✓':'◇'}}</span>{{active.kind==='rule'?'规则检查 · 无需模型凭据':'模型评判 · 需要有效模型凭据'}}</div>
      <button class="detail-action" type="button" :class="{added:modelValue.includes(active.id)}" @click="toggle(active.id,!modelValue.includes(active.id))">{{modelValue.includes(active.id)?'已加入 · 点击移除':'＋ 加入本次评测'}}</button>

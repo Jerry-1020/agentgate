@@ -18,6 +18,7 @@ from agentgate.integrations.model_providers.environment import (
 )
 from agentgate.integrations.observability import InMemoryTraceCapture
 from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets.local_bank import LocalBankAdapter, resolve_local_bank_trace
 from agentgate.storage.sqlite import SQLiteRepository
 
 
@@ -104,7 +105,7 @@ def execute_evaluation_run(run_id: str) -> str:
         raise ValueError(f"unknown EvaluationRun: {run_id}")
     if run.status is not RunStatus.PENDING:
         return run.status.value
-    if run.manifest.target.adapter_type != DemoLoanTargetAdapter.adapter_type:
+    if run.manifest.target.adapter_type not in {DemoLoanTargetAdapter.adapter_type, LocalBankAdapter.adapter_type}:
         raise ValueError(
             "Celery worker does not support the Run Target adapter type"
         )
@@ -122,6 +123,13 @@ def execute_evaluation_run(run_id: str) -> str:
                 judge_credential_ref=configured_judge.credential_ref,
             )
         )
+        if run.manifest.target.adapter_type == LocalBankAdapter.adapter_type:
+            if run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1:
+                raise ValueError("local bank execution requires no retries and serial cases")
+            completed = RunManagement(repository, evaluator_management).execute_run(
+                run.id, LocalBankAdapter(), resolve_local_bank_trace,
+            )
+            return completed.status.value
         capture = InMemoryTraceCapture()
         completed = RunManagement(
             repository,

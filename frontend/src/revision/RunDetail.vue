@@ -25,8 +25,7 @@ async function update(){
  try{
   const p=await api.status(props.id)
   const completed=p.status==='completed'?await api.report(props.id):null
-  const manifest=completed?.run.manifest??await request<any>(`/runs/${props.id}/manifest`)
-  const s={run:completed?.run??({id:props.id,status:p.status,manifest} as any),results:completed?.results??[],complete:!!completed}
+  const s=completed?{run:completed.run,results:completed.results,complete:true}:await api.samples(props.id)
   if(disposed)return
   progress.value=p;evidence.value=s
   if(completed)report.value=completed
@@ -57,7 +56,7 @@ onMounted(async()=>{await update();await nextTick();if(new URLSearchParams(locat
  <section v-if="progress" class="task-overview" aria-label="任务结果总览">
   <div class="overview-heading"><div><span class="overview-eyebrow">本次评测</span><h2>任务结果总览</h2></div><span class="badge" :class="report?(report.release_gate.outcome==='pass'?'success':'warn'):'info'">{{report?(noEvidence?'无有效评判依据':statusLabel(report.release_gate.outcome)):statusLabel(progress.status)}}</span></div>
   <div v-if="report" class="overview-scores">
-   <article v-for="m in report.metrics.filter(m=>m.level==='overall'||m.level==='kind')" :key="m.key" class="score-tile" :class="{primary:m.level==='overall'}"><span>{{metricLabel(m.key)}}</span><div class="score-number">{{score(m.score)}}<small>/ 100</small></div><p>通过 {{m.passed}} · 未通过 {{m.failed}} · 异常 {{m.errors}} · 不适用 {{m.not_applicable}}</p></article>
+   <article v-for="m in report.metrics.filter(m=>m.level==='overall'||m.level==='kind')" :key="m.key" class="score-tile" :class="{primary:m.level==='overall'}"><span>{{metricLabel(m.key)}}</span><div class="score-number">{{score(m.score)}}<small>/ 100</small></div><p>通过 {{m.passed}} · 未通过 {{m.failed}} · 待复核 {{m.reviewed}} · 异常 {{m.errors}} · 不适用 {{m.not_applicable}}</p></article>
   </div>
   <p v-if="report" class="score-caption">按评估结果统计，非唯一样本数；无分数时显示“—”。</p>
   <div class="overview-facts"><div><span>执行状态</span><b>{{statusLabel(progress.status)}}</b><small>{{progress.completed_cases}} / {{progress.total_cases}} 样本</small></div><div><span>智能体版本</span><b>{{progress.target_name}}</b><small>{{progress.target_version}}</small></div><div><span>评测集版本</span><b>{{progress.dataset_name}}</b><small>v{{progress.dataset_version}}</small></div><div><span>运行耗时</span><b>{{progress.duration_seconds==null?'—':progress.duration_seconds.toFixed(1)+' 秒'}}</b><small v-if="progress.queue_position!=null">队列位置：{{progress.queue_position}}</small></div></div>

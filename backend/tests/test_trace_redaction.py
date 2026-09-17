@@ -6,6 +6,52 @@ from agentgate.domain import FrozenJsonObject, SpanStatus, Trace, TraceSpan
 from agentgate.trace.redaction import REDACTION_MARKER, redact_trace, redact_value
 
 
+CORRELATION_UUID = "11843294-6268-4d2e-a97b-8666ab7e6076"
+
+
+@pytest.mark.parametrize("key", [
+    "request_id", "bank.request_id", "session_id", "trace_sdk.session_id",
+    "trace_id", "span_id", "parent_span_id",
+])
+@pytest.mark.parametrize("value", [CORRELATION_UUID, CORRELATION_UUID.upper()])
+def test_correlation_uuid_is_preserved_even_when_its_prefix_passes_luhn(key, value):
+    original = {"nested": [{key: value}]}
+    protected = redact_value(original)
+    assert protected["nested"][0][key] == value
+    assert redact_value(protected) == protected
+    assert original["nested"][0][key] == value
+
+
+@pytest.mark.parametrize("key", ["request_id", "bank.request_id"])
+@pytest.mark.parametrize("value", [
+    "4111 1111 1111 1111", "4111111111111111",
+    "alice@example.com", "token=top-secret", "Bearer top-secret",
+    CORRELATION_UUID + " api_key=top-secret",
+])
+def test_correlation_field_does_not_exempt_arbitrary_sensitive_values(key, value):
+    protected = redact_value({key: value})[key]
+    assert REDACTION_MARKER in protected
+    assert "top-secret" not in protected
+    assert "4111111111111111" not in protected
+    assert "4111 1111 1111 1111" not in protected
+    assert "alice@example.com" not in protected
+
+
+def test_sensitive_keys_take_precedence_over_uuid_preservation():
+    protected = redact_value(
+        {"bank.request_id": CORRELATION_UUID, "api_key": CORRELATION_UUID},
+        additional_sensitive_keys={"request_id"},
+    )
+    assert protected["bank.request_id"] == REDACTION_MARKER
+    assert protected["api_key"] == REDACTION_MARKER
+
+
+def test_request_id_objects_and_lists_are_still_recursively_redacted():
+    protected = redact_value({"request_id": [{"api_key": "top-secret"}, "4111111111111111"]})
+    assert protected["request_id"][0]["api_key"] == REDACTION_MARKER
+    assert protected["request_id"][1] == REDACTION_MARKER
+
+
 def trace_with_sensitive_data() -> Trace:
     return Trace(
         trace_id="a" * 32,

@@ -12,17 +12,20 @@ from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.dependencies import build_dependencies
 from agentgate.server.routes import (
+    bank_targets,
     catalogs,
     comparisons,
     credentials,
     datasets,
     evaluators,
+    evaluation_tasks,
     lineage,
     optimizer,
     results,
     runs,
     skill_analysis,
     system,
+    stability,
     telemetry,
 )
 
@@ -61,10 +64,13 @@ def create_app(
     )
     application.state.dependencies = dependencies
     application.include_router(system.router)
+    application.include_router(bank_targets.router)
+    application.include_router(stability.router)
     application.include_router(datasets.router)
     application.include_router(catalogs.router)
     application.include_router(credentials.router)
     application.include_router(evaluators.router)
+    application.include_router(evaluation_tasks.router)
     application.include_router(runs.router)
     application.include_router(results.router)
     application.include_router(comparisons.router)

@@ -16,6 +16,13 @@ export interface Definition {
   combination: string | null; version?: string; content_sha256?: string;
 }
 export interface EvaluatorDetail { evaluator: EvaluatorSummary; latest: Definition | null; draft: Definition | null }
+export interface TargetDescriptor {
+ ref:{source_id:string;target_type:string;external_target_id:string;external_version_id:string};
+ display_name:string;content_sha256:string;prompt?:string;
+ skills:{external_skill_id:string;external_version_id:string|null;name:string;description:string}[];
+ metadata:Record<string,unknown>;
+}
+export interface BankTarget {descriptor:TargetDescriptor;snapshot:{descriptor_sha256:string;invocation_config:{mode:string}}}
 export interface Overview { total_runs: number; completed_runs: number; running_runs: number; pending_runs: number; failed_runs: number; cancelled_runs: number; dataset_count: number; case_count: number }
 export interface RunSamples { run: Report['run']; results: Report['results']; complete: boolean }
 export interface Comparison {
@@ -25,7 +32,7 @@ export interface Comparison {
 }
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 30000): Promise<T> {
   if(method==='POST'){
-    if(path==='/evaluations')assertLocallyEnabled((body as {evaluator_ids?:string[]})?.evaluator_ids??[])
+    if(['/evaluations','/bank-evaluations','/stability-experiments'].includes(path))assertLocallyEnabled((body as {evaluator_ids?:string[]})?.evaluator_ids??[])
     if(path==='/run-comparisons')assertLocallyEnabled(((body as {evaluators?:{id:string}[]})?.evaluators??[]).map(e=>e.id))
     if(/^\/runs\/[^/]+\/rerun$/.test(path)){const manifest=await request<{primary_evaluator_ids:string[]}>(path.replace(/\/rerun$/,'/manifest'));assertLocallyEnabled(manifest.primary_evaluator_ids)}
   }

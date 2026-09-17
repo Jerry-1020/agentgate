@@ -9,6 +9,7 @@ export interface EvaluationRun {
     selected_case_ids?: string[] | null
     primary_evaluator_ids: string[]
     target: {
+      descriptor_sha256: string
       display_name: string
       ref: { source_id: string; target_type: string; external_target_id: string; external_version_id: string }
     }

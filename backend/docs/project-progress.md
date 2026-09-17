@@ -1,6 +1,52 @@
 # AgentGate Project Progress
 
-Last updated: 2026-09-11
+Last updated: 2026-09-17
+
+## Trace API correlation-ID redaction fix — 2026-09-17
+
+- Preserve full UUIDs only in request/session/trace/span correlation fields (including namespaced keys); explicit sensitive-key policies still take priority. Other values still undergo recursive credential/PII redaction.
+- Reproduced the historical Luhn/UUID collision before the fix. Added 29 regression cases including the real UUID, nested attributes, sensitive values in ID fields, explicit policy overrides, and an HTTP route/storage-invariance test.
+- Verification: focused suite 83 passed / 1 skipped; full backend 1023 passed / 1 skipped (private SDK fixture), with two existing dependency deprecation warnings.
+- Restarted the idle local stack. Across the existing three conformance runs, all 27 request IDs now match canonical storage; all 24 canonical Trace payloads and 27 raw JSONL file digests remain unchanged. No frontend, tested-Agent or original evidence changes; no model rerun.
+- Evidence: workspace-root BANK-CONFORMANCE-AUDIT-20260917.md, follow-up section; runtime/conformance-20260917/trace-api-redaction-fix.json. Original audit evidence is retained.
+
+## Full-stack real-target integration — 2026-09-17
+
+- Existing UI layout retained; creation now binds the three live targets, published database cases, capability limits and exact descriptor fingerprints. Static analysis no longer routes these targets through Demo or aliases unrelated v1 descriptors.
+- Added safe model metadata, pinned descriptor lookup, partial samples for non-completed runs, real-target stability and scheduled launches; one supervisor can launch all six local processes.
+- Fixed SDK UUID/phone masking collision through a narrow public SDK rule override, retaining actual phone masking. Judge invalid JSON values get at most one correction; both responses/fingerprints persist and invalid results remain errors.
+- Live tests include actual model execution, composite propagation, static report/reanalysis, scheduled dispatch, stability rounds, notes writeback and a versioned negative-control regression. Real model business failures and an optimizer invalid-confidence edge case remain visible, not coerced into passes.
+- Workspace-root `FULLSTACK-ACCEPTANCE-20260917.md` supersedes older frontend-not-bound checkpoints below and records exact run IDs and production boundaries.
+- Final verification: 994 backend tests passed / 1 skipped; 19 tested-Agent tests passed; 16 unified UI tests and 4 new target UI tests passed; production frontend build passed. All three modes completed a final live low-risk smoke run after restart. Services remain local and running.
+
+## Independent bank-tested Agent checkpoint — 2026-09-17
+
+- Added a separate `tested-agents/` service: real model tool-loop, LangGraph workflow, and LangGraph Skill-router/cloudshrimp modes. Shares synthetic SQLite loan tools and the supplied actual Trace SDK, not replayed model answers.
+- Added loopback HTTP Target adapter, `/api/bank-targets`, `/api/bank-evaluations`, and Celery dispatch. Pinned descriptors include code hash; request/session/Trace output are cross-checked. Actual turn inputs come from SDK evidence.
+- Added three persisted eight-case datasets. Full live-model runs cover low/high risk, rejection, amount boundary, over-limit review, missing fields, multi-turn completion and status query.
+- Verification: 18 independent-service tests and 991 backend tests including the private SDK fixture. Live results and exact run IDs are in workspace-root `BANK-TESTED-AGENTS-20260917.md`.
+- Frontend source/layout unchanged in this checkpoint; existing report pages render these tasks, but create-form target selection and global Demo wording are not yet rebound.
+- This implements a reference-compatible local tested Agent, not the bank's undisclosed production internals or remote factory lifecycle. See `tested-agents/README.md` for unsupported protocol fields and operational limits.
+
+## Customer SDK integration checkpoint — 2026-09-17
+
+- Added strict customer SDK JSONL normalization and a hash-pinned replay Target adapter using the unchanged refactor-1 runtime/Trace contracts (upstream e3760d1).
+- Added explicit ChatABC/cloudshrimp request and SSE protocol translation; no customer HTTP calls or resource operations are wired yet.
+- Verified the supplied private city-research archive through RunManagement, RunEngine, existing rule evaluators, and isolated SQLite. The archive is not a loan-agent acceptance test and is not copied into this repository.
+- Verification: 29 focused tests including the private archive; 982 full backend tests passed. Frontend unchanged in this checkpoint.
+- Still pending: exact customer loan Target/version, request-to-SDK Trace correlation, live HTTP adapter, worker/catalog composition, resource lifecycle ownership, and UI data binding. See workspace-root `CUSTOMER-AGENT-API-CONTRACT-20260917.md`.
+
+## Local UX integration checkpoint — 2026-09-17
+
+These changes are in the local unified-task integration worktree, not a claim of an upstream merge.
+
+- Task identities and run/static-report associations are persisted in SQLite. Single, A/B, and stability launches save runs and their task associations atomically before dispatch.
+- Stability launches support 2–20 independent runs with an identical manifest. Summary excludes failed/error/unscored runs from numerical statistics and preserves every round's status.
+- Optimization reports are persisted by evidence/model/analyzer fingerprint. Analyzer v3 restricts model citations to the same Span allowlist enforced by the report domain and uses representative evidence with one bounded contract retry.
+- Registered composite v1 supports all, any, and weighted scores while preserving blocking failures, errors, and review outcomes.
+- Frontend task relations use server data. Reanalysis replaces the active task-to-static-report link without deleting older reports. Existing layout and the three-column tuning workbench remain.
+- Verification: 953 backend tests, frontend production build, and the unified-task browser suite. Exact live run IDs and remaining boundaries are recorded in the workspace-root `INTEGRATION-20260917.md`.
+- Model connection editing/team authorization still requires a choice between local single-user management and a multi-user identity/authorization system. Existing service-managed model execution is verified; there is no claim of production tenant isolation.
 
 ## Status Legend
 

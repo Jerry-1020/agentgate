@@ -13,6 +13,7 @@ from .base import DomainModel, normalize_utc, require_non_blank, utcnow
 class EvaluationTaskKind(StrEnum):
     SINGLE = "single"
     AB = "ab"
+    STABILITY = "stability"
 
 
 class EvaluationTask(DomainModel):
@@ -54,6 +55,14 @@ class EvaluationTask(DomainModel):
 
     @model_validator(mode="after")
     def validate_cardinality(self) -> "EvaluationTask":
+        if self.kind == EvaluationTaskKind.STABILITY:
+            if not 2 <= len(self.run_ids) <= 20:
+                raise ValueError("stability requires 2 to 20 runs")
+            if len(self.static_report_ids) > 1:
+                raise ValueError("stability uses one target snapshot")
+            if self.git_commit_refs:
+                raise ValueError("stability Git references are not supported")
+            return self
         count = 1 if self.kind == EvaluationTaskKind.SINGLE else 2
         if len(self.run_ids) != count:
             raise ValueError(f"{self.kind} requires exactly {count} runs")

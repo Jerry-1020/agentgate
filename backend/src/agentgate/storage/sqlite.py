@@ -16,6 +16,7 @@ from agentgate.domain import (
     EvaluatorDraft,
     EvaluatorSource,
     EvaluatorSpec,
+    OptimizationReport,
     RunStatus,
     SkillAnalysisReport,
     SkillAnalysisReview,
@@ -29,6 +30,7 @@ from agentgate.domain import (
     transition_run,
 )
 from agentgate.domain.credential import ApiKeyMetadata
+from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.evaluator.versioning import (
     publish_evaluator_draft as build_evaluator_publication,
 )
@@ -243,6 +245,95 @@ class SQLiteRepository:
             db.executescript(_SCHEMA)
             self._ensure_runs_schema(db)
             db.executescript(_RUNS_INDEX_SCHEMA)
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS optimization_reports (
+                    evidence_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS evaluation_tasks (
+                    id TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS evaluation_task_runs (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+                    task_id TEXT NOT NULL REFERENCES evaluation_tasks(id)
+                );
+            """)
+
+    def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
+        if task.run_ids != tuple(r.id for r in runs):
+            raise ValueError("invalid task run associations")
+        if any(r.status not in {RunStatus.PENDING, RunStatus.SCHEDULED} for r in runs):
+            raise ValueError("task creation requires unstarted runs")
+        if task.kind == "stability" and any(r.manifest != runs[0].manifest or r.status != RunStatus.PENDING for r in runs):
+            raise ValueError("stability requires identical snapshots and pending runs")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for run in runs:
+                references = self._run_asset_references(db, run)
+                db.execute("INSERT INTO runs(id,status,created_at,scheduled_for,payload) VALUES(?,?,?,?,?)",
+                           (run.id, run.status, run.created_at.isoformat(), run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run)))
+                db.executemany("INSERT INTO run_asset_refs(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)", references)
+            db.execute("INSERT INTO evaluation_tasks VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
+            db.executemany("INSERT INTO evaluation_task_runs VALUES(?,?)", [(r.id, task.id) for r in runs])
+
+    def get_optimization_report(self, evidence_key: str) -> OptimizationReport | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload FROM optimization_reports WHERE evidence_key=?", (evidence_key,)).fetchone()
+        return OptimizationReport.model_validate_json(row["payload"]) if row else None
+
+    def save_optimization_report(self, evidence_key: str, report: OptimizationReport) -> OptimizationReport:
+        with self._connect() as db:
+            db.execute("INSERT OR IGNORE INTO optimization_reports VALUES(?,?,?,?)",
+                       (evidence_key, report.run_id, report.created_at.isoformat(), canonical_json(report)))
+            row = db.execute("SELECT payload FROM optimization_reports WHERE evidence_key=?", (evidence_key,)).fetchone()
+        return OptimizationReport.model_validate_json(row["payload"])
+
+    def save_evaluation_task(self, task: EvaluationTask) -> EvaluationTask:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload FROM evaluation_tasks WHERE id=?", (task.id,)).fetchone()
+            if row:
+                previous = EvaluationTask.model_validate_json(row["payload"])
+                for field in ("kind", "run_ids", "git_commit_refs", "credential_id"):
+                    if getattr(previous, field) != getattr(task, field):
+                        raise ValueError("task identity and run associations are immutable")
+                reports_by_target = {}
+                for report_id in previous.static_report_ids + task.static_report_ids:
+                    report_row = db.execute("SELECT payload FROM skill_analysis_reports WHERE id=?", (report_id,)).fetchone()
+                    if report_row is None:
+                        raise ValueError("unknown static report")
+                    report = SkillAnalysisReport.model_validate_json(report_row["payload"])
+                    reports_by_target[report.target_descriptor_sha256] = report_id
+                task = EvaluationTask.model_validate({
+                    **previous.model_dump(),
+                    "static_report_ids": tuple(reports_by_target.values()),
+                })
+            for report_id in task.static_report_ids:
+                if db.execute("SELECT 1 FROM skill_analysis_reports WHERE id=?", (report_id,)).fetchone() is None:
+                    raise ValueError("unknown static report")
+            try:
+                if not row:
+                    db.execute("INSERT INTO evaluation_tasks VALUES(?,?,?)",
+                               (task.id, task.created_at.isoformat(), canonical_json(task)))
+                    db.executemany("INSERT INTO evaluation_task_runs VALUES(?,?)",
+                                   [(run_id, task.id) for run_id in task.run_ids])
+                else:
+                    db.execute("UPDATE evaluation_tasks SET payload=? WHERE id=?", (canonical_json(task), task.id))
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("run does not exist or already belongs to another task") from exc
+        return task
+
+    def get_evaluation_task(self, task_id: str) -> EvaluationTask | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload FROM evaluation_tasks WHERE id=?", (task_id,)).fetchone()
+        return EvaluationTask.model_validate_json(row["payload"]) if row else None
+
+    def list_evaluation_tasks(self) -> list[EvaluationTask]:
+        with self._connect() as db:
+            rows = db.execute("SELECT payload FROM evaluation_tasks ORDER BY created_at DESC,id").fetchall()
+        return [EvaluationTask.model_validate_json(row["payload"]) for row in rows]
 
     @staticmethod
     def _ensure_runs_schema(db: sqlite3.Connection) -> None:

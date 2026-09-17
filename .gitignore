@@ -20,4 +20,5 @@ runtime/
 **/playwright-report/
 **/.coverage
 **/htmlcov/
+**/build/
 **/*.egg-info/

@@ -6,7 +6,7 @@ from agentgate.demo.targets import (
     build_demo_target_snapshot,
     get_demo_target_descriptor,
 )
-from agentgate.domain import CaseDifficulty, TargetSnapshot
+from agentgate.domain import CaseDifficulty, TargetSnapshot, RunStatus
 from agentgate.server.dependencies import ServerDependencies, build_dependencies
 from agentgate.server.routes.results import router
 
@@ -73,6 +73,29 @@ def test_result_route_rejects_report_for_pending_run(tmp_path) -> None:
     assert response.json()["detail"] == (
         "EvaluationReport requires a completed EvaluationRun"
     )
+
+
+def test_samples_are_available_without_a_final_report(tmp_path, monkeypatch) -> None:
+    dependencies = build_dependencies(tmp_path / "partial-samples.db")
+    pending = dependencies.runs.create_run(_target(), dataset_id=LOAN_DATASET.id)
+    done = dependencies.execute_demo_run("loan-agent-v2-fixed")
+    with _client(dependencies) as client:
+        empty = client.get(f"/api/runs/{pending.id}/samples")
+        assert empty.status_code == 200
+        assert empty.json()["results"] == []
+        assert empty.json()["complete"] is False
+        evidence = client.get(f"/api/runs/{done.id}/samples").json()
+        assert evidence["complete"] is True
+        assert len(evidence["results"]) > 0
+        assert "release_gate" not in evidence
+        # A terminal failure must not hide already committed samples.
+        original = dependencies.repository.get_run
+        monkeypatch.setattr(dependencies.repository, "get_run", lambda id:
+            done.model_copy(update={"status": RunStatus.FAILED, "error": "test"}) if id == done.id else original(id))
+        partial = client.get(f"/api/runs/{done.id}/samples").json()
+        assert partial["complete"] is False
+        assert partial["results"] == evidence["results"]
+        assert client.get('/api/runs/missing/samples').status_code == 404
 
 
 def test_result_route_returns_available_analytics_breakdowns(tmp_path) -> None:

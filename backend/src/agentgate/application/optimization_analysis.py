@@ -11,7 +11,8 @@ from agentgate.domain import (
     SkillAnalysisReport,
     SkillAnalysisStatus,
 )
-from agentgate.domain.base import require_non_blank
+from agentgate.domain.base import require_non_blank, content_sha256
+from agentgate.optimizer.pipeline import ANALYZER_VERSION
 from agentgate.evaluator.judge.model_protocol import JudgeModelClient
 from agentgate.optimizer import build_optimization_report
 from agentgate.storage.repository import AgentGateRepository
@@ -105,15 +106,30 @@ class OptimizationAnalysis:
                 for finding in sorted(report.findings, key=lambda item: item.id)
                 if finding.id not in dismissed
             )
-        return build_optimization_report(
+        results = self.repository.list_results(run.id)
+        traces = self.repository.list_traces(run.id)
+        evidence_key = content_sha256({
+            "run": run.model_dump(mode="json"),
+            "results": [r.model_dump(mode="json") for r in sorted(results, key=lambda r: r.id)],
+            "traces": [t.model_dump(mode="json") for t in sorted(traces, key=lambda t: t.trace_id)],
+            "findings": [f.model_dump(mode="json") for f in findings],
+            "model_id": self.root_cause_model_id,
+            "provider_id": self.root_cause_model_client.provider_id if self.root_cause_model_client else None,
+            "analyzer_version": ANALYZER_VERSION,
+        })
+        cached = self.repository.get_optimization_report(evidence_key)
+        if cached is not None:
+            return cached
+        report = build_optimization_report(
             run,
-            self.repository.list_results(run.id),
-            self.repository.list_traces(run.id),
+            results,
+            traces,
             findings,
             model_client=self.root_cause_model_client,
             model_id=self.root_cause_model_id,
             root_cause_timeout_seconds=self.root_cause_timeout_seconds,
         )
+        return self.repository.save_optimization_report(evidence_key, report)
 
     def _skill_analysis_report(
         self,

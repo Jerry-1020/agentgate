@@ -87,7 +87,6 @@ onMounted(async()=>{window.addEventListener('beforeunload',beforeUnload);await l
  <h3>类型</h3><div class="filter-chips"><button v-for="k in (['rule','llm_judge','hybrid'] as const)" :class="{active:typeFilter===k}" :aria-pressed="typeFilter===k" @click="typeFilter=typeFilter===k?'':k;kind=k">{{kindLabel(k)}}</button></div>
  <h3>场景</h3><div class="filter-chips"><button v-for="d in dimensions" :key="d" :class="{active:dimensionFilter===d}" :aria-pressed="dimensionFilter===d" @click="dimensionFilter=dimensionFilter===d?'':d">{{dimensionLabel(d)}}</button></div>
  <h3>状态</h3><select class="input" v-model="enabledFilter" aria-label="评估器状态"><option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select>
- <p v-if="typeFilter==='hybrid'" class="muted">当前后端未注册复合执行实现，可创建和编辑草稿，暂不能发布运行。</p>
  </aside>
  <main class="catalog-main"><input v-model="query" class="input catalog-search" placeholder="搜索评估器名称、说明或指标" aria-label="搜索评估器"/>
  <div class="evaluator-cards"><button v-for="e in filtered" :key="e.id" class="evaluator-catalog-card" @click="chooseItem(e)">
@@ -114,7 +113,7 @@ onMounted(async()=>{window.addEventListener('beforeunload',beforeUnload);await l
 <section><h3>输出</h3><p>评估指标：{{definition.metric}} · 判定状态、可用评分与证据；具体结构以实现为准。</p></section>
 <section><h3>结果呈现位置</h3><p>评测任务 → 查看详情 → 评测结果 → 样本评估明细</p></section>
 </div>
-    <div v-else class="detail-content"><label class="field">备注说明<textarea class="input" rows="3" v-model="description" :readonly="readOnly"/></label><EvaluatorEditor v-if="edit" v-model="edit" :items="items" :disabled="readOnly"/><div v-if="!readOnly" class="form-footer"><button class="secondary" :disabled="busy" @click="save">保存草稿</button><span v-if="dirty" class="muted">有未保存的修改，请先保存草稿。</span><button class="primary" :disabled="busy||!selected.draft||dirty||definition.kind==='hybrid'" @click="publish">发布新版本</button></div></div>
+    <div v-else class="detail-content"><label class="field">备注说明<textarea class="input" rows="3" v-model="description" :readonly="readOnly"/></label><EvaluatorEditor v-if="edit" v-model="edit" :items="items" :disabled="readOnly"/><div v-if="!readOnly" class="form-footer"><button class="secondary" :disabled="busy" @click="save">保存草稿</button><span v-if="dirty" class="muted">有未保存的修改，请先保存草稿。</span><button class="primary" :disabled="busy||!selected.draft||dirty" @click="publish">发布新版本</button></div></div>
    </template>
    <div v-else class="empty"><h2>选择一个{{kindLabel(kind)}}</h2><p>{{kind==='hybrid'?'点击“新建评估器”，选择子评估器版本并设置总计 100% 的权重。':'左侧选择后查看判定依据、配置和实现源码。'}}</p></div>
   </section>

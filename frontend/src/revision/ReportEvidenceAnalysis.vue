@@ -2,8 +2,9 @@
 import {computed,ref,watch} from 'vue'
 import AnalysisAnnotation from './AnalysisAnnotation.vue'
 import CaseReport from './CaseReport.vue'
-import {api,pretty,type Report} from './api'
+import {api,pretty,request,type Report} from './api'
 import type {EvaluationResult,Trace} from '../upstream/api/client'
+import {readTaskLinks} from './task-links'
 const props=defineProps<{report:Report}>()
 const annotations=ref<Record<string,string>>({})
 watch(()=>props.report.run.id,()=>{annotations.value={}})
@@ -19,24 +20,6 @@ watch(reportCase,async id=>{
  catch(e){if(ticket===traceTicket)traceError.value=String(e)}
  finally{if(ticket===traceTicket)traceLoading.value=false}
 })
-const guidance:Record<string,string>={
- forbidden_tool_compliance:'核对禁用工具约束、调用前的权限判断和实际工具调用记录；修改后用同一发布样本复测。',
- skill_routing_accuracy:'核对期望 Skill、实际路由记录及路由触发条件；不能仅凭路由不匹配断言提示词错误。',
- required_tool_coverage:'核对必需工具是否被调用，以及条件分支是否跳过该步骤。',
- tool_argument_accuracy:'逐项对比参数路径的期望值与实际值，核对字段映射、类型和调用前的校验。',
- final_state_accuracy:'对照失败状态字段与业务期望，检查状态更新分支和工具执行结果。',
- final_output_accuracy:'对照失败输出字段，检查输出格式、字段映射和结果生成环节。',
- policy_compliance:'核对样本策略约束及实际执行证据，检查策略条件和执行顺序。'
-}
-const actions:Record<string,[string,string,string]>={
- forbidden_tool_compliance:['限制禁用工具的调用路径','根据关联 Trace，核对被禁止工具的触发条件，在对应业务分支阻止调用。','重跑关联样本，确认禁用工具不再出现，并检查其他必需动作是否执行。'],
- tool_coverage:['补齐必需工具调用','检查缺失工具的触发条件与执行分支，补齐调用步骤。','确认必需工具均被调用，再核对参数和返回结果。'],
- policy_compliance:['修正业务策略执行','对照策略失败原因核对业务分支，同时检查禁止动作和要求达到的业务状态。','逐项确认策略检查通过，不以单个工具调用成功代替策略通过。'],
- final_state_match:['修正最终业务状态','对照状态检查项的期望与实际值，修正状态更新条件。','确认失败状态字段达到期望，并检查状态更新前置动作。'],
- tool_argument_accuracy:['修正工具参数构造','对照工具参数检查项，修正对应参数字段和取值来源。','确认失败参数符合期望，并检查工具执行结果。'],
- skill_routing_accuracy:['修正 Skill 路由条件','对照期望 Skill 与实际路由，核对触发条件和职责边界。','确认实际 Skill 符合期望，并回归相邻场景。']
-}
-const action=(metric:string)=>actions[metric]??['核对并修正执行配置',suggestion(metric),'使用同一评测集发布版本和评估器版本重跑关联样本，对比修复前后结果，并检查是否引入新的失败。']
 const evaluatorTitle=(id:string,name:string)=>({'final-state':'最终业务状态','forbidden-tool':'调用了禁用工具','policy-compliance':'策略合规','required-tool':'必需工具调用','skill-routing':'技能路由','tool-arguments':'工具参数','final-output':'最终输出'} as Record<string,string>)[id]??name
 const groups=computed(()=>{
  const map=new Map<string,{key:string;name:string;version:string;metric:string;items:EvaluationResult[]}>()
@@ -53,12 +36,35 @@ const errors=computed(()=>props.report.results.filter(r=>r.outcome==='error').le
 const reviews=computed(()=>props.report.results.filter(r=>r.outcome==='review').length)
 const caseName=(id:string)=>props.report.run.manifest.dataset.cases.find(c=>c.id===id)?.name??id
 const reason=(text:string)=>[...new Set(text.split(/[；;]/).map(t=>t.trim()).filter(Boolean))].join('；')
-const suggestion=(metric:string)=>guidance[metric]??'逐项核对下方期望值、实际值与 Trace；先确认样本约束是否正确，再排查智能体执行过程。'
 const groupKey=ref(''),caseKey=ref('')
 const activeGroup=computed(()=>groups.value.find(g=>g.key===groupKey.value)??groups.value[0])
 const caseIds=computed(()=>[...new Set(activeGroup.value?.items.map(r=>r.case_id)??[])])
 const selectedCase=computed({get:()=>caseIds.value.includes(caseKey.value)?caseKey.value:caseIds.value[0]??'',set:(v:string)=>caseKey.value=v})
 const caseResults=computed(()=>activeGroup.value?.items.filter(r=>r.case_id===selectedCase.value)??[])
+interface Optimization {
+ run_id:string
+ clusters:{id:string;members:{result_id:string}[]}[]
+ hypotheses:{id:string;title:string;explanation:string;result_ids:string[];cluster_ids:string[]}[]
+ suggestions:{id:string;title:string;recommendation:string;rationale:string;hypothesis_ids:string[]}[]
+}
+const optimization=ref<Optimization|null>(null),analysisLoading=ref(false),analysisError=ref('')
+let analysisTicket=0
+const staticReportId=computed(()=>readTaskLinks().find(t=>t.runIds.includes(props.report.run.id))?.staticReports.find(r=>r.descriptorHash===props.report.run.manifest.target.descriptor_sha256)?.reportId)
+watch([()=>props.report.run.id,staticReportId],()=>{++analysisTicket;optimization.value=null;analysisLoading.value=false;analysisError.value=''})
+const hypotheses=computed(()=>optimization.value?.hypotheses.filter(h=>h.result_ids.some(id=>caseResults.value.some(r=>r.id===id))||optimization.value?.clusters.some(c=>h.cluster_ids.includes(c.id)&&c.members.some(m=>caseResults.value.some(r=>r.id===m.result_id))))??[])
+const modelSuggestions=computed(()=>optimization.value?.suggestions.filter(s=>s.hypothesis_ids.some(id=>hypotheses.value.some(h=>h.id===id)))??[])
+async function analyze(){
+ if(analysisLoading.value||optimization.value)return
+ const ticket=++analysisTicket,runId=props.report.run.id
+ analysisLoading.value=true;analysisError.value=''
+ try{
+  const query=staticReportId.value?'?skill_analysis_report_id='+encodeURIComponent(staticReportId.value):''
+  const value=await request<Optimization>('/runs/'+encodeURIComponent(runId)+'/optimization'+query,'GET',undefined,240000)
+  if(value.run_id!==runId)throw Error('分析报告与当前运行不一致')
+  if(ticket===analysisTicket)optimization.value=value
+ }catch(e){if(ticket===analysisTicket)analysisError.value=String(e)}
+ finally{if(ticket===analysisTicket)analysisLoading.value=false}
+}
 watch(()=>props.report.run.id,()=>{groupKey.value='';caseKey.value=''})
 </script>
 <template>
@@ -82,8 +88,14 @@ watch(()=>props.report.run.id,()=>{groupKey.value='';caseKey.value=''})
 </div><p v-if="!result.checks.some(c=>c.outcome==='fail')" class="muted">报告未提供检查项明细，可查看完整样本报告。</p>
 </article>
 <details class="recommendation"><summary>原因与改进建议</summary>
-<p><b>优先级：</b>{{activeGroup.items.some(r=>r.severity==='blocking')?'高':'待确认'}} · 修改对象待根据 Trace 定位。</p>
-<p><b>{{action(activeGroup.metric)[0]}}</b>：{{action(activeGroup.metric)[1]}}</p><p><b>如何验证：</b>{{action(activeGroup.metric)[2]}}</p>
+<button v-if="!optimization" :disabled="analysisLoading" @click="analyze">{{analysisLoading?'模型分析中…':'运行模型调优分析'}}</button>
+<p v-if="analysisError" role="alert">{{analysisError}}</p>
+<template v-if="optimization">
+<p class="muted">以下为后端模型基于本次运行中同类失败的代表证据生成的原因分析，建议需人工复核，不会自动修改智能体或用例。</p>
+<article v-for="item in hypotheses" :key="item.id"><b>{{item.title}}</b><p>{{item.explanation}}</p></article>
+<article v-for="item in modelSuggestions" :key="item.id"><b>{{item.title}}</b><p>{{item.recommendation}}</p><p>{{item.rationale}}</p></article>
+<p v-if="!hypotheses.length">模型未返回关联当前检查项的原因，不能据此推断具体修复方案。</p>
+</template>
 </details></section>
 <aside class="tuning-notes" aria-label="用例人工备注"><p class="note-context">{{caseName(selectedCase)}}</p>
 <AnalysisAnnotation :key="report.run.id+':'+selectedCase" :run-id="report.run.id" :case-id="selectedCase" :case-name="caseName(selectedCase)" :dataset-name="report.run.manifest.dataset.dataset_name" :model-value="annotations[selectedCase]??''" @update:model-value="annotations[selectedCase]=$event"/>

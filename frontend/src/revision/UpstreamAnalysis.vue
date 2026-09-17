@@ -3,8 +3,9 @@ import {computed,onMounted,onUnmounted,ref,watch} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import {staticChinese,skillChinese} from './static-chinese'
 import ReportEvidenceAnalysis from './ReportEvidenceAnalysis.vue'
-import {api,request,pretty,type Report,type EvaluationRun} from './api'
-const props=defineProps<{mode:string;initialId?:string;preferredReportId?:string;lockTarget?:boolean;targetName?:string;runs:EvaluationRun[]}>()
+import {api,request,pretty,type Report,type EvaluationRun,type TargetDescriptor} from './api'
+const props=defineProps<{mode:string;initialId?:string;preferredReportId?:string;lockTarget?:boolean;targetName?:string;targetDescriptor?:TargetDescriptor;runs:EvaluationRun[]}>()
+const emit=defineEmits<{reportCreated:[reportId:string]}>()
 const analyzing=ref(false)
 const skills=ref<{external_id:string;label:string;version:string|null}[]>([])
 const selectedSkill=ref(''),loadingContext=ref(false)
@@ -35,12 +36,17 @@ async function loadEvidence(){
 async function loadContext(){
  const current=++ticket,version=selected.value;loadingContext.value=true
  try{
-  const graph=await request<any>('/targets/agentgate-demo/agent/loan-agent/versions/'+encodeURIComponent(selected.value)+'/lineage')
-  if(current!==ticket)return
-  const root=graph.nodes.find((n:any)=>n.id===graph.root_node_id)
-  if(!root?.content_sha256)throw Error('未取得版本定义指纹，无法查询报告。')
-  hash.value=root.content_sha256
-  skills.value=graph.nodes.filter((n:any)=>n.kind==='skill'&&graph.edges.some((e:any)=>e.source_id===root.id&&e.target_id===n.id&&e.relation==='includes_skill'))
+  if(props.targetDescriptor){
+   hash.value=props.targetDescriptor.content_sha256
+   skills.value=props.targetDescriptor.skills.map(s=>({external_id:s.external_skill_id,label:s.name,version:s.external_version_id}))
+  }else{
+   const graph=await request<any>('/targets/agentgate-demo/agent/loan-agent/versions/'+encodeURIComponent(selected.value)+'/lineage')
+   if(current!==ticket)return
+   const root=graph.nodes.find((n:any)=>n.id===graph.root_node_id)
+   if(!root?.content_sha256)throw Error('未取得版本定义指纹，无法查询报告。')
+   hash.value=root.content_sha256
+   skills.value=graph.nodes.filter((n:any)=>n.kind==='skill'&&graph.edges.some((e:any)=>e.source_id===root.id&&e.target_id===n.id&&e.relation==='includes_skill'))
+  }
   const reports=await request<any[]>('/skill-analysis/reports?'+new URLSearchParams({target_descriptor_sha256:hash.value}))
   if(current!==ticket)return
   history.value=reports
@@ -51,11 +57,13 @@ async function loadContext(){
 async function loadHistory(){if(hash.value)history.value=await request<any[]>('/skill-analysis/reports?'+new URLSearchParams({target_descriptor_sha256:hash.value}))}
 async function analyze(){
  if(props.mode!=='analysis'||!hash.value||busy.value||loadingContext.value)return
+ if(!skills.value.length){error.value='该目标没有声明 Skill，静态职责分析不适用。';return}
  const current=++ticket;busy.value=true;analyzing.value=true;error.value='';data.value=null
  try{
   const result=await request<any>('/skill-analysis/reports','POST',{target_descriptor_sha256:hash.value},180000)
   if(current!==ticket)return
   data.value=result;reviews.value=[];decisions.value={};comments.value={}
+  emit('reportCreated',result.id)
   if(props.mode==='analysis'){hash.value=result.target_descriptor_sha256;historyId.value=result.id;await loadHistory()}
  }catch(e){if(current===ticket)error.value=String(e)}finally{if(current===ticket){busy.value=false;analyzing.value=false}}
 }
@@ -78,8 +86,8 @@ async function review(id:string){
 onMounted(async()=>{if(props.mode==='optimizer'){if(selected.value)await loadEvidence();return}try{if(!props.lockTarget)versions.value=await api.versions();if(selected.value)await loadContext()}catch(e){error.value=String(e)}})
 onUnmounted(()=>ticket++)
 </script>
-<template><div class="page-head"><div><div v-if="mode==='optimizer'" class="analysis-return"><a v-if="initialId" class="link" :href="'#tasks/'+encodeURIComponent(initialId)">← 返回来源评测任务</a><a v-else-if="selected" class="link" :href="'#tasks/'+encodeURIComponent(selected)">← 查看所选评测任务</a><a class="link" href="#tasks">返回任务列表</a></div><h1 class="page-title">{{mode==='analysis'?'Skill 静态分析':'调优中心'}}</h1><p class="page-sub">{{mode==='analysis'?'按版本查看 Skill 关系、历史分析与复核结果。':'从失败证据定位问题，查看改进建议，再进入回归验证。'}}</p></div></div><section class="card"><h3 v-if="mode==='analysis'">{{lockTarget?'本次任务评测对象':'第一步：选择要检查的智能体版本'}}</h3><div :class="{'selection-row':mode==='analysis'}"><div v-if="lockTarget" class="field task-target" aria-label="本次任务评测对象"><strong>{{targetName}}</strong><span>智能体版本：{{initialId}}</span><small class="muted">来自本次评测任务的运行配置，不可更换。</small></div><label v-else class="field">{{mode==='analysis'?'智能体版本':'已完成任务'}}<select class="input" v-model="selected" :disabled="busy" aria-label="分析对象"><option value="">请选择</option><option v-for="o in options" :value="o.id">{{o.label}}</option></select></label><button v-if="mode==='analysis'" class="primary" :disabled="!hash||busy||loadingContext" @click="analyze()">{{busy?(analyzing?'分析中…':'读取中…'):(data?'重新分析':'运行分析')}}</button></div><p class="muted">{{mode==='optimizer'?'选择任务后自动展示分析结果。':'模型比较 Skill 职责关系，不运行评测用例。'}}</p><button v-if="mode==='optimizer'&&error" class="secondary" :disabled="busy" @click="loadEvidence()">重新加载</button><p v-if="busy" class="muted" role="status">{{mode==='optimizer'&&!evidenceReport?'正在读取评测报告…':(analyzing?'正在调用服务端模型，复杂任务可能需要 1–3 分钟，请勿重复提交。':'正在读取已保存的报告…')}}</p><p v-if="error" role="alert">{{message}}</p><label v-if="history.length" class="field">历史报告<select class="input" v-model="historyId" :disabled="busy" @change="openHistory"><option v-for="r in history" :value="r.id">{{new Date(r.created_at).toLocaleString()}} · {{analysisStatus(r.status)}}</option></select></label>
- <template v-if="mode==='analysis'&&selected"><p v-if="loadingContext" role="status">正在读取版本与历史报告…</p><div v-if="skills.length" class="skill-context"><h3>{{lockTarget?'本次版本包含的 Skill':'第二步：确认要检查的 Skill'}}</h3><table class="data-table"><thead><tr><th>Skill</th><th>版本</th></tr></thead><tbody><tr v-for="skill in skills" :key="skill.external_id"><td>{{skillChinese(skill.label)}}</td><td>{{skill.version??'未提供版本'}}</td></tr></tbody></table></div><p v-if="!loadingContext&&!history.length&&!error" class="muted">此版本暂无历史报告，可发起分析。</p></template>
+<template><div class="page-head"><div><div v-if="mode==='optimizer'" class="analysis-return"><a v-if="initialId" class="link" :href="'#tasks/'+encodeURIComponent(initialId)">← 返回来源评测任务</a><a v-else-if="selected" class="link" :href="'#tasks/'+encodeURIComponent(selected)">← 查看所选评测任务</a><a class="link" href="#tasks">返回任务列表</a></div><h1 class="page-title">{{mode==='analysis'?'Skill 静态分析':'调优中心'}}</h1><p class="page-sub">{{mode==='analysis'?'按版本查看 Skill 关系、历史分析与复核结果。':'从失败证据定位问题，查看改进建议，再进入回归验证。'}}</p></div></div><section class="card"><h3 v-if="mode==='analysis'">{{lockTarget?'本次任务评测对象':'第一步：选择要检查的智能体版本'}}</h3><div :class="{'selection-row':mode==='analysis'}"><div v-if="lockTarget" class="field task-target" aria-label="本次任务评测对象"><strong>{{targetName}}</strong><span>智能体版本：{{initialId}}</span><small class="muted">来自本次评测任务的运行配置，不可更换。</small></div><label v-else class="field">{{mode==='analysis'?'智能体版本':'已完成任务'}}<select class="input" v-model="selected" :disabled="busy" aria-label="分析对象"><option value="">请选择</option><option v-for="o in options" :value="o.id">{{o.label}}</option></select></label><button v-if="mode==='analysis'" class="primary" :disabled="!hash||busy||loadingContext||!skills.length" @click="analyze()">{{busy?(analyzing?'分析中…':'读取中…'):(data?'重新分析':'运行分析')}}</button></div><p class="muted">{{mode==='optimizer'?'选择任务后自动展示分析结果。':(!loadingContext&&hash&&!skills.length?'该评测对象未声明 Skill，静态分析不适用。':'模型比较 Skill 职责关系，不运行评测用例。')}}</p><button v-if="mode==='optimizer'&&error" class="secondary" :disabled="busy" @click="loadEvidence()">重新加载</button><p v-if="busy" class="muted" role="status">{{mode==='optimizer'&&!evidenceReport?'正在读取评测报告…':(analyzing?'正在调用服务端模型，复杂任务可能需要 1–3 分钟，请勿重复提交。':'正在读取已保存的报告…')}}</p><p v-if="error" role="alert">{{message}}</p><label v-if="history.length" class="field">历史报告<select class="input" v-model="historyId" :disabled="busy" @change="openHistory"><option v-for="r in history" :value="r.id">{{new Date(r.created_at).toLocaleString()}} · {{analysisStatus(r.status)}}</option></select></label>
+ <template v-if="mode==='analysis'&&selected"><p v-if="loadingContext" role="status">正在读取版本与历史报告…</p><div v-if="skills.length" class="skill-context"><h3>{{lockTarget?'本次版本包含的 Skill':'第二步：确认要检查的 Skill'}}</h3><table class="data-table"><thead><tr><th>Skill</th><th>版本</th></tr></thead><tbody><tr v-for="skill in skills" :key="skill.external_id"><td>{{skillChinese(skill.label)}}</td><td>{{skill.version??'未提供版本'}}</td></tr></tbody></table></div><p v-if="!loadingContext&&skills.length&&!history.length&&!error" class="muted">此版本暂无历史报告，可发起分析。</p></template>
  </section>
 <ReportEvidenceAnalysis v-if="mode==='optimizer'&&evidenceReport" :report="evidenceReport"/>
 <section v-if="data&&mode==='analysis'" class="card section-gap">
