@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
 
 class BjsJobDispatcher:
     """Submit persisted Run IDs to a BJS execution backend."""
 
     def submit(self, run_id: str) -> None:
-        print(f"BjsJobDispatcher.submit: run_id={run_id}")
+        LOGGER.info("BjsJobDispatcher.submit: run_id=%s", run_id)
 
     def cancel(self, run_id: str) -> None:
-        print(f"BjsJobDispatcher.cancel: run_id={run_id}")
+        LOGGER.info("BjsJobDispatcher.cancel: run_id=%s", run_id)
