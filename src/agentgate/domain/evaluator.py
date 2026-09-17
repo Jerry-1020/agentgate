@@ -74,6 +74,9 @@ class Evaluator(DomainModel):
     enabled: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+    user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
+    user_id: str = ""  # 用户 ID（创建者标识）
+    user_name: str = ""  # 用户姓名（创建者显示名）
 
     @field_validator("id", "name")
     @classmethod
@@ -111,6 +114,9 @@ class EvaluatorDraft(DomainModel):
     combination: CombinationPolicy | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+    user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
+    user_id: str = ""  # 用户 ID（创建者标识）
+    user_name: str = ""  # 用户姓名（创建者显示名）
 
     @field_validator(
         "id",
@@ -170,6 +176,9 @@ class EvaluatorSpec(DomainModel):
     children: tuple[EvaluatorRef, ...] = ()
     combination: CombinationPolicy | None = None
     content_sha256: str = ""
+    user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
+    user_id: str = ""  # 用户 ID（创建者标识）
+    user_name: str = ""  # 用户姓名（创建者显示名）
 
     @field_validator(
         "id",
@@ -204,7 +213,10 @@ class EvaluatorSpec(DomainModel):
         )
 
         expected = content_sha256(
-            self.model_dump(mode="json", exclude={"content_sha256"})
+            self.model_dump(
+                mode="json",
+                exclude={"content_sha256", "user_team_id", "user_id", "user_name"},
+            )
         )
         if self.content_sha256 and self.content_sha256 != expected:
             raise ValueError("EvaluatorSpec content hash mismatch")

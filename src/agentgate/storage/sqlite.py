@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS {_T_EVALUATORS} (
     enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_evaluators_enabled_updated
@@ -116,12 +119,18 @@ CREATE TABLE IF NOT EXISTS {_T_EVALUATOR_DRAFTS} (
         REFERENCES {_T_EVALUATORS}(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS {_T_EVALUATOR_VERSIONS} (
     evaluator_id TEXT NOT NULL REFERENCES {_T_EVALUATORS}(id),
     version INTEGER NOT NULL CHECK(version >= 1),
     content_sha256 TEXT NOT NULL,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL,
     PRIMARY KEY(evaluator_id, version)
 );
@@ -130,6 +139,9 @@ CREATE TABLE IF NOT EXISTS {_T_DATASETS} (
     name TEXT NOT NULL,
     archived INTEGER NOT NULL CHECK(archived IN (0, 1)),
     updated_at TEXT NOT NULL,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS {_T_DATASET_VERSIONS} (
@@ -139,6 +151,9 @@ CREATE TABLE IF NOT EXISTS {_T_DATASET_VERSIONS} (
     status TEXT NOT NULL CHECK(status IN ('draft', 'published')),
     created_at TEXT NOT NULL,
     content_sha256 TEXT NOT NULL,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
     payload TEXT NOT NULL,
     CHECK(
         (status = 'draft' AND version IS NULL)
@@ -213,6 +228,11 @@ CREATE TABLE {_T_RUNS} (
     ),
     created_at TEXT NOT NULL,
     scheduled_for TEXT,
+    user_team_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '',
+    user_name TEXT NOT NULL DEFAULT '',
+    api_key TEXT,
+    case_max_parallel INTEGER,
     payload TEXT NOT NULL
 )
 """
@@ -538,11 +558,15 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_EVALUATORS}(
-                    id,source,enabled,created_at,updated_at,payload
-                ) VALUES(?,?,?,?,?,?)
+                    id,source,enabled,created_at,updated_at,
+                    user_team_id,user_id,user_name,payload
+                ) VALUES(?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     enabled=excluded.enabled,
                     updated_at=excluded.updated_at,
+                    user_team_id=excluded.user_team_id,
+                    user_id=excluded.user_id,
+                    user_name=excluded.user_name,
                     payload=excluded.payload
                 """,
                 (
@@ -551,6 +575,9 @@ class SQLiteRepository:
                     int(evaluator.enabled),
                     evaluator.created_at.isoformat(),
                     evaluator.updated_at.isoformat(),
+                    evaluator.user_team_id,
+                    evaluator.user_id,
+                    evaluator.user_name,
                     canonical_json(evaluator),
                 ),
             )
@@ -569,8 +596,9 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_EVALUATORS}(
-                    id,source,enabled,created_at,updated_at,payload
-                ) VALUES(?,?,?,?,?,?)
+                    id,source,enabled,created_at,updated_at,
+                    user_team_id,user_id,user_name,payload
+                ) VALUES(?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     evaluator.id,
@@ -578,47 +606,63 @@ class SQLiteRepository:
                     int(evaluator.enabled),
                     evaluator.created_at.isoformat(),
                     evaluator.updated_at.isoformat(),
+                    evaluator.user_team_id,
+                    evaluator.user_id,
+                    evaluator.user_name,
                     canonical_json(evaluator),
                 ),
             )
             db.execute(
                 f"""
                 INSERT INTO {_T_EVALUATOR_DRAFTS}(
-                    id,evaluator_id,created_at,updated_at,payload
-                ) VALUES(?,?,?,?,?)
+                    id,evaluator_id,created_at,updated_at,
+                    user_team_id,user_id,user_name,payload
+                ) VALUES(?,?,?,?,?,?,?,?)
                 """,
                 (
                     draft.id,
                     draft.evaluator_id,
                     draft.created_at.isoformat(),
                     draft.updated_at.isoformat(),
+                    draft.user_team_id,
+                    draft.user_id,
+                    draft.user_name,
                     canonical_json(draft),
                 ),
             )
 
-    def get_evaluator(self, evaluator_id: str) -> Evaluator | None:
+    def get_evaluator(
+        self, evaluator_id: str, *, user_team_id: str
+    ) -> Evaluator | None:
         with self._connect() as db:
             row = db.execute(
-                f"SELECT payload FROM {_T_EVALUATORS} WHERE id=?", (evaluator_id,)
+                f"SELECT payload FROM {_T_EVALUATORS} WHERE id=? AND user_team_id=?",
+                (evaluator_id, user_team_id),
             ).fetchone()
         return Evaluator.model_validate_json(row[0]) if row else None
 
     def list_evaluators(
         self,
         include_disabled: bool = False,
+        *,
+        user_team_id: str,
     ) -> list[Evaluator]:
-        query = f"SELECT payload FROM {_T_EVALUATORS}"
+        query = f"SELECT payload FROM {_T_EVALUATORS} WHERE user_team_id=?"
+        parameters: tuple[object, ...] = (user_team_id,)
         if not include_disabled:
-            query += " WHERE enabled=1"
+            query += " AND enabled=1"
         query += " ORDER BY updated_at DESC, id"
         with self._connect() as db:
-            rows = db.execute(query).fetchall()
+            rows = db.execute(query, parameters).fetchall()
         return [Evaluator.model_validate_json(row[0]) for row in rows]
 
-    def delete_unpublished_evaluator(self, evaluator_id: str) -> None:
+    def delete_unpublished_evaluator(
+        self, evaluator_id: str, *, user_team_id: str
+    ) -> None:
         with self._connect() as db:
             evaluator = db.execute(
-                f"SELECT 1 FROM {_T_EVALUATORS} WHERE id=?", (evaluator_id,)
+                f"SELECT 1 FROM {_T_EVALUATORS} WHERE id=? AND user_team_id=?",
+                (evaluator_id, user_team_id),
             ).fetchone()
             if evaluator is None:
                 raise ValueError(f"unknown Evaluator: {evaluator_id}")
@@ -660,10 +704,17 @@ class SQLiteRepository:
                 db.execute(
                     f"""
                     UPDATE {_T_EVALUATOR_DRAFTS}
-                    SET updated_at=?, payload=?
+                    SET updated_at=?, user_team_id=?, user_id=?, user_name=?, payload=?
                     WHERE id=?
                     """,
-                    (draft.updated_at.isoformat(), canonical_json(draft), draft.id),
+                    (
+                        draft.updated_at.isoformat(),
+                        draft.user_team_id,
+                        draft.user_id,
+                        draft.user_name,
+                        canonical_json(draft),
+                        draft.id,
+                    ),
                 )
                 return
 
@@ -676,14 +727,18 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_EVALUATOR_DRAFTS}(
-                    id,evaluator_id,created_at,updated_at,payload
-                ) VALUES(?,?,?,?,?)
+                    id,evaluator_id,created_at,updated_at,
+                    user_team_id,user_id,user_name,payload
+                ) VALUES(?,?,?,?,?,?,?,?)
                 """,
                 (
                     draft.id,
                     draft.evaluator_id,
                     draft.created_at.isoformat(),
                     draft.updated_at.isoformat(),
+                    draft.user_team_id,
+                    draft.user_id,
+                    draft.user_name,
                     canonical_json(draft),
                 ),
             )
@@ -691,11 +746,13 @@ class SQLiteRepository:
     def get_evaluator_draft(
         self,
         evaluator_id: str,
+        *,
+        user_team_id: str,
     ) -> EvaluatorDraft | None:
         with self._connect() as db:
             row = db.execute(
-                f"SELECT payload FROM {_T_EVALUATOR_DRAFTS} WHERE evaluator_id=?",
-                (evaluator_id,),
+                f"SELECT payload FROM {_T_EVALUATOR_DRAFTS} WHERE evaluator_id=? AND user_team_id=?",
+                (evaluator_id, user_team_id),
             ).fetchone()
         return EvaluatorDraft.model_validate_json(row[0]) if row else None
 
@@ -703,14 +760,16 @@ class SQLiteRepository:
         self,
         evaluator_id: str,
         expected_draft_id: str,
+        *,
+        user_team_id: str,
     ) -> None:
         with self._connect() as db:
             cursor = db.execute(
                 f"""
                 DELETE FROM {_T_EVALUATOR_DRAFTS}
-                WHERE evaluator_id=? AND id=?
+                WHERE evaluator_id=? AND id=? AND user_team_id=?
                 """,
-                (evaluator_id, expected_draft_id),
+                (evaluator_id, expected_draft_id, user_team_id),
             )
             if cursor.rowcount != 1:
                 raise ValueError("expected Evaluator draft does not exist")
@@ -718,16 +777,18 @@ class SQLiteRepository:
     def list_evaluator_versions(
         self,
         evaluator_id: str,
+        *,
+        user_team_id: str,
     ) -> list[EvaluatorSpec]:
         with self._connect() as db:
             rows = db.execute(
                 f"""
                 SELECT version,content_sha256,payload
                 FROM {_T_EVALUATOR_VERSIONS}
-                WHERE evaluator_id=?
+                WHERE evaluator_id=? AND user_team_id=?
                 ORDER BY version DESC
                 """,
-                (evaluator_id,),
+                (evaluator_id, user_team_id),
             ).fetchall()
         return [_load_evaluator_spec(row) for row in rows]
 
@@ -735,6 +796,8 @@ class SQLiteRepository:
         self,
         evaluator_id: str,
         version: str,
+        *,
+        user_team_id: str,
     ) -> EvaluatorSpec | None:
         version_number = _parse_evaluator_version(version)
         with self._connect() as db:
@@ -742,26 +805,28 @@ class SQLiteRepository:
                 f"""
                 SELECT version,content_sha256,payload
                 FROM {_T_EVALUATOR_VERSIONS}
-                WHERE evaluator_id=? AND version=?
+                WHERE evaluator_id=? AND version=? AND user_team_id=?
                 """,
-                (evaluator_id, version_number),
+                (evaluator_id, version_number, user_team_id),
             ).fetchone()
         return _load_evaluator_spec(row) if row else None
 
     def get_latest_evaluator_version(
         self,
         evaluator_id: str,
+        *,
+        user_team_id: str,
     ) -> EvaluatorSpec | None:
         with self._connect() as db:
             row = db.execute(
                 f"""
                 SELECT version,content_sha256,payload
                 FROM {_T_EVALUATOR_VERSIONS}
-                WHERE evaluator_id=?
+                WHERE evaluator_id=? AND user_team_id=?
                 ORDER BY version DESC
                 LIMIT 1
                 """,
-                (evaluator_id,),
+                (evaluator_id, user_team_id),
             ).fetchone()
         return _load_evaluator_spec(row) if row else None
 
@@ -814,13 +879,17 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_EVALUATOR_VERSIONS}(
-                    evaluator_id,version,content_sha256,payload
-                ) VALUES(?,?,?,?)
+                    evaluator_id,version,content_sha256,
+                    user_team_id,user_id,user_name,payload
+                ) VALUES(?,?,?,?,?,?,?)
                 """,
                 (
                     published.id,
                     version,
                     published.content_sha256,
+                    published.user_team_id,
+                    published.user_id,
+                    published.user_name,
                     canonical_json(published),
                 ),
             )
@@ -846,17 +915,25 @@ class SQLiteRepository:
                     return
             db.execute(
                 f"""
-                INSERT INTO {_T_DATASETS}(id,name,archived,updated_at,payload)
-                VALUES(?,?,?,?,?)
+                INSERT INTO {_T_DATASETS}(
+                    id,name,archived,updated_at,
+                    user_team_id,user_id,user_name,payload
+                )
+                VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                     name=excluded.name,
                     archived=excluded.archived,
                     updated_at=excluded.updated_at,
+                    user_team_id=excluded.user_team_id,
+                    user_id=excluded.user_id,
+                    user_name=excluded.user_name,
                     payload=excluded.payload
                 """,
                 (
                     dataset.id, dataset.name, int(dataset.archived),
-                    dataset.updated_at.isoformat(), canonical_json(dataset),
+                    dataset.updated_at.isoformat(),
+                    dataset.user_team_id, dataset.user_id, dataset.user_name,
+                    canonical_json(dataset),
                 ),
             )
 
@@ -868,14 +945,20 @@ class SQLiteRepository:
         with self._connect() as db:
             db.execute(
                 f"""
-                INSERT INTO {_T_DATASETS}(id,name,archived,updated_at,payload)
-                VALUES(?,?,?,?,?)
+                INSERT INTO {_T_DATASETS}(
+                    id,name,archived,updated_at,
+                    user_team_id,user_id,user_name,payload
+                )
+                VALUES(?,?,?,?,?,?,?,?)
                 """,
                 (
                     dataset.id,
                     dataset.name,
                     int(dataset.archived),
                     dataset.updated_at.isoformat(),
+                    dataset.user_team_id,
+                    dataset.user_id,
+                    dataset.user_name,
                     canonical_json(dataset),
                 ),
             )
@@ -896,20 +979,26 @@ class SQLiteRepository:
                 ),
             )
 
-    def get_dataset(self, dataset_id: str) -> Dataset | None:
+    def get_dataset(
+        self, dataset_id: str, *, user_team_id: str
+    ) -> Dataset | None:
         with self._connect() as db:
             row = db.execute(
-                f"SELECT payload FROM {_T_DATASETS} WHERE id=?", (dataset_id,)
+                f"SELECT payload FROM {_T_DATASETS} WHERE id=? AND user_team_id=?",
+                (dataset_id, user_team_id),
             ).fetchone()
         return Dataset.model_validate_json(row[0]) if row else None
 
-    def list_datasets(self, include_archived: bool = False) -> list[Dataset]:
-        query = f"SELECT payload FROM {_T_DATASETS}"
+    def list_datasets(
+        self, include_archived: bool = False, *, user_team_id: str
+    ) -> list[Dataset]:
+        query = f"SELECT payload FROM {_T_DATASETS} WHERE user_team_id=?"
+        parameters: tuple[object, ...] = (user_team_id,)
         if not include_archived:
-            query += " WHERE archived=0"
+            query += " AND archived=0"
         query += " ORDER BY updated_at DESC, id"
         with self._connect() as db:
-            rows = db.execute(query).fetchall()
+            rows = db.execute(query, parameters).fetchall()
         return [Dataset.model_validate_json(row[0]) for row in rows]
 
     def save_dataset_version(self, version: DatasetVersion) -> None:
@@ -938,10 +1027,17 @@ class SQLiteRepository:
                 db.execute(
                     f"""
                     UPDATE {_T_DATASET_VERSIONS}
-                    SET content_sha256 = ?, payload = ?
+                    SET content_sha256 = ?,
+                        user_team_id = ?, user_id = ?, user_name = ?,
+                        payload = ?
                     WHERE id = ? AND status = 'draft'
                     """,
-                    (version.content_sha256, canonical_json(version), version.id),
+                    (
+                        version.content_sha256,
+                        version.user_team_id, version.user_id, version.user_name,
+                        canonical_json(version),
+                        version.id,
+                    ),
                 )
                 return
             if version.status == DatasetVersionStatus.PUBLISHED:
@@ -960,73 +1056,85 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_DATASET_VERSIONS}(
-                    id,dataset_id,version,status,created_at,content_sha256,payload
-                ) VALUES(?,?,?,?,?,?,?)
+                    id,dataset_id,version,status,created_at,content_sha256,
+                    user_team_id,user_id,user_name,
+                    payload
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     version.id, version.dataset_id, version.version, version.status.value,
                     version.created_at.isoformat(), version.content_sha256,
+                    version.user_team_id, version.user_id, version.user_name,
                     canonical_json(version),
                 ),
             )
 
     def get_published_dataset_version(
-        self, dataset_id: str, version: int
+        self, dataset_id: str, version: int, *, user_team_id: str
     ) -> DatasetVersion | None:
         with self._connect() as db:
             row = db.execute(
                 f"""
                 SELECT payload FROM {_T_DATASET_VERSIONS}
                 WHERE dataset_id=? AND version=? AND status='published'
+                    AND user_team_id=?
                 """,
-                (dataset_id, version),
+                (dataset_id, version, user_team_id),
             ).fetchone()
         return DatasetVersion.model_validate_json(row[0]) if row else None
 
     def get_latest_published_dataset_version(
-        self, dataset_id: str
+        self, dataset_id: str, *, user_team_id: str
     ) -> DatasetVersion | None:
         with self._connect() as db:
             row = db.execute(
                 f"""
                 SELECT payload FROM {_T_DATASET_VERSIONS}
-                WHERE dataset_id=? AND status='published'
+                WHERE dataset_id=? AND status='published' AND user_team_id=?
                 ORDER BY version DESC LIMIT 1
                 """,
-                (dataset_id,),
+                (dataset_id, user_team_id),
             ).fetchone()
         return DatasetVersion.model_validate_json(row[0]) if row else None
 
-    def get_dataset_draft(self, dataset_id: str) -> DatasetVersion | None:
+    def get_dataset_draft(
+        self, dataset_id: str, *, user_team_id: str
+    ) -> DatasetVersion | None:
         with self._connect() as db:
             row = db.execute(
                 f"""
                 SELECT payload FROM {_T_DATASET_VERSIONS}
-                WHERE dataset_id=? AND status='draft'
+                WHERE dataset_id=? AND status='draft' AND user_team_id=?
                 """,
-                (dataset_id,),
+                (dataset_id, user_team_id),
             ).fetchone()
         return DatasetVersion.model_validate_json(row[0]) if row else None
 
     def list_dataset_versions(
-        self, dataset_id: str, include_draft: bool = True
+        self, dataset_id: str, include_draft: bool = True, *, user_team_id: str
     ) -> list[DatasetVersion]:
-        query = f"SELECT payload FROM {_T_DATASET_VERSIONS} WHERE dataset_id=?"
+        query = (
+            f"SELECT payload FROM {_T_DATASET_VERSIONS} "
+            f"WHERE dataset_id=? AND user_team_id=?"
+        )
+        parameters: tuple[object, ...] = (dataset_id, user_team_id)
         if not include_draft:
             query += " AND status='published'"
         query += " ORDER BY CASE status WHEN 'draft' THEN 0 ELSE 1 END, version DESC"
         with self._connect() as db:
-            rows = db.execute(query, (dataset_id,)).fetchall()
+            rows = db.execute(query, parameters).fetchall()
         return [DatasetVersion.model_validate_json(row[0]) for row in rows]
 
-    def delete_dataset_draft(self, dataset_id: str, expected_draft_id: str) -> None:
+    def delete_dataset_draft(
+        self, dataset_id: str, expected_draft_id: str, *, user_team_id: str
+    ) -> None:
         with self._connect() as db:
             cursor = db.execute(
                 f"""
                 DELETE FROM {_T_DATASET_VERSIONS}
-                WHERE dataset_id=? AND id=? AND status='draft'
+                WHERE dataset_id=? AND id=? AND status='draft' AND user_team_id=?
                 """,
-                (dataset_id, expected_draft_id),
+                (dataset_id, expected_draft_id, user_team_id),
             )
             if cursor.rowcount != 1:
                 raise ValueError("expected Dataset draft does not exist")
@@ -1038,9 +1146,9 @@ class SQLiteRepository:
             row = db.execute(
                 f"""
                 SELECT payload FROM {_T_DATASET_VERSIONS}
-                WHERE id=? AND status='draft'
+                WHERE id=? AND status='draft' AND user_team_id=?
                 """,
-                (expected_draft_id,),
+                (expected_draft_id, published.user_team_id),
             ).fetchone()
             if row is None:
                 raise ValueError("expected Dataset draft does not exist")
@@ -1062,13 +1170,17 @@ class SQLiteRepository:
             db.execute(
                 f"""
                 INSERT INTO {_T_DATASET_VERSIONS}(
-                    id,dataset_id,version,status,created_at,content_sha256,payload
-                ) VALUES(?,?,?,?,?,?,?)
+                    id,dataset_id,version,status,created_at,content_sha256,
+                    user_team_id,user_id,user_name,
+                    payload
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     published.id, published.dataset_id, published.version,
                     published.status.value, published.created_at.isoformat(),
-                    published.content_sha256, canonical_json(published),
+                    published.content_sha256,
+                    published.user_team_id, published.user_id, published.user_name,
+                    canonical_json(published),
                 ),
             )
             db.execute(f"DELETE FROM {_T_DATASET_VERSIONS} WHERE id=?", (draft.id,))
@@ -1083,8 +1195,11 @@ class SQLiteRepository:
                 db.execute(
                     f"""
                     INSERT INTO {_T_RUNS}(
-                        id,status,created_at,scheduled_for,payload
-                    ) VALUES(?,?,?,?,?)
+                        id,status,created_at,scheduled_for,
+                        user_team_id,user_id,user_name,
+                        api_key,case_max_parallel,
+                        payload
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         run.id,
@@ -1095,6 +1210,11 @@ class SQLiteRepository:
                             if run.scheduled_for is not None
                             else None
                         ),
+                        run.user_team_id,
+                        run.user_id,
+                        run.user_name,
+                        run.api_key,
+                        run.case_max_parallel,
                         canonical_json(run),
                     ),
                 )
@@ -1122,29 +1242,54 @@ class SQLiteRepository:
             if stored.completed_at is not None:
                 raise ValueError("terminal EvaluationRun is immutable")
             db.execute(
-                f"UPDATE {_T_RUNS} SET status = ?, payload = ? WHERE id = ?",
-                (run.status, canonical_json(run), run.id),
+                f"""
+                UPDATE {_T_RUNS} SET status = ?, payload = ?,
+                    user_team_id = ?, user_id = ?, user_name = ?,
+                    api_key = ?, case_max_parallel = ?
+                WHERE id = ?
+                """,
+                (
+                    run.status, canonical_json(run),
+                    run.user_team_id, run.user_id, run.user_name,
+                    run.api_key, run.case_max_parallel,
+                    run.id,
+                ),
             )
 
-    def get_run(self, run_id: str) -> EvaluationRun | None:
+    def get_run(
+        self, run_id: str, *, user_team_id: str | None = None
+    ) -> EvaluationRun | None:
         with self._connect() as db:
-            row = db.execute(f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run_id,)).fetchone()
+            if user_team_id is None:
+                row = db.execute(
+                    f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run_id,)
+                ).fetchone()
+            else:
+                row = db.execute(
+                    f"SELECT payload FROM {_T_RUNS} WHERE id=? AND user_team_id=?",
+                    (run_id, user_team_id),
+                ).fetchone()
         return EvaluationRun.model_validate_json(row[0]) if row else None
 
-    def list_runs(self, limit: int = 50) -> list[EvaluationRun]:
+    def list_runs(
+        self, limit: int = 50, *, user_team_id: str
+    ) -> list[EvaluationRun]:
         if limit < 1:
             raise ValueError("Run list limit must be at least 1")
         with self._connect() as db:
             rows = db.execute(
-                f"SELECT payload FROM {_T_RUNS} ORDER BY created_at DESC, id LIMIT ?", (limit,)
+                f"SELECT payload FROM {_T_RUNS} WHERE user_team_id=? "
+                f"ORDER BY created_at DESC, id LIMIT ?",
+                (user_team_id, limit),
             ).fetchall()
         return [EvaluationRun.model_validate_json(row[0]) for row in rows]
 
     def list_runs_by_dataset_version(
-        self, dataset_id: str, version: int, limit: int = 50
+        self, dataset_id: str, version: int, limit: int = 50, *, user_team_id: str
     ) -> list[EvaluationRun]:
         return self._list_runs_by_asset(
-            "dataset", "", dataset_id, str(version), limit=limit
+            "dataset", "", dataset_id, str(version), limit=limit,
+            user_team_id=user_team_id,
         )
 
     def list_runs_by_case_content(
@@ -1154,6 +1299,8 @@ class SQLiteRepository:
         case_id: str,
         content_sha256: str,
         limit: int = 50,
+        *,
+        user_team_id: str,
     ) -> list[EvaluationRun]:
         return self._list_runs_by_asset(
             "case",
@@ -1162,6 +1309,7 @@ class SQLiteRepository:
             str(version),
             content_sha256=content_sha256,
             limit=limit,
+            user_team_id=user_team_id,
         )
 
     def list_runs_by_target_version(
@@ -1173,6 +1321,7 @@ class SQLiteRepository:
         limit: int = 50,
         *,
         content_sha256: str | None = None,
+        user_team_id: str,
     ) -> list[EvaluationRun]:
         return self._list_runs_by_asset(
             target_type.value,
@@ -1181,6 +1330,7 @@ class SQLiteRepository:
             version,
             content_sha256=content_sha256,
             limit=limit,
+            user_team_id=user_team_id,
         )
 
     def list_runs_by_skill_version(
@@ -1191,6 +1341,7 @@ class SQLiteRepository:
         limit: int = 50,
         *,
         content_sha256: str | None = None,
+        user_team_id: str,
     ) -> list[EvaluationRun]:
         return self._list_runs_by_asset(
             "skill",
@@ -1199,13 +1350,15 @@ class SQLiteRepository:
             version,
             content_sha256=content_sha256,
             limit=limit,
+            user_team_id=user_team_id,
         )
 
     def list_runs_by_evaluator_version(
-        self, evaluator_id: str, version: str, limit: int = 50
+        self, evaluator_id: str, version: str, limit: int = 50, *, user_team_id: str
     ) -> list[EvaluationRun]:
         return self._list_runs_by_asset(
-            "evaluator", "", evaluator_id, version, limit=limit
+            "evaluator", "", evaluator_id, version, limit=limit,
+            user_team_id=user_team_id,
         )
 
     def _run_asset_references(
@@ -1292,6 +1445,7 @@ class SQLiteRepository:
         *,
         content_sha256: str | None = None,
         limit: int,
+        user_team_id: str,
     ) -> list[EvaluationRun]:
         if limit < 1:
             raise ValueError("Run list limit must be at least 1")
@@ -1300,12 +1454,14 @@ class SQLiteRepository:
             FROM {_T_RUN_ASSET_REFS}
             JOIN {_T_RUNS} ON {_T_RUNS}.id={_T_RUN_ASSET_REFS}.run_id
             WHERE asset_kind=? AND source_id=? AND asset_id=? AND version=?
+                AND {_T_RUNS}.user_team_id=?
         """
         parameters: tuple[object, ...] = (
             asset_kind,
             source_id,
             asset_id,
             version,
+            user_team_id,
         )
         if content_sha256 is not None:
             query += " AND content_sha256=?"
@@ -1382,12 +1538,13 @@ class SQLiteRepository:
         return claimed
 
     def cancel_run(
-        self, run_id: str, cancelled_at: datetime
+        self, run_id: str, cancelled_at: datetime, *, user_team_id: str
     ) -> EvaluationRun | None:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
-                f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run_id,)
+                f"SELECT payload FROM {_T_RUNS} WHERE id=? AND user_team_id=?",
+                (run_id, user_team_id),
             ).fetchone()
             if row is None:
                 return None
@@ -1407,13 +1564,14 @@ class SQLiteRepository:
             cursor = db.execute(
                 f"""
                 UPDATE {_T_RUNS} SET status=?, payload=?
-                WHERE id=? AND status=?
+                WHERE id=? AND status=? AND user_team_id=?
                 """,
                 (
                     cancelled.status,
                     canonical_json(cancelled),
                     run_id,
                     current.status,
+                    user_team_id,
                 ),
             )
             return cancelled if cursor.rowcount == 1 else None
@@ -1423,6 +1581,8 @@ class SQLiteRepository:
         status: RunStatus,
         limit: int | None = None,
         oldest_first: bool = False,
+        *,
+        user_team_id: str | None = None,
     ) -> list[EvaluationRun]:
         if limit is not None and limit < 1:
             raise ValueError("Run list limit must be at least 1")
@@ -1432,11 +1592,12 @@ class SQLiteRepository:
             if status in {RunStatus.SCHEDULED, RunStatus.PENDING}
             else "created_at"
         )
-        query = (
-            f"SELECT payload FROM {_T_RUNS} WHERE status=? "
-            f"ORDER BY {order_column} {direction}, id"
-        )
+        query = f"SELECT payload FROM {_T_RUNS} WHERE status=?"
         parameters: tuple[object, ...] = (status.value,)
+        if user_team_id is not None:
+            query += " AND user_team_id=?"
+            parameters += (user_team_id,)
+        query += f" ORDER BY {order_column} {direction}, id"
         if limit is not None:
             query += " LIMIT ?"
             parameters += (limit,)
@@ -1444,11 +1605,13 @@ class SQLiteRepository:
             rows = db.execute(query, parameters).fetchall()
         return [EvaluationRun.model_validate_json(row[0]) for row in rows]
 
-    def count_runs_by_status(self) -> dict[RunStatus, int]:
+    def count_runs_by_status(self, *, user_team_id: str) -> dict[RunStatus, int]:
         counts = {status: 0 for status in RunStatus}
         with self._connect() as db:
             rows = db.execute(
-                f"SELECT status, COUNT(*) AS count FROM {_T_RUNS} GROUP BY status"
+                f"SELECT status, COUNT(*) AS count FROM {_T_RUNS} "
+                f"WHERE user_team_id=? GROUP BY status",
+                (user_team_id,),
             ).fetchall()
         for row in rows:
             counts[RunStatus(row["status"])] = row["count"]

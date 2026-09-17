@@ -7,6 +7,12 @@ from pydantic import BaseModel, ConfigDict
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.domain import Case, DatasetVersion, EvaluationResult, Outcome
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
+
+
+def _user_team_id() -> str:
+    info = get_user_info()
+    return info.user_team_id if info else ""
 
 
 class HistoricalRunNotFound(LookupError):
@@ -65,7 +71,7 @@ class ResultCaseWriteback:
         run_id: str,
         case_id: str,
     ) -> HistoricalResultCase:
-        run = self.repository.get_run(run_id)
+        run = self.repository.get_run(run_id, user_team_id=_user_team_id())
         if run is None:
             raise HistoricalRunNotFound(f"unknown EvaluationRun: {run_id}")
 

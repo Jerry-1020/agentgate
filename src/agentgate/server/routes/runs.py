@@ -37,6 +37,8 @@ class LaunchRequest(BaseModel):
     max_retries: int = Field(default=0, ge=0, le=5)
     case_ids: list[str] | None = None
     scheduled_for: datetime | None = None
+    api_key: str | None = None
+    case_max_parallel: int | None = Field(default=None, ge=1, le=32)
 
 
 class RunSetupSkillAnalysisRequest(BaseModel):
@@ -76,6 +78,8 @@ def launch_evaluation(
             max_parallel_cases=request.max_parallel_cases,
             max_retries=request.max_retries,
             scheduled_for=request.scheduled_for,
+            api_key=request.api_key,
+            case_max_parallel=request.case_max_parallel,
         )
         return dependencies.results.get_run_progress(run.id)
     except RuntimeError as error:

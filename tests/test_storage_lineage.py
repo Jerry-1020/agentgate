@@ -48,8 +48,7 @@ def test_run_asset_references_support_exact_reverse_queries(tmp_path) -> None:
     assert {
         run.id
         for run in repository.list_runs_by_dataset_version(
-            dataset.dataset_id, dataset.version
-        )
+            dataset.dataset_id, dataset.version, user_team_id="")
     } == {baseline.id, candidate.id}
     assert {
         run.id
@@ -57,25 +56,21 @@ def test_run_asset_references_support_exact_reverse_queries(tmp_path) -> None:
             dataset.dataset_id,
             dataset.version,
             case.id,
-            content_sha256(case),
-        )
+            content_sha256(case), user_team_id="")
     } == {baseline.id, candidate.id}
     assert repository.list_runs_by_target_version(
         "agentgate-demo",
         TargetType.AGENT,
         "loan-agent",
-        "loan-agent-v2-fixed",
-    ) == [candidate]
+        "loan-agent-v2-fixed", user_team_id="") == [candidate]
     assert repository.list_runs_by_skill_version(
         "agentgate-demo",
         "loan_approval",
-        "loan-approval-v2-fixed",
-    ) == [candidate]
+        "loan-approval-v2-fixed", user_team_id="") == [candidate]
     assert {
         run.id
         for run in repository.list_runs_by_evaluator_version(
-            evaluator.id, evaluator.version
-        )
+            evaluator.id, evaluator.version, user_team_id="")
     } == {baseline.id, candidate.id}
 
 
@@ -132,14 +127,12 @@ def test_run_asset_references_include_only_selected_cases(tmp_path) -> None:
         dataset.id,
         1,
         selected.id,
-        content_sha256(selected),
-    ) == [run]
+        content_sha256(selected), user_team_id="") == [run]
     assert repository.list_runs_by_case_content(
         dataset.id,
         1,
         excluded.id,
-        content_sha256(excluded),
-    ) == []
+        content_sha256(excluded), user_team_id="") == []
 
 
 def test_reverse_queries_apply_limits_and_exact_versions(tmp_path) -> None:
@@ -149,14 +142,11 @@ def test_reverse_queries_apply_limits_and_exact_versions(tmp_path) -> None:
     dataset = second.manifest.dataset
 
     limited = repository.list_runs_by_dataset_version(
-        dataset.dataset_id, dataset.version, limit=1
-    )
+        dataset.dataset_id, dataset.version, limit=1, user_team_id="")
     assert len(limited) == 1
     assert limited[0].id in {first.id, second.id}
     assert repository.list_runs_by_dataset_version(
-        dataset.dataset_id, dataset.version + 1
-    ) == []
+        dataset.dataset_id, dataset.version + 1, user_team_id="") == []
     with pytest.raises(ValueError, match="limit must be at least 1"):
         repository.list_runs_by_dataset_version(
-            dataset.dataset_id, dataset.version, limit=0
-        )
+            dataset.dataset_id, dataset.version, limit=0, user_team_id="")

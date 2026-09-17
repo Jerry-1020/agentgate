@@ -67,9 +67,9 @@ def create_app(
     class UserContextMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             info = UserInfo(
-                user_team_id=request.headers.get("user_team_id", "python_auto_fill"),
-                user_id=request.headers.get("user_id", "python_auto_fill"),
-                user_name=request.headers.get("user_name", "python_auto_fill"),
+                user_team_id=request.headers.get("user_team_id", ""),
+                user_id=request.headers.get("user_id", ""),
+                user_name=request.headers.get("user_name", ""),
             )
             set_user_info(info)
             print(

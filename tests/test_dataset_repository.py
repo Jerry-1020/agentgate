@@ -31,13 +31,13 @@ def test_sqlite_initialization_enables_wal_and_schema_checks(tmp_path):
     with sqlite3.connect(repository.path) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         connection.execute(
-            f"INSERT INTO {_T_DATASETS} VALUES(?,?,?,?,?)",
-            ("dataset", "Dataset", 0, "2026-09-06T00:00:00+00:00", "{}"),
+            f"INSERT INTO {_T_DATASETS} VALUES(?,?,?,?,?,?,?,?)",
+            ("dataset", "Dataset", 0, "2026-09-06T00:00:00+00:00", "", "", "", "{}"),
         )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
             connection.execute(
-                f"INSERT INTO {_T_DATASET_VERSIONS} VALUES(?,?,?,?,?,?,?)",
-                ("draft", "dataset", 1, "draft", "now", "hash", "{}"),
+                f"INSERT INTO {_T_DATASET_VERSIONS} VALUES(?,?,?,?,?,?,?,?,?,?)",
+                ("draft", "dataset", 1, "draft", "now", "hash", "", "", "", "{}"),
             )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
                 connection.execute(
@@ -80,12 +80,20 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
             f"SELECT status FROM {_T_RUNS} WHERE id='existing'"
         ).fetchone() == ("pending",)
         connection.execute(
-            f"INSERT INTO {_T_RUNS} VALUES(?,?,?,?,?)",
+            f"""
+            INSERT INTO {_T_RUNS}(
+                id,status,created_at,scheduled_for,
+                user_team_id,user_id,user_name,
+                api_key,case_max_parallel,payload
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
             (
                 "scheduled",
                 "scheduled",
                 "2026-09-09T00:00:00+00:00",
                 "2026-09-10T00:00:00+00:00",
+                "", "", "",
+                None, None,
                 "{}",
             ),
         )
@@ -98,7 +106,7 @@ def test_sqlite_persists_catalog_and_enforces_one_draft(tmp_path):
     first = service.create_draft(dataset.id)
     with pytest.raises(ValueError, match="active draft"):
         service.create_draft(dataset.id)
-    assert repository.get_dataset_draft(dataset.id).id == first.id
+    assert repository.get_dataset_draft(dataset.id, user_team_id="").id == first.id
     with sqlite3.connect(repository.path) as db:
         assert db.execute(f"SELECT COUNT(*) FROM {_T_DATASETS}").fetchone()[0] == 1
         assert db.execute(f"SELECT COUNT(*) FROM {_T_DATASET_VERSIONS}").fetchone()[0] == 1
@@ -131,11 +139,11 @@ def test_save_dataset_with_version_is_atomic_for_draft_and_publication(
 
     repository.save_dataset_with_version(dataset, version)
 
-    assert repository.get_dataset(dataset.id) == dataset
+    assert repository.get_dataset(dataset.id, user_team_id="") == dataset
     if published:
-        assert repository.get_published_dataset_version(dataset.id, 1) == version
+        assert repository.get_published_dataset_version(dataset.id, 1, user_team_id="") == version
     else:
-        assert repository.get_dataset_draft(dataset.id) == version
+        assert repository.get_dataset_draft(dataset.id, user_team_id="") == version
 
 
 def test_save_dataset_with_version_rolls_back_both_records(tmp_path):
@@ -150,7 +158,7 @@ def test_save_dataset_with_version_rolls_back_both_records(tmp_path):
     with pytest.raises(sqlite3.IntegrityError):
         repository.save_dataset_with_version(new_dataset, new_version)
 
-    assert repository.get_dataset(new_dataset.id) is None
+    assert repository.get_dataset(new_dataset.id, user_team_id="") is None
 
 
 def test_save_dataset_with_version_rejects_mismatched_identity(tmp_path):
@@ -161,7 +169,7 @@ def test_save_dataset_with_version_rejects_mismatched_identity(tmp_path):
     with pytest.raises(ValueError, match="must belong"):
         repository.save_dataset_with_version(dataset, version)
 
-    assert repository.get_dataset(dataset.id) is None
+    assert repository.get_dataset(dataset.id, user_team_id="") is None
 
 
 def test_dataset_catalog_rejects_changed_creation_time_and_stale_updates(tmp_path):
@@ -182,7 +190,7 @@ def test_dataset_catalog_rejects_changed_creation_time_and_stale_updates(tmp_pat
     stale = original.model_copy(update={"name": "Stale"})
     with pytest.raises(ValueError, match="stale Dataset"):
         repository.save_dataset(stale)
-    assert repository.get_dataset(original.id) == current
+    assert repository.get_dataset(original.id, user_team_id="") == current
 
 
 def test_stale_draft_identity_cannot_delete_or_replace_current_data(tmp_path):
@@ -192,8 +200,8 @@ def test_stale_draft_identity_cannot_delete_or_replace_current_data(tmp_path):
     draft = service.create_draft(dataset.id)
 
     with pytest.raises(ValueError, match="expected Dataset draft"):
-        repository.delete_dataset_draft(dataset.id, "stale-draft-id")
-    assert repository.get_dataset_draft(dataset.id) == draft
+        repository.delete_dataset_draft(dataset.id, "stale-draft-id", user_team_id="")
+    assert repository.get_dataset_draft(dataset.id, user_team_id="") == draft
 
     service.save_case(
         dataset.id,
@@ -202,7 +210,7 @@ def test_stale_draft_identity_cannot_delete_or_replace_current_data(tmp_path):
     published = service.publish_draft(dataset.id)
     with pytest.raises(ValueError, match="expected Dataset draft"):
         repository.replace_dataset_draft(draft.id, published)
-    assert repository.get_published_dataset_version(dataset.id, 1) == published
+    assert repository.get_published_dataset_version(dataset.id, 1, user_team_id="") == published
 
 
 def test_draft_save_preserves_identity_and_rejects_stale_content(tmp_path):
@@ -237,7 +245,7 @@ def test_draft_save_preserves_identity_and_rejects_stale_content(tmp_path):
     for invalid in invalid_updates:
         with pytest.raises(ValueError):
             repository.save_dataset_version(invalid)
-    assert repository.get_dataset_draft(dataset.id) == current
+    assert repository.get_dataset_draft(dataset.id, user_team_id="") == current
 
 
 def test_replacement_rejects_changed_draft_without_partial_publication(tmp_path):
@@ -273,8 +281,8 @@ def test_replacement_rejects_changed_draft_without_partial_publication(tmp_path)
 
     with pytest.raises(ValueError, match="content does not match"):
         repository.replace_dataset_draft(original.id, candidate)
-    assert repository.get_dataset_draft(dataset.id) == changed
-    assert repository.get_published_dataset_version(dataset.id, 1) is None
+    assert repository.get_dataset_draft(dataset.id, user_team_id="") == changed
+    assert repository.get_published_dataset_version(dataset.id, 1, user_team_id="") is None
 
 
 def test_dataset_version_queries_are_explicit_and_deterministic(tmp_path):
@@ -289,12 +297,12 @@ def test_dataset_version_queries_are_explicit_and_deterministic(tmp_path):
     first = service.publish_draft(dataset.id)
     draft = service.create_draft(dataset.id, based_on_version=1)
 
-    assert repository.get_published_dataset_version(dataset.id, 1) == first
-    assert repository.get_published_dataset_version(dataset.id, 2) is None
-    assert repository.get_latest_published_dataset_version(dataset.id) == first
-    assert repository.get_dataset_draft(dataset.id) == draft
-    assert repository.list_dataset_versions(dataset.id) == [draft, first]
-    assert repository.list_dataset_versions(dataset.id, include_draft=False) == [first]
+    assert repository.get_published_dataset_version(dataset.id, 1, user_team_id="") == first
+    assert repository.get_published_dataset_version(dataset.id, 2, user_team_id="") is None
+    assert repository.get_latest_published_dataset_version(dataset.id, user_team_id="") == first
+    assert repository.get_dataset_draft(dataset.id, user_team_id="") == draft
+    assert repository.list_dataset_versions(dataset.id, user_team_id="") == [draft, first]
+    assert repository.list_dataset_versions(dataset.id, include_draft=False, user_team_id="") == [first]
 
 
 def test_published_payload_cannot_be_overwritten(tmp_path):

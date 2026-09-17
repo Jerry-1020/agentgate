@@ -119,6 +119,8 @@ class ServerDependencies:
         max_parallel_cases: int = 1,
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
+        api_key: str | None = None,
+        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         """Create one POC Loan Agent Run and dispatch it when eligible."""
 
@@ -132,6 +134,8 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            api_key=api_key,
+            case_max_parallel=case_max_parallel,
         )
         if run.status is RunStatus.SCHEDULED:
             return run
@@ -200,6 +204,8 @@ class ServerDependencies:
         max_parallel_cases: int,
         max_retries: int,
         scheduled_for: datetime | None = None,
+        api_key: str | None = None,
+        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         target = self._resolve_demo_target(version)
         return self.runs.create_run(
@@ -212,6 +218,8 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            api_key=api_key,
+            case_max_parallel=case_max_parallel,
         )
 
     def _resolve_demo_target(self, version: str) -> TargetSnapshot:

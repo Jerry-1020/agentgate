@@ -19,7 +19,13 @@ from agentgate.result.analytics import ResultAnalytics, calculate_result_analyti
 from agentgate.result.comparison import EvaluationComparison, compare_reports
 from agentgate.result.report import build_evaluation_report
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
 from agentgate.trace.redaction import redact_trace
+
+
+def _user_team_id() -> str:
+    info = get_user_info()
+    return info.user_team_id if info else ""
 
 
 class RunProgress(BaseModel):
@@ -67,9 +73,12 @@ class ResultReader:
     def list_runs(
         self, limit: int = 50, status: RunStatus | None = None
     ) -> list[EvaluationRun]:
+        team_id = _user_team_id()
         if status is not None:
-            return self.repository.list_runs_by_status(status, limit=limit)
-        return self.repository.list_runs(limit=limit)
+            return self.repository.list_runs_by_status(
+                status, limit=limit, user_team_id=team_id
+            )
+        return self.repository.list_runs(limit=limit, user_team_id=team_id)
 
     def get_run_manifest(self, run_id: str) -> RunManifest:
         """Return the immutable execution manifest persisted for one Run."""
@@ -90,7 +99,7 @@ class ResultReader:
             queued_ids = tuple(
                 item.id
                 for item in self.repository.list_runs_by_status(
-                    RunStatus.PENDING, oldest_first=True
+                    RunStatus.PENDING, oldest_first=True, user_team_id=_user_team_id()
                 )
             )
             if run.id in queued_ids:
@@ -111,14 +120,15 @@ class ResultReader:
         if recent_limit < 1:
             raise ValueError("recent Run limit must be at least 1")
         projection_time = normalize_utc(now or utcnow(), "Run activity time")
+        team_id = _user_team_id()
         scheduled_runs = self.repository.list_runs_by_status(
-            RunStatus.SCHEDULED, oldest_first=True
+            RunStatus.SCHEDULED, oldest_first=True, user_team_id=team_id
         )
         queued_runs = self.repository.list_runs_by_status(
-            RunStatus.PENDING, oldest_first=True
+            RunStatus.PENDING, oldest_first=True, user_team_id=team_id
         )
         running_runs = self.repository.list_runs_by_status(
-            RunStatus.RUNNING, oldest_first=True
+            RunStatus.RUNNING, oldest_first=True, user_team_id=team_id
         )
         terminal_runs = sorted(
             (
@@ -128,13 +138,15 @@ class ResultReader:
                     RunStatus.FAILED,
                     RunStatus.CANCELLED,
                 )
-                for run in self.repository.list_runs_by_status(status)
+                for run in self.repository.list_runs_by_status(
+                    status, user_team_id=team_id
+                )
             ),
             key=lambda run: (run.completed_at or run.created_at, run.id),
             reverse=True,
         )[:recent_limit]
         return RunActivity(
-            status_counts=self.repository.count_runs_by_status(),
+            status_counts=self.repository.count_runs_by_status(user_team_id=team_id),
             scheduled=tuple(
                 self._project_run(run, now=projection_time)
                 for run in scheduled_runs
@@ -188,12 +200,15 @@ class ResultReader:
         return redact_trace(trace)
 
     def overview(self) -> dict[str, Any]:
-        runs = self.repository.list_runs()
-        statuses = self.repository.count_runs_by_status()
-        datasets = self.repository.list_datasets()
+        team_id = _user_team_id()
+        runs = self.repository.list_runs(user_team_id=team_id)
+        statuses = self.repository.count_runs_by_status(user_team_id=team_id)
+        datasets = self.repository.list_datasets(user_team_id=team_id)
         case_count = 0
         for dataset in datasets:
-            version = self.repository.get_latest_published_dataset_version(dataset.id)
+            version = self.repository.get_latest_published_dataset_version(
+                dataset.id, user_team_id=team_id
+            )
             if version is not None:
                 case_count += len(version.cases)
         latest_run = next(
@@ -214,7 +229,7 @@ class ResultReader:
         }
 
     def _get_run(self, run_id: str) -> EvaluationRun:
-        run = self.repository.get_run(run_id)
+        run = self.repository.get_run(run_id, user_team_id=_user_team_id())
         if run is None:
             raise LookupError(f"unknown EvaluationRun: {run_id}")
         return run

@@ -123,10 +123,10 @@ def test_repository_lists_runs_with_valid_limit_and_deterministic_ties(tmp_path)
     repository.save_run(first)
     repository.save_run(second)
 
-    assert [run.id for run in repository.list_runs()] == ["a-run", "b-run"]
-    assert [run.id for run in repository.list_runs(limit=1)] == ["a-run"]
+    assert [run.id for run in repository.list_runs(user_team_id="")] == ["a-run", "b-run"]
+    assert [run.id for run in repository.list_runs(limit=1, user_team_id="")] == ["a-run"]
     with pytest.raises(ValueError, match="limit must be at least 1"):
-        repository.list_runs(limit=0)
+        repository.list_runs(limit=0, user_team_id="")
 
 
 def test_repository_claims_a_pending_run_once(tmp_path):
@@ -151,14 +151,14 @@ def test_repository_atomically_cancels_pending_run(tmp_path):
     repository.save_run(pending)
     cancelled_at = pending.created_at + timedelta(seconds=1)
 
-    cancelled = repository.cancel_run(pending.id, cancelled_at)
+    cancelled = repository.cancel_run(pending.id, cancelled_at, user_team_id="")
 
     assert cancelled is not None
     assert cancelled.status is RunStatus.CANCELLED
     assert cancelled.started_at is None
     assert cancelled.completed_at == cancelled_at
     assert repository.get_run(pending.id) == cancelled
-    assert repository.cancel_run(pending.id, cancelled_at) is None
+    assert repository.cancel_run(pending.id, cancelled_at, user_team_id="") is None
     assert repository.claim_pending_run(pending.id, cancelled_at) is None
 
 
@@ -171,7 +171,7 @@ def test_repository_atomically_cancels_running_run(tmp_path):
     assert running is not None
     cancelled_at = started_at + timedelta(seconds=1)
 
-    cancelled = repository.cancel_run(pending.id, cancelled_at)
+    cancelled = repository.cancel_run(pending.id, cancelled_at, user_team_id="")
 
     assert cancelled is not None
     assert cancelled.status is RunStatus.CANCELLED
@@ -221,14 +221,13 @@ def test_repository_cancellation_rejects_ineligible_runs_and_time(tmp_path):
     repository.save_run(completed)
     repository.save_run(failed)
 
-    assert repository.cancel_run("missing", completed.completed_at) is None
-    assert repository.cancel_run(completed.id, completed.completed_at) is None
-    assert repository.cancel_run(failed.id, failed.completed_at) is None
+    assert repository.cancel_run("missing", completed.completed_at, user_team_id="") is None
+    assert repository.cancel_run(completed.id, completed.completed_at, user_team_id="") is None
+    assert repository.cancel_run(failed.id, failed.completed_at, user_team_id="") is None
     with pytest.raises(ValueError, match="precede Run activity"):
         repository.cancel_run(
             invalid_time.id,
-            invalid_time.created_at - timedelta(seconds=1),
-        )
+            invalid_time.created_at - timedelta(seconds=1), user_team_id="")
 
     assert repository.get_run(completed.id) == completed
     assert repository.get_run(failed.id) == failed
@@ -256,7 +255,7 @@ def test_repository_lists_and_counts_runs_by_status(tmp_path):
     assert [
         run.id for run in repository.list_runs_by_status(RunStatus.RUNNING, limit=1)
     ] == ["second"]
-    assert repository.count_runs_by_status() == {
+    assert repository.count_runs_by_status(user_team_id="") == {
         RunStatus.SCHEDULED: 0,
         RunStatus.PENDING: 1,
         RunStatus.RUNNING: 1,

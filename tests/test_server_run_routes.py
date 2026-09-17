@@ -542,8 +542,7 @@ def test_run_route_reruns_failed_and_cancelled_runs(tmp_path) -> None:
     cancelled_pending = dependencies.runs.create_rerun(completed.id)
     cancelled = repository.cancel_run(
         cancelled_pending.id,
-        cancelled_pending.created_at,
-    )
+        cancelled_pending.created_at, user_team_id="")
     assert cancelled is not None
 
     with client:

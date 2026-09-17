@@ -154,6 +154,11 @@ class EvaluationRun(DomainModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
+    user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
+    user_id: str = ""  # 用户 ID（创建者标识）
+    user_name: str = ""  # 用户姓名（创建者显示名）
+    api_key: str | None = None  # 模型 API Key（明文，透传给执行引擎调用被测模型）
+    case_max_parallel: int | None = None  # 单个任务内 case 最大并行数
 
     @field_validator("id")
     @classmethod

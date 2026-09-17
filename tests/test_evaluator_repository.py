@@ -59,19 +59,20 @@ def test_repository_protocol_exposes_evaluator_catalog_operations() -> None:
     expected_parameters = {
         "save_evaluator": ("self", "evaluator"),
         "save_evaluator_with_draft": ("self", "evaluator", "draft"),
-        "get_evaluator": ("self", "evaluator_id"),
-        "list_evaluators": ("self", "include_disabled"),
-        "delete_unpublished_evaluator": ("self", "evaluator_id"),
+        "get_evaluator": ("self", "evaluator_id", "user_team_id"),
+        "list_evaluators": ("self", "include_disabled", "user_team_id"),
+        "delete_unpublished_evaluator": ("self", "evaluator_id", "user_team_id"),
         "save_evaluator_draft": ("self", "draft"),
-        "get_evaluator_draft": ("self", "evaluator_id"),
+        "get_evaluator_draft": ("self", "evaluator_id", "user_team_id"),
         "delete_evaluator_draft": (
             "self",
             "evaluator_id",
             "expected_draft_id",
+            "user_team_id",
         ),
-        "list_evaluator_versions": ("self", "evaluator_id"),
-        "get_evaluator_version": ("self", "evaluator_id", "version"),
-        "get_latest_evaluator_version": ("self", "evaluator_id"),
+        "list_evaluator_versions": ("self", "evaluator_id", "user_team_id"),
+        "get_evaluator_version": ("self", "evaluator_id", "version", "user_team_id"),
+        "get_latest_evaluator_version": ("self", "evaluator_id", "user_team_id"),
         "publish_evaluator_draft": (
             "self",
             "expected_draft_id",
@@ -119,12 +120,12 @@ def test_evaluator_identity_round_trip_filter_and_stale_write(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "identity.db")
     original = evaluator()
 
-    assert repository.get_evaluator(original.id) is None
+    assert repository.get_evaluator(original.id, user_team_id="") is None
     repository.save_evaluator(original)
     repository.save_evaluator(original)
 
-    assert repository.list_evaluators() == []
-    assert repository.list_evaluators(include_disabled=True) == [original]
+    assert repository.list_evaluators(user_team_id="") == []
+    assert repository.list_evaluators(include_disabled=True, user_team_id="") == [original]
 
     current = original.model_copy(
         update={
@@ -135,8 +136,8 @@ def test_evaluator_identity_round_trip_filter_and_stale_write(tmp_path) -> None:
     )
     repository.save_evaluator(current)
 
-    assert repository.get_evaluator(original.id) == current
-    assert repository.list_evaluators() == [current]
+    assert repository.get_evaluator(original.id, user_team_id="") == current
+    assert repository.list_evaluators(user_team_id="") == [current]
 
     changed_creation = current.model_copy(
         update={"created_at": NOW - timedelta(seconds=1)}
@@ -162,21 +163,21 @@ def test_save_evaluator_with_draft_is_atomic(tmp_path) -> None:
     first_draft = draft_for(first, draft_id="shared-draft")
     repository.save_evaluator_with_draft(first, first_draft)
 
-    assert repository.get_evaluator(first.id) == first
-    assert repository.get_evaluator_draft(first.id) == first_draft
+    assert repository.get_evaluator(first.id, user_team_id="") == first
+    assert repository.get_evaluator_draft(first.id, user_team_id="") == first_draft
 
     second = evaluator("second")
     second_draft = draft_for(second, draft_id="shared-draft")
     with pytest.raises(sqlite3.IntegrityError):
         repository.save_evaluator_with_draft(second, second_draft)
 
-    assert repository.get_evaluator(second.id) is None
-    assert repository.get_evaluator_draft(second.id) is None
+    assert repository.get_evaluator(second.id, user_team_id="") is None
+    assert repository.get_evaluator_draft(second.id, user_team_id="") is None
 
     mismatched = evaluator("mismatched")
     with pytest.raises(ValueError, match="must belong"):
         repository.save_evaluator_with_draft(mismatched, first_draft)
-    assert repository.get_evaluator(mismatched.id) is None
+    assert repository.get_evaluator(mismatched.id, user_team_id="") is None
 
 
 def test_evaluator_draft_save_is_single_owner_and_stale_safe(tmp_path) -> None:
@@ -202,7 +203,7 @@ def test_evaluator_draft_save_is_single_owner_and_stale_safe(tmp_path) -> None:
     )
     repository.save_evaluator_draft(current)
 
-    assert repository.get_evaluator_draft(value.id) == current
+    assert repository.get_evaluator_draft(value.id, user_team_id="") == current
     with pytest.raises(ValueError, match="stale EvaluatorDraft"):
         repository.save_evaluator_draft(original)
     with pytest.raises(ValueError, match="active draft"):
@@ -210,10 +211,10 @@ def test_evaluator_draft_save_is_single_owner_and_stale_safe(tmp_path) -> None:
             draft_for(value, draft_id="another-draft")
         )
     with pytest.raises(ValueError, match="expected Evaluator draft"):
-        repository.delete_evaluator_draft(value.id, "stale-draft")
+        repository.delete_evaluator_draft(value.id, "stale-draft", user_team_id="")
 
-    repository.delete_evaluator_draft(value.id, current.id)
-    assert repository.get_evaluator_draft(value.id) is None
+    repository.delete_evaluator_draft(value.id, current.id, user_team_id="")
+    assert repository.get_evaluator_draft(value.id, user_team_id="") is None
 
 
 def test_publication_consumes_draft_and_versions_are_exactly_ordered(tmp_path) -> None:
@@ -225,10 +226,10 @@ def test_publication_consumes_draft_and_versions_are_exactly_ordered(tmp_path) -
 
     repository.publish_evaluator_draft(first_draft.id, first)
 
-    assert repository.get_evaluator_draft(value.id) is None
-    assert repository.get_evaluator_version(value.id, "1") == first
-    assert repository.get_latest_evaluator_version(value.id) == first
-    assert repository.list_evaluator_versions(value.id) == [first]
+    assert repository.get_evaluator_draft(value.id, user_team_id="") is None
+    assert repository.get_evaluator_version(value.id, "1", user_team_id="") == first
+    assert repository.get_latest_evaluator_version(value.id, user_team_id="") == first
+    assert repository.list_evaluator_versions(value.id, user_team_id="") == [first]
 
     second_draft = clone_evaluator_version_to_draft(
         value,
@@ -240,11 +241,11 @@ def test_publication_consumes_draft_and_versions_are_exactly_ordered(tmp_path) -
     second = publish_evaluator_draft(value, second_draft, 2)
     repository.publish_evaluator_draft(second_draft.id, second)
 
-    assert repository.list_evaluator_versions(value.id) == [second, first]
-    assert repository.get_evaluator_version(value.id, "2") == second
-    assert repository.get_evaluator_version(value.id, "3") is None
+    assert repository.list_evaluator_versions(value.id, user_team_id="") == [second, first]
+    assert repository.get_evaluator_version(value.id, "2", user_team_id="") == second
+    assert repository.get_evaluator_version(value.id, "3", user_team_id="") is None
     with pytest.raises(ValueError, match="canonical positive integer"):
-        repository.get_evaluator_version(value.id, "01")
+        repository.get_evaluator_version(value.id, "01", user_team_id="")
 
 
 def test_publication_rejects_skipped_version_and_changed_draft_atomically(
@@ -258,8 +259,8 @@ def test_publication_rejects_skipped_version_and_changed_draft_atomically(
     skipped = publish_evaluator_draft(value, original, 2)
     with pytest.raises(ValueError, match="requires version 1"):
         repository.publish_evaluator_draft(original.id, skipped)
-    assert repository.get_evaluator_draft(value.id) == original
-    assert repository.list_evaluator_versions(value.id) == []
+    assert repository.get_evaluator_draft(value.id, user_team_id="") == original
+    assert repository.list_evaluator_versions(value.id, user_team_id="") == []
 
     stale_candidate = publish_evaluator_draft(value, original, 1)
     current = replace_evaluator_draft(
@@ -279,8 +280,8 @@ def test_publication_rejects_skipped_version_and_changed_draft_atomically(
 
     with pytest.raises(ValueError, match="does not match the current draft"):
         repository.publish_evaluator_draft(original.id, stale_candidate)
-    assert repository.get_evaluator_draft(value.id) == current
-    assert repository.list_evaluator_versions(value.id) == []
+    assert repository.get_evaluator_draft(value.id, user_team_id="") == current
+    assert repository.list_evaluator_versions(value.id, user_team_id="") == []
 
 
 def test_unpublished_delete_cascades_draft_but_preserves_publications(
@@ -291,12 +292,12 @@ def test_unpublished_delete_cascades_draft_but_preserves_publications(
     unpublished_draft = draft_for(unpublished)
     repository.save_evaluator_with_draft(unpublished, unpublished_draft)
 
-    repository.delete_unpublished_evaluator(unpublished.id)
+    repository.delete_unpublished_evaluator(unpublished.id, user_team_id="")
 
-    assert repository.get_evaluator(unpublished.id) is None
-    assert repository.get_evaluator_draft(unpublished.id) is None
+    assert repository.get_evaluator(unpublished.id, user_team_id="") is None
+    assert repository.get_evaluator_draft(unpublished.id, user_team_id="") is None
     with pytest.raises(ValueError, match="unknown Evaluator"):
-        repository.delete_unpublished_evaluator(unpublished.id)
+        repository.delete_unpublished_evaluator(unpublished.id, user_team_id="")
 
     published_identity = evaluator("published")
     published_draft = draft_for(published_identity)
@@ -309,8 +310,8 @@ def test_unpublished_delete_cascades_draft_but_preserves_publications(
     repository.publish_evaluator_draft(published_draft.id, published)
 
     with pytest.raises(ValueError, match="published Evaluator cannot be deleted"):
-        repository.delete_unpublished_evaluator(published_identity.id)
-    assert repository.get_evaluator_version(published_identity.id, "1") == published
+        repository.delete_unpublished_evaluator(published_identity.id, user_team_id="")
+    assert repository.get_evaluator_version(published_identity.id, "1", user_team_id="") == published
 
 
 def test_version_reads_detect_corrupt_indexed_columns(tmp_path) -> None:
@@ -332,4 +333,4 @@ def test_version_reads_detect_corrupt_indexed_columns(tmp_path) -> None:
         )
 
     with pytest.raises(ValueError, match="content hash"):
-        repository.get_evaluator_version(value.id, "1")
+        repository.get_evaluator_version(value.id, "1", user_team_id="")
