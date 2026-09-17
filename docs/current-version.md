@@ -1,5 +1,7 @@
 # 当前版本与能力边界
 
+> 本文是 2026-09-15 历史记录，部分能力已被后续实现替代。当前交付以 [三模式联调说明](bank-agents/README.md) 为准。
+
 整理日期：2026-09-15。默认入口 frontend/src/App.vue → revision/Workspace.vue。
 
 ## 后端来源

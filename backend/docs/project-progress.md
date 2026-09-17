@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-17
 
+## Reproducible bank-target delivery — 2026-09-17
+
+- Repository-local Trace SDK dependency, separate locked Python environments, automatic 24-case database initialization, and fresh-run browser/Trace acceptance scripts are included.
+- Current handoff instructions and validation are in workspace-root docs/bank-agents/. Older checkpoint references to developer-local audit documents below are historical records, not prerequisites for installing this delivery.
+- Customer factory lifecycle, full cloudshrimp protocol and production equivalence remain outside the verified scope.
+
 ## Trace API correlation-ID redaction fix — 2026-09-17
 
 - Preserve full UUIDs only in request/session/trace/span correlation fields (including namespaced keys); explicit sensitive-key policies still take priority. Other values still undergo recursive credential/PII redaction.

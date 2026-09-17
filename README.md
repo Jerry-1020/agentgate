@@ -1,91 +1,50 @@
-# AgentGate 统一评测任务开发副本
+# AgentGate 工作台与三模式被测智能体
 
-本副本基于已整理版本 `018dbf7`，开发分支为 `feature/unified-evaluation-tasks`。原 5196 版本保持不变。统一创建表单及现有接口联调已实现；Git 分支、任务级凭据选择和后端任务关联持久化尚未完成。
+本仓库包含 Vue 工作台、AgentGate 评测后端，以及独立运行的基础编排、工作流、云虾三模式贷款测试智能体。保留已有前后端目录和历史交付文件，不使用日期文件夹复制整套工程。
 
-开发范围和确认进度见 [统一任务开发记录](docs/unified-evaluation-tasks.md)。
+**本次交付入口：[安装与端到端验收](docs/bank-agents/README.md)。**
 
-智能体评测工作台，包含 Vue 前端和 AgentGate Python 后端。此仓库整理自 2026-09-15 的 5196 联调版本，保留当前功能，不包含本机数据库、真实密钥或安装依赖。
+## 快速开始
 
-## 目录结构
-
-```text
-.
-├── frontend/              # 当前 Vue 3 + TypeScript + Element Plus 工作台
-├── backend/               # AgentGate API、执行引擎、存储与测试
-│   ├── src/agentgate/
-│   ├── tests/
-│   ├── docs/
-│   └── web/               # 上游自带参考界面；不是本仓库默认前端
-├── scripts/               # 启动及进程管理
-├── docs/                  # 当前能力边界、来源和验证说明
-├── .env.example           # 模型配置模板，不含凭据
-└── start-macos.command    # macOS 启动入口
-```
-
-## 快速启动
-
-准备 Node.js 22、npm、Python 3.11 或以上、uv 和 Redis。首次安装依赖需要联网。
+准备 Python 3.11、uv、Node.js 22/npm、Redis 和有效的支持工具调用的模型配置。
 
 ```bash
-# 在本开发副本根目录执行
-bash start-macos.command
-```
-
-也可双击 `start-macos.command`。该脚本安装项目依赖，不安装系统软件；未安装 Node.js、uv 或 Redis 时会提示退出。
-
-启动后访问 [评测工作台](http://127.0.0.1:5197/)。前端端口 5197、API 8097、Redis 6397。端口占用时脚本拒绝启动，不停止已有服务。按 Ctrl+C 结束本次启动的进程。
-
-日志和 SQLite 数据在首次启动后生成的 `runtime/`，该目录不会提交到 Git。新环境会初始化内置贷款 Demo；原电脑创建的评测集、历史报告及人工备注不在此代码仓库中。
-
-### 模型配置（可选）
-
-基础 Demo 和规则评测不需要模型密钥；Skill 静态分析和模型评估需要有效模型服务。
-
-```bash
+bash scripts/setup-bank-integration.sh
 cp .env.example .env
 chmod 600 .env
+# 编辑 .env，填写模型配置；不要上传真实密钥
+bash scripts/start-bank-integration.sh
 ```
 
-编辑 `.env`，取消四个配置项的注释并填写供应商、兼容接口地址、模型名称和密钥，然后重启服务。也可通过 `AGENTGATE_MODEL_ENV_FILE` 指向其他私有配置文件。文件按 shell 环境配置读取，请只使用可信内容。不要将凭据写进前端或提交到仓库。
+打开 http://127.0.0.1:5197/#tasks 。启动后会创建本机数据库并初始化三个数据库评测集，共 24 条用例。前端、API、Worker、Scheduler、Redis、被测服务共同运行；Ctrl+C 关闭本次启动的服务，不删除数据。
 
-### 分别启动服务
+## 目录
 
-在五个终端中依次运行：
+- `frontend/`：前端与当前真实接口接入。
+- `backend/`：AgentGate API、执行调度、评估与存储。
+- `tested-agents/`：独立贷款智能体、测试与依赖锁。
+- `vendor/trace-sdk/`：必需 SDK 源码与来源摘要。
+- `scripts/`：安装、启动、初始化、验收脚本。
+- `docs/bank-agents/`：本次交付说明、架构和验证记录。
+- `runtime/`：本机生成数据、日志及 Trace，不上传。
+- `delivery/2026-09-16/`：保留的历史数据库及 Trace 快照，不自动恢复。
+
+## 新机器验收
+
+保持服务运行，在另一个终端中执行（会真实调用模型并产生费用）：
 
 ```bash
-bash scripts/run.sh redis
-bash scripts/run.sh api
-bash scripts/run.sh worker
-bash scripts/run.sh scheduler
-bash scripts/run.sh web
+(cd frontend && npx playwright install chromium)
+node scripts/accept-bank-browser.mjs
+backend/.venv/bin/python scripts/verify-bank-traces.py
 ```
 
-首次手动运行前先在 `backend/` 执行 `uv sync --extra test`，在 `frontend/` 执行 `npm ci`。
+测试从前端发起新任务，不依赖开发者历史任务 ID。输入输出、页面 Trace、平台数据库、业务数据库与 SDK JSONL 互相核对。结果写入 runtime/bank-acceptance/，业务失败不会被伪装为通过。
 
-## 当前能力
+## 重要边界
 
-- 评测集与发布版本管理、评估器管理、评测任务、报告及 Trace。
-- A/B 实验创建与已有结果对比。
-- 后端模型驱动的 Skill 静态分析及人工复核。
-- 根据失败报告展示规则改进建议，人工备注可回写来源评测集草稿。
+这是可执行的本地联调实现，不是客户行内完整源码或生产行为的等价复制。使用合成数据与 test-policy-v1，不连接真实银行征信或放款系统。客户工厂、文件、完整云虾协议和安全围栏仍存在待接入内容，详见交付文档。
 
-本项目是“真实评测后端 + 内置演示智能体 + 部分前端本地能力”，不是纯前端 Mock，也不代表已接入生产业务智能体。完整限制见 [当前能力与来源](docs/current-version.md)。
+三模式启动必须有有效模型配置，无 Mock fallback。旧 Demo 入口 start-macos.command 仍保留；旧日期能力记录是历史资料，不应覆盖本次交付说明。现有历史浏览器测试包含固定数据依赖，新机器请使用上述验收脚本。
 
-## 验证
-
-```bash
-cd frontend
-npm ci
-npm run build
-cd ../backend
-uv sync --extra test
-uv run pytest -q
-```
-
-前端浏览器测试位于 `frontend/tests/`，需要运行中的服务和测试数据。部分历史用例引用原联调数据库中的固定报告 ID，不能将其作为全新数据库的开箱验收；浏览器测试也可能创建测试数据，不应直接针对重要数据运行。
-
-## 上游与许可证
-
-后端来源：[open-fin/agentgate，refactor-1](https://github.com/open-fin/agentgate/tree/refactor-1)，基础提交 `e3760d16602c9423b54be968ea97839a5144d691`。本地增加模型中文输出要求，并修复 Skill 静态分析的置信度语义：格式不合格时允许一次模型纠错，仍严格校验，不在本地修改分数。包含对应回归测试。完整后端源码纳入本仓库，不是 Git 子模块。
-
-上游后端采用 Apache-2.0，保留在 [backend/LICENSE](backend/LICENSE)。新增前端的许可范围未另行声明，请勿将上游后端许可自动视为覆盖全部新增内容。后端内的 README 和设计文档为上游资料，本仓库默认启动方式以本文件为准。
+后端来源：open-fin/agentgate 的 refactor-1，基线 e3760d16602c9423b54be968ea97839a5144d691，另有本地接入与修复。后端 Apache-2.0 许可保留在 backend/LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。
