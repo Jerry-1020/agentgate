@@ -224,7 +224,7 @@ class RecordingModelClient:
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        references = json.loads(request.user_prompt.splitlines()[2])
+        references = json.loads(request.user_prompt.split("reference_ids:\n", 1)[1].splitlines()[0])
         return JudgeResponse(
             text=json.dumps(
                 {
@@ -289,6 +289,13 @@ class RepositoryStub:
         self.traces = traces
         self.result_loads = 0
         self.trace_loads = 0
+        self.optimizations = {}
+
+    def get_optimization_report(self, key):
+        return self.optimizations.get(key)
+
+    def save_optimization_report(self, key, report):
+        return self.optimizations.setdefault(key, report)
 
     def get_run(
         self, run_id: str, *, user_team_id: str | None = None
@@ -316,6 +323,34 @@ class RepositoryStub:
         report_id: str,
     ) -> list[SkillAnalysisReview]:
         return list(self.reviews) if self.report and self.report.id == report_id else []
+
+
+def test_same_evidence_reuses_saved_model_report():
+    run = completed_run()
+    repository = RepositoryStub(run, (failed_result(),), traces=(execution_trace(),))
+    client = RecordingModelClient()
+    service = OptimizationAnalysis(repository, root_cause_model_client=client, root_cause_model_id="model-1")
+    first = service.analyze_run(run.id)
+    assert service.analyze_run(run.id) == first
+    assert len(client.requests) == 1
+    other = OptimizationAnalysis(repository, root_cause_model_client=client, root_cause_model_id="model-2")
+    other.analyze_run(run.id)
+    assert len(client.requests) == 2
+
+
+def test_sqlite_optimization_survives_new_application(tmp_path):
+    from agentgate.server.app import create_app
+    from fastapi.testclient import TestClient
+    path = tmp_path / "optimization.db"
+    app = create_app(path)
+    with TestClient(app) as client:
+        deps = app.state.dependencies
+        run = deps.execute_demo_run("loan-agent-v2-fixed", evaluator_ids=["final-state"])
+        report = client.get("/api/runs/"+run.id+"/optimization")
+        assert report.status_code == 200, report.text
+        saved = report.json()
+    with TestClient(create_app(path)) as client:
+        assert client.get("/api/runs/"+run.id+"/optimization").json() == saved
 
 
 def test_analyzes_persisted_run_results_without_static_report() -> None:

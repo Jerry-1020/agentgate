@@ -545,7 +545,7 @@ class EvaluatorManagement:
             )
         if spec.kind == EvaluatorKind.RULE and spec.config:
             raise ValueError("Rule Evaluator config must be empty")
-        if spec.kind == EvaluatorKind.LLM_JUDGE:
+        if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "validate_spec", None))):
             validate_spec = getattr(implementation, "validate_spec", None)
             if not callable(validate_spec):
                 raise TypeError("LLM Judge implementation must validate specifications")
@@ -710,6 +710,8 @@ def build_default_evaluator_management(
 
     specs = _BUILTIN_EVALUATOR_SPECS
     implementations = dict(_BUILTIN_IMPLEMENTATIONS)
+    from agentgate.evaluator.hybrid import CompositeEvaluator
+    implementations[("composite", "1")] = CompositeEvaluator()
     if judge_client is not None:
         assert judge_model_id is not None
         assert judge_credential_ref is not None

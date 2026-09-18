@@ -62,6 +62,7 @@ class JudgeRecord(DomainModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     latency_ms: float | None = Field(default=None, ge=0)
+    previous_attempts: tuple[JudgeRecord, ...] = ()
 
     @field_validator("provider_id", "requested_model")
     @classmethod

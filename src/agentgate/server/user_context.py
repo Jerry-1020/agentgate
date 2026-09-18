@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
 
@@ -16,8 +16,12 @@ class UserInfo:
 _current: ContextVar[UserInfo | None] = ContextVar("user_context", default=None)
 
 
-def set_user_info(info: UserInfo) -> None:
-    _current.set(info)
+def set_user_info(info: UserInfo) -> Token:
+    return _current.set(info)
+
+
+def reset_user_info(token: Token) -> None:
+    _current.reset(token)
 
 
 def get_user_info() -> UserInfo | None:

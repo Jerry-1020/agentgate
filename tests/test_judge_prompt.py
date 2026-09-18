@@ -139,6 +139,9 @@ def test_prompt_rendering_is_deterministic_and_forces_json_response() -> None:
     assert first.response_format == "json_object"
     assert '"verdict"' in (first.system_prompt or "")
     assert "0.8" in (first.system_prompt or "")
+    assert "closed interval [0, 1]" in first.system_prompt
+    assert "80 percent is 0.8" in first.system_prompt
+    assert "untrusted data" in first.system_prompt
 
 
 def test_bounded_evidence_returns_valid_json_with_digest() -> None:

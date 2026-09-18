@@ -1,0 +1,23 @@
+import type { Dataset, Evaluator, EvalTask, VersionedTarget } from '../domain/evaluation'
+
+export const targets: VersionedTarget[] = [
+  { id: 'a-1', name: '客户服务主智能体', type: 'Agent', version: 'v2.4.0', description: '意图识别、Skill 路由与多轮任务编排', updatedAt: '2026-09-06 14:20' },
+  { id: 'a-2', name: '业务咨询智能体', type: 'Agent', version: 'v1.8.2', description: '面向业务咨询的多轮对话服务', updatedAt: '2026-09-05 11:10' },
+  { id: 's-1', name: '订单查询 Skill', type: 'Skill', version: 'v3.1.0', description: '订单状态查询与字段格式化', updatedAt: '2026-09-06 09:40' },
+  { id: 's-2', name: '风险提示 Skill', type: 'Skill', version: 'v1.6.0', description: '输出风险等级与处置提示', updatedAt: '2026-09-04 16:15' }
+]
+export const datasets: Dataset[] = [
+  { id: 'd-1', name: '核心业务回归集', version: 'v1.4', cases: 86, source: '人工创建 + 补充', scope: '正例 / 负例 / 边界 / 多轮', updatedAt: '2026-09-06' },
+  { id: 'd-2', name: '路由与工具调用集', version: 'v2.1', cases: 42, source: '历史 Badcase', scope: '路由 / 工具参数', updatedAt: '2026-09-05' },
+  { id: 'd-3', name: '发布前冒烟集', version: 'v1.0', cases: 18, source: '人工创建', scope: 'P0 正例 / 边界', updatedAt: '2026-09-03' }
+]
+export const evaluators: Evaluator[] = [
+  { id: 'e-1', name: '结构与路由规则', version: 'v1.3', kind: '规则', coverage: 'JSON、必填字段、路由、工具参数', status: '已启用' },
+  { id: 'e-2', name: '回答质量评估', version: 'v1.1', kind: 'LLM', coverage: '结论完整性、表达与业务一致性', status: '已启用' },
+  { id: 'e-3', name: '核心链路复合评估', version: 'v2.0', kind: '复合', coverage: '规则优先 + 质量评分', status: '已启用' }
+]
+export const initialTasks: EvalTask[] = [
+  { id: 'ET-20260906-018', name: '客户服务主智能体 · 发布回归', target: targets[0], dataset: datasets[0], evaluator: evaluators[2], status: '已完成', passRate: 92.4, createdAt: '2026-09-06 14:30', config: '并发 5 · 超时 30 秒 · 重试 1 次' },
+  { id: 'ET-20260906-017', name: '订单查询 Skill · 规则验证', target: targets[2], dataset: datasets[1], evaluator: evaluators[0], status: '运行中', passRate: null, createdAt: '2026-09-06 10:15', config: '并发 3 · 超时 20 秒 · 重试 0 次' },
+  { id: 'ET-20260905-016', name: '业务咨询智能体 · 冒烟评测', target: targets[1], dataset: datasets[2], evaluator: evaluators[1], status: '已失败', passRate: 61.1, createdAt: '2026-09-05 16:45', config: '并发 2 · 超时 30 秒 · 重试 1 次' }
+]

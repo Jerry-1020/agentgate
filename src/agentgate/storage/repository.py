@@ -14,6 +14,7 @@ from agentgate.domain import (
     Evaluator,
     EvaluatorDraft,
     EvaluatorSpec,
+    OptimizationReport,
     RunStatus,
     SkillAnalysisReport,
     SkillAnalysisReview,
@@ -23,9 +24,17 @@ from agentgate.domain import (
     Trace,
 )
 from agentgate.domain.credential import ApiKeyMetadata
+from agentgate.domain.evaluation_task import EvaluationTask
 
 
 class AgentGateRepository(Protocol):
+    def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None: ...
+    def save_optimization_report(self, evidence_key: str, report: OptimizationReport) -> OptimizationReport: ...
+    def get_optimization_report(self, evidence_key: str) -> OptimizationReport | None: ...
+    def save_evaluation_task(self, task: EvaluationTask) -> EvaluationTask: ...
+    def get_evaluation_task(self, task_id: str) -> EvaluationTask | None: ...
+    def list_evaluation_tasks(self) -> list[EvaluationTask]: ...
+
     def save_api_key(
         self, metadata: ApiKeyMetadata, encrypted_api_key: str
     ) -> None: ...

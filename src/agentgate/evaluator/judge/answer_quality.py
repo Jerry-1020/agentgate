@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from time import monotonic
 from types import MappingProxyType
 from typing import Any
 
@@ -22,7 +23,7 @@ from agentgate.domain import (
 from agentgate.trace.redaction import redact_value
 
 from ..models import CheckDraft, Evaluation, FailureCandidate, ResultResolver
-from .contract import ParsedVerdict, parse_verdict
+from .contract import JudgeContractError, ParsedVerdict, parse_verdict
 from .model_protocol import (
     JudgeModelClient,
     JudgeModelInvalidResponse,
@@ -300,10 +301,44 @@ class AnswerQualityJudge:
             max_input_chars=config.max_input_chars,
             redact=redact_value,
         )
-        response = client.complete(request)
-        if response.truncated:
-            raise JudgeModelInvalidResponse("Judge model response was truncated")
-        verdict = parse_verdict(response.text, config.pass_threshold)
+        deadline = monotonic() + config.timeout_seconds
+        attempts: list[JudgeRecord] = []
+        # One correction at most, within the original deadline. Never normalize
+        # invalid scores or turn a protocol failure into a passing verdict.
+        for attempt in range(2):
+            try:
+                response = client.complete(request)
+            except Exception as exc:
+                if attempts:
+                    exc.judge_record = attempts[-1]
+                raise
+            record = _judge_record(config, request_fingerprint(request), response).model_copy(
+                update={"previous_attempts": tuple(attempts)}
+            )
+            try:
+                if response.truncated:
+                    raise JudgeModelInvalidResponse("Judge model response was truncated")
+                verdict = parse_verdict(response.text, config.pass_threshold)
+                break
+            except (JudgeContractError, JudgeModelInvalidResponse) as exc:
+                remaining = deadline - monotonic()
+                if attempt or remaining <= 0 or response.truncated:
+                    error = JudgeModelInvalidResponse(str(exc))
+                    error.judge_record = record
+                    raise error from exc
+                attempts.append(record)
+                request = replace(request, timeout_seconds=remaining,
+                    system_prompt=(request.system_prompt or "") + "\n"
+                    "Your preceding response failed schema validation. Re-evaluate the same "
+                    "evidence and return ONLY a JSON object with exactly these fields: "
+                    '{"verdict":"pass|fail|review","score":0.0,"confidence":0.0,'
+                    '"reason":"short explanation","violations":[]}. '
+                    "score and confidence MUST be fractions from 0.0 to 1.0 inclusive, "
+                    "NEVER percentages or ten-point scores. The example is a schema, "
+                    "confidence means nonnegative certainty, not sentiment: a confident "
+                    "failure has positive confidence (e.g. 0.9), NEVER -0.9. "
+                    "not a verdict to copy. Keep the original rubric and pass threshold. "
+                    "Do not invent evidence or change a failure into a pass.")
         outcome, reason = _outcome_and_reason(verdict, config.min_confidence)
 
         return Evaluation(
@@ -336,7 +371,7 @@ class AnswerQualityJudge:
                     ),
                 ),
             ),
-            judge_record=_judge_record(config, request_fingerprint(request), response),
+            judge_record=record,
         )
 
 

@@ -61,6 +61,7 @@ class RunManagement:
         max_parallel_cases: int = 1,
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
+        persist: bool = True,
         api_key: str | None = None,
         case_max_parallel: int | None = None,
     ) -> EvaluationRun:
@@ -103,7 +104,7 @@ class RunManagement:
                 metric_plan=metric_plan or MetricPlan(),
                 gate_spec=gate_spec or ReleaseGateSpec(),
                 timeout_seconds=timeout_seconds,
-                max_parallel_cases=max_parallel_cases,
+                max_parallel_cases=case_max_parallel if case_max_parallel is not None else max_parallel_cases,
                 max_retries=max_retries,
             ),
             status=(
@@ -119,10 +120,11 @@ class RunManagement:
             api_key=api_key,
             case_max_parallel=case_max_parallel,
         )
-        self.repository.save_run(run)
+        if persist:
+            self.repository.save_run(run)
         return run
 
-    def create_rerun(self, source_run_id: str) -> EvaluationRun:
+    def create_rerun(self, source_run_id: str, *, persist: bool = True) -> EvaluationRun:
         """Create a pending Run from one terminal Run's exact manifest."""
 
         info = get_user_info()
@@ -149,7 +151,8 @@ class RunManagement:
             api_key=source.api_key,
             case_max_parallel=source.case_max_parallel,
         )
-        self.repository.save_run(rerun)
+        if persist:
+            self.repository.save_run(rerun)
         return rerun
 
     def execute_run(
