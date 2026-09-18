@@ -50,3 +50,30 @@
 ## 不在本次通过声明内
 
 客户工厂/身份/文件生命周期、完整云虾协议、安全围栏真实语义、客户生产贷款规则及提示词等仍需正式接入和验收。新机器模型服务、网络和凭据必须有效；模型未来输出存在变化，测试应保留真实失败，而不是强行改成通过。
+
+## 合并仓库回归与验收 — 2026-09-18
+
+本记录对应把本仓库 main 按单后端方案合入 `open-fin-sub/agentgate` 的 `integration/baibo` 分支后的复验：原 `backend/` 增量已移植到仓库根 `src/`、`tests/`，`backend/` 目录删除，启动与验收脚本、文档路径改为指向根后端。
+
+### 回归
+
+| 检查 | 结果 |
+|---|---|
+| 根目录 uv sync --extra test | 成功 |
+| 根目录后端 pytest | 1033 通过，1 跳过 |
+| tested-agents uv sync --locked --extra test 后 pytest | 19 通过 |
+| frontend npm ci、vue-tsc --noEmit、vite build | 成功，保留大 bundle 警告 |
+
+### 真实浏览器验收
+
+模型配置通过外部 `AGENTGATE_MODEL_ENV_FILE` 注入（未入库），真实调用模型并产生费用。为释放 5197/8097/6397/8107 端口，先停止了旧目录（915-NH-WEB）遗留的本机 stack；未复用历史任务、未回放旧 JSONL。
+
+| 模式 | run_id | 案例 / 轮次 | 状态 |
+|---|---|---:|---|
+| base | 5ac7c22b-8d59-4667-a2c3-572cdd6566de | 8 / 9 | completed |
+| workflow | a3754e46-830d-4ceb-bcc2-d79778d95a27 | 8 / 9 | completed |
+| cloudshrimp | 2c4ea55d-5722-41d0-ac9b-13f766c7f47d | 8 / 9 | completed |
+
+- 24 个样本页面查看，页面错误 0。
+- 27 轮请求 × 11 项对照 = 297 项检查全部通过（trace-verification.json `passed: true`）。
+- 以上 run_id 为本次新产生，脚本每次产生新 ID；完整 browser.json、截图与核对结果保留在本机 runtime/bank-acceptance/，不上传。
