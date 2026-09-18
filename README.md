@@ -232,7 +232,7 @@ browser once with `npx playwright install chromium` if needed.
 
 # 附：AgentGate 工作台（agentgate-web-nh 集成）
 
-以下为 `agentgate-web-nh` 仓库合入本分支的内容说明。
+以下为 `agentgate-web-nh` 仓库合入本分支的内容说明。合入时已将原 `backend/` 并入仓库根目录，相关路径已同步调整。
 
 # AgentGate 工作台与三模式被测智能体
 
@@ -259,7 +259,7 @@ bash scripts/start-bank-integration.sh
 ## 目录
 
 - `frontend/`：前端与当前真实接口接入。
-- `backend/`：AgentGate API、执行调度、评估与存储。
+- 仓库根目录：AgentGate API、执行调度、评估与存储（原 `backend/` 已并入）。
 - `tested-agents/`：独立贷款智能体、测试与依赖锁。
 - `vendor/trace-sdk/`：必需 SDK 源码与来源摘要。
 - `scripts/`：安装、启动、初始化、验收脚本。
@@ -274,7 +274,7 @@ bash scripts/start-bank-integration.sh
 ```bash
 (cd frontend && npx playwright install chromium)
 node scripts/accept-bank-browser.mjs
-backend/.venv/bin/python scripts/verify-bank-traces.py
+.venv/bin/python scripts/verify-bank-traces.py
 ```
 
 测试从前端发起新任务，不依赖开发者历史任务 ID。输入输出、页面 Trace、平台数据库、业务数据库与 SDK JSONL 互相核对。结果写入 runtime/bank-acceptance/，业务失败不会被伪装为通过。
@@ -285,4 +285,4 @@ backend/.venv/bin/python scripts/verify-bank-traces.py
 
 三模式启动必须有有效模型配置，无 Mock fallback。旧 Demo 入口 start-macos.command 仍保留；旧日期能力记录是历史资料，不应覆盖本次交付说明。现有历史浏览器测试包含固定数据依赖，新机器请使用上述验收脚本。
 
-后端原基线：open-fin/agentgate 的 refactor-1，提交 e3760d16602c9423b54be968ea97839a5144d691；2026-09-18 集成 open-fin-sub/agentgate 的 refactor-1 提交 33db48afcb83b0331e6e012abbd100c823268313，并保留本地接入与兼容性修复。后端 Apache-2.0 许可保留在 backend/LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。
+后端原基线：open-fin/agentgate 的 refactor-1，提交 e3760d16602c9423b54be968ea97839a5144d691；2026-09-18 集成 open-fin-sub/agentgate 的 refactor-1 提交 33db48afcb83b0331e6e012abbd100c823268313，并保留本地接入与兼容性修复。后端 Apache-2.0 许可保留在根目录 LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。

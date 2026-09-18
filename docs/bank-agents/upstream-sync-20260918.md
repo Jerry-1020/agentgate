@@ -115,10 +115,10 @@
 
 复测入口：
 
-- `backend/.venv/bin/python -m pytest backend/tests`（推荐进入 backend 后运行 pytest）
+- `.venv/bin/python -m pytest tests`（推荐在仓库根目录运行 pytest）
 - `node scripts/accept-bank-browser.mjs runtime/upstream-acceptance`
-- `backend/.venv/bin/python scripts/verify-bank-traces.py runtime/upstream-acceptance`
-- `backend/.venv/bin/python scripts/verify-upstream-live.py`（会创建测试任务、调用付费模型）
+- `.venv/bin/python scripts/verify-bank-traces.py runtime/upstream-acceptance`
+- `.venv/bin/python scripts/verify-upstream-live.py`（会创建测试任务、调用付费模型）
 - `frontend/node_modules/.bin/playwright test --config scripts/playwright-upstream.config.mjs`（基于迁移后的历史 fixture；本次执行的子集见运行记录）
 
 客户工厂七步验收仍须单独进行，不能由这些本地证据替代。

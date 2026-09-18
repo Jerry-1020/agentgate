@@ -28,7 +28,7 @@ frontend/src/revision/
   Workspace.vue
   EvaluationTaskForm.vue                 新增
   EvaluatorSelectionGuide.vue            新增
-backend/src/agentgate/
+src/agentgate/
   domain/evaluation_task.py              新增
   application/evaluation_task_management.py 新增
   server/routes/evaluation_tasks.py      新增
@@ -49,7 +49,7 @@ backend/src/agentgate/
 用户已确认详细设计（类型、时间、1/2个运行引用、报告、可选提交/凭据引用）；13 项校验测试通过。
 
 application/evaluation_task_management.py 的职责已确认，详细设计待确认，尚未实现。
-后续遵循 backend/AGENTS.md 的结构、职责、详细设计、实现四个确认点。
+后续遵循仓库根 AGENTS.md 的结构、职责、详细设计、实现四个确认点。
 
 ## 本轮可用功能
 

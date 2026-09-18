@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "backend/src"))
+sys.path.insert(0, str(root / "src"))
 
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.domain import Case, CaseTurn

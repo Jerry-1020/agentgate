@@ -30,7 +30,7 @@ const historical=ref<Definition|null>(null)
 const definition=computed(()=>historical.value??(selected.value?.evaluator.kind==='rule'?selected.value?.latest:selected.value?.draft??selected.value?.latest))
 const readOnly=computed(()=>definition.value?.kind==='rule'||!!historical.value||!selected.value?.draft||selected.value?.evaluator.source==='builtin')
 function viewVersion(value:Definition|null){historical.value=value;edit.value=definition.value?JSON.parse(JSON.stringify(definition.value)):null}
-const sourceFiles=import.meta.glob('../../../backend/src/agentgate/evaluator/{rule/*.py,judge/*.py,hybrid.py}',{eager:true,query:'?raw',import:'default'})
+const sourceFiles=import.meta.glob('../../../src/agentgate/evaluator/{rule/*.py,judge/*.py,hybrid.py}',{eager:true,query:'?raw',import:'default'})
 const source=computed(()=>Object.entries(sourceFiles).find(([,text])=>String(text).includes(`implementation_id = "${definition.value?.implementation_id}"`)))
 const ruleHints:Record<string,[string,string]>={
  skill_routing:['Case 中的 skill_route 条件','Trace 路由事件中记录的实际 Skill'],

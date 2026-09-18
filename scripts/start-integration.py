@@ -61,7 +61,7 @@ def main():
     else:
         raise RuntimeError("服务启动超时，请检查 runtime 日志。")
     if options.with_bank_agents:
-        subprocess.run([str(root / "backend/.venv/bin/python"),
+        subprocess.run([str(root / ".venv/bin/python"),
                         str(root / "scripts/seed-bank-agents.py")], cwd=root, check=True)
     print("已启动：http://127.0.0.1:5197/ ；按 Ctrl+C 停止本次启动的服务。", flush=True)
     webbrowser.open("http://127.0.0.1:5197/")

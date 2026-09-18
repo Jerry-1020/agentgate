@@ -50,8 +50,8 @@ SDK 固定来自本仓库 `vendor/trace-sdk`，不依赖开发者本机目录，
 平台另行启动（仓库根目录）：
 
 ```sh
-AGENTGATE_MODEL_ENV_FILE=/absolute/path/to/agentgate-model.env backend/.venv/bin/python scripts/start-integration.py
-backend/.venv/bin/python scripts/seed-bank-agents.py
+AGENTGATE_MODEL_ENV_FILE=/absolute/path/to/agentgate-model.env .venv/bin/python scripts/start-integration.py
+.venv/bin/python scripts/seed-bank-agents.py
 ```
 
 种子脚本把被测服务数据库中的 24 条案例发布为 AgentGate 三个评测集，各 8 条。相同名称已存在时不覆盖已有数据；不是每次请求临时生成演示结果。
@@ -59,7 +59,7 @@ backend/.venv/bin/python scripts/seed-bank-agents.py
 也可由一个命令启动全部本地服务（不要先另起 8107 服务）：
 
 ```sh
-AGENTGATE_MODEL_ENV_FILE=/absolute/path/to/agentgate-model.env backend/.venv/bin/python scripts/start-integration.py --with-bank-agents
+AGENTGATE_MODEL_ENV_FILE=/absolute/path/to/agentgate-model.env .venv/bin/python scripts/start-integration.py --with-bank-agents
 ```
 
 ## 接口

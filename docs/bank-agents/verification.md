@@ -14,7 +14,7 @@
 
 | 检查 | 结果 |
 |---|---|
-| backend uv sync --locked --extra test | 成功，锁文件无需修改 |
+| 根目录 uv sync --extra test | 成功 |
 | tested-agents uv sync --locked --extra test | 成功，从 vendor/trace-sdk 安装 |
 | frontend npm ci | 成功，npm audit 当次报告 0 漏洞 |
 | 后端单元/接口回归 | 1023 通过，1 私有客户样本测试跳过 |

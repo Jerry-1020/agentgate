@@ -9,7 +9,7 @@
 | 目录 | 责任 |
 |---|---|
 | `frontend/` | 已有工作台与真实目标接入；本次打包不重新设计页面 |
-| `backend/` | AgentGate API、任务持久化、Celery 执行、规则/LLM/复合评估、Trace 规范化 |
+| 仓库根目录 | AgentGate API、任务持久化、Celery 执行、规则/LLM/复合评估、Trace 规范化（原 web-nh `backend/`，已并入根目录） |
 | `tested-agents/` | 独立进程：基础编排、LangGraph 工作流、LangGraph Skill 路由三模式 |
 | `vendor/trace-sdk/` | 固定的客户 SDK 源码，不依赖开发者机器路径 |
 | `scripts/` | 安装、启动、种子和验收 |
@@ -77,7 +77,7 @@ AGENTGATE_MODEL_ENV_FILE=/absolute/path/to/private-model.env \
 ```bash
 (cd frontend && npx playwright install chromium)
 node scripts/accept-bank-browser.mjs
-backend/.venv/bin/python scripts/verify-bank-traces.py
+.venv/bin/python scripts/verify-bank-traces.py
 ```
 
 浏览器脚本从页面创建三次真实任务，覆盖 24 个用例、27 轮交互；核对页面输入、输出和 Trace 与 API 一致。任何执行失败、规则失败或浏览器错误均以非零状态退出，不自动重跑业务操作来掩盖失败。
@@ -91,7 +91,7 @@ Trace 脚本读取本次动态任务 ID，对照平台数据库、业务数据�
 ## 自动化单元测试
 
 ```bash
-backend/.venv/bin/pytest -q backend/tests
+.venv/bin/pytest -q tests
 (cd tested-agents && .venv/bin/pytest -q)
 (cd frontend && npm run build)
 ```

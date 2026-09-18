@@ -24,7 +24,7 @@
 | `model.py` | 真实 Chat Completions 调用，无 Mock fallback |
 | `tools.py` / `store.py` | 合成业务规则、数据库状态、工具审计、种子用例 |
 | `telemetry.py` | 请求级独立 SDK Collector 和证据落盘 |
-| `backend/src/agentgate/integrations/targets/local_bank.py` | HTTP 执行、固定指纹验证、原始结果核对 |
+| `src/agentgate/integrations/targets/local_bank.py` | HTTP 执行、固定指纹验证、原始结果核对 |
 | `integrations/targets/bank_protocol.py` | ChatABC/云虾请求与 SSE 解析 |
 | `integrations/observability/trace_sdk.py` | SDK 事件转换到 Domain Trace，不伪造未知业务状态 |
 | `server/routes/bank_targets.py` | 目标发现、真实评测创建、运行模型元数据 |
@@ -53,7 +53,7 @@
 
 ## 版本与依赖
 
-被测服务与 AgentGate 使用不同 Python 环境：避免 SDK/LangGraph 与评估平台依赖互相污染。backend/uv.lock、tested-agents/uv.lock、frontend/package-lock.json 分别锁定依赖。
+被测服务与 AgentGate 使用不同 Python 环境：避免 SDK/LangGraph 与评估平台依赖互相污染。根目录与 `tested-agents/` 各自维护 Python 依赖，`frontend/package-lock.json` 锁定前端依赖。
 
 目标描述包含模型名、提示词、工具 Schema、Skill 和实现源码摘要。任务固化描述摘要；实现变化后旧任务重跑可能被拒绝，应创建新任务，不能替换旧结果的版本来源。
 
