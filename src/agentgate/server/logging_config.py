@@ -9,15 +9,15 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2].parent
-DEFAULT_LOG_PATH = str(_PROJECT_ROOT.parent / "logs" / "agentgate")
+DEFAULT_LOG_PATH = str(_PROJECT_ROOT.parent / "runtime" / "logs" / "agentgate")
 
 LOG_FORMAT = (
     "[%(asctime)s] [%(threadName)s] [%(levelname)s] %(name)s - %(message)s"
 )
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-MAX_BYTES = 100 * 1024 * 1024
-BACKUP_COUNT = 30
+MAX_BYTES = 10 * 1024 * 1024
+BACKUP_COUNT = 3
 
 
 class _ErrorOnlyFilter(logging.Filter):
@@ -31,14 +31,15 @@ def setup_logging() -> None:
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
+    if any(getattr(handler, "_agentgate_handler", False) for handler in root.handlers):
+        return
 
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
+    console_handler._agentgate_handler = True
     root.addHandler(console_handler)
 
     file_handler = RotatingFileHandler(
@@ -49,6 +50,7 @@ def setup_logging() -> None:
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
+    file_handler._agentgate_handler = True
     root.addHandler(file_handler)
 
     error_handler = RotatingFileHandler(
@@ -59,6 +61,7 @@ def setup_logging() -> None:
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(formatter)
+    error_handler._agentgate_handler = True
     root.addHandler(error_handler)
 
     logging.getLogger("agentgate").setLevel(logging.DEBUG)

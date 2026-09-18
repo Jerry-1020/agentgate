@@ -230,7 +230,7 @@ def test_one_failed_pair_preserves_successful_pair_as_partial_report() -> None:
 def test_total_model_failure_returns_failed_report(
     response: JudgeResponse | Exception,
 ) -> None:
-    model = RecordingModel([response])
+    model = RecordingModel([response, response])
 
     report = analyze_skill_relationships(
         descriptor(
@@ -245,6 +245,34 @@ def test_total_model_failure_returns_failed_report(
     assert report.findings == ()
     assert report.risk_matrix == ()
     assert len(report.errors) == 1
+
+
+def test_negative_confidence_is_regenerated_by_model_not_coerced() -> None:
+    model = RecordingModel([assessment(confidence=-0.95), assessment(confidence=0.87)])
+    report = analyze_skill_relationships(
+        descriptor(skill("one", "Handle one."), skill("two", "Handle two.")),
+        model, model_id="judge-model",
+    )
+    assert report.status is SkillAnalysisStatus.COMPLETED
+    assert report.errors == ()
+    assert report.risk_matrix[0]["confidence"] == 0.87
+    assert report.findings == ()
+    assert len(model.requests) == 2
+    feedback = json.loads(model.requests[1].user_prompt)["validation_feedback"]
+    assert feedback["invalid_fields"] == ["confidence"]
+
+
+def test_invalid_correction_remains_failed_and_retry_is_bounded() -> None:
+    model = RecordingModel([assessment(confidence=-0.95), assessment(confidence=-0.95)])
+    report = analyze_skill_relationships(
+        descriptor(skill("one", "Handle one."), skill("two", "Handle two.")),
+        model, model_id="judge-model",
+    )
+    assert len(model.requests) == 2
+    assert report.status is SkillAnalysisStatus.FAILED
+    assert report.errors[0]["category"] == "invalid_output"
+    assert report.risk_matrix == ()
+    assert report.findings == ()
 
 
 @pytest.mark.parametrize(

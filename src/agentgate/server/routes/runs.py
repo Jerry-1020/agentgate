@@ -27,6 +27,9 @@ router = APIRouter(prefix="/api", tags=["runs"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
 
 
+from agentgate.domain.evaluation_task import EvaluationTask
+
+
 class LaunchRequest(BaseModel):
     version: str
     dataset_id: str
@@ -37,7 +40,7 @@ class LaunchRequest(BaseModel):
     max_retries: int = Field(default=0, ge=0, le=5)
     case_ids: list[str] | None = None
     scheduled_for: datetime | None = None
-    api_key: str | None = None
+    api_key: None = None
     case_max_parallel: int | None = Field(default=None, ge=1, le=32)
 
 
@@ -130,7 +133,10 @@ def cancel_run(run_id: str, dependencies: Dependencies) -> RunProgress:
 @router.post("/runs/{run_id}/rerun", status_code=202)
 def rerun_run(run_id: str, dependencies: Dependencies) -> RunProgress:
     try:
-        rerun = dependencies.runs.create_rerun(run_id)
+        rerun = dependencies.runs.create_rerun(run_id, persist=False)
+        dependencies.repository.save_task_runs(EvaluationTask(
+            id=rerun.id, kind="single", run_ids=(rerun.id,),
+        ), [rerun])
         dependencies.runs.dispatch_run(rerun.id, dependencies.dispatcher)
         return dependencies.results.get_run_progress(rerun.id)
     except LookupError as error:

@@ -16,6 +16,7 @@ from agentgate.domain import (
     EvaluatorDraft,
     EvaluatorSource,
     EvaluatorSpec,
+    OptimizationReport,
     RunStatus,
     SkillAnalysisReport,
     SkillAnalysisReview,
@@ -29,6 +30,7 @@ from agentgate.domain import (
     transition_run,
 )
 from agentgate.domain.credential import ApiKeyMetadata
+from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.evaluator.versioning import (
     publish_evaluator_draft as build_evaluator_publication,
 )
@@ -277,9 +279,132 @@ class SQLiteRepository:
     def _initialize(self) -> None:
         with self._connect() as db:
             db.execute("PRAGMA journal_mode = WAL")
+            self._migrate_table_prefix(db)
             db.executescript(_SCHEMA)
             self._ensure_runs_schema(db)
+            self._ensure_identity_columns(db)
             db.executescript(_RUNS_INDEX_SCHEMA)
+            db.executescript(f"""
+                CREATE TABLE IF NOT EXISTS optimization_reports (
+                    evidence_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES {_T_RUNS}(id),
+                    created_at TEXT NOT NULL,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS evaluation_tasks (
+                    id TEXT PRIMARY KEY, created_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS evaluation_task_runs (
+                    run_id TEXT PRIMARY KEY REFERENCES {_T_RUNS}(id),
+                    task_id TEXT NOT NULL REFERENCES evaluation_tasks(id)
+                );
+            """)
+
+    def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
+        if task.run_ids != tuple(r.id for r in runs):
+            raise ValueError("invalid task run associations")
+        if any(r.status not in {RunStatus.PENDING, RunStatus.SCHEDULED} for r in runs):
+            raise ValueError("task creation requires unstarted runs")
+        if task.kind == "stability" and any(r.manifest != runs[0].manifest or r.status != RunStatus.PENDING for r in runs):
+            raise ValueError("stability requires identical snapshots and pending runs")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for run in runs:
+                references = self._run_asset_references(db, run)
+                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name,case_max_parallel) VALUES(?,?,?,?,?,?,?,?,?)",
+                           (run.id, run.status, run.created_at.isoformat(), run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run),
+                            run.user_team_id, run.user_id, run.user_name, run.case_max_parallel))
+                db.executemany(f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)", references)
+            db.execute("INSERT INTO evaluation_tasks VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
+            db.executemany("INSERT INTO evaluation_task_runs VALUES(?,?)", [(r.id, task.id) for r in runs])
+
+    def get_optimization_report(self, evidence_key: str) -> OptimizationReport | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload FROM optimization_reports WHERE evidence_key=?", (evidence_key,)).fetchone()
+        return OptimizationReport.model_validate_json(row["payload"]) if row else None
+
+    def save_optimization_report(self, evidence_key: str, report: OptimizationReport) -> OptimizationReport:
+        with self._connect() as db:
+            db.execute("INSERT OR IGNORE INTO optimization_reports VALUES(?,?,?,?)",
+                       (evidence_key, report.run_id, report.created_at.isoformat(), canonical_json(report)))
+            row = db.execute("SELECT payload FROM optimization_reports WHERE evidence_key=?", (evidence_key,)).fetchone()
+        return OptimizationReport.model_validate_json(row["payload"])
+
+    def save_evaluation_task(self, task: EvaluationTask) -> EvaluationTask:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload FROM evaluation_tasks WHERE id=?", (task.id,)).fetchone()
+            if row:
+                previous = EvaluationTask.model_validate_json(row["payload"])
+                for field in ("kind", "run_ids", "git_commit_refs", "credential_id"):
+                    if getattr(previous, field) != getattr(task, field):
+                        raise ValueError("task identity and run associations are immutable")
+                reports_by_target = {}
+                for report_id in previous.static_report_ids + task.static_report_ids:
+                    report_row = db.execute(f"SELECT payload FROM {_T_SKILL_ANALYSIS_REPORTS} WHERE id=?", (report_id,)).fetchone()
+                    if report_row is None:
+                        raise ValueError("unknown static report")
+                    report = SkillAnalysisReport.model_validate_json(report_row["payload"])
+                    reports_by_target[report.target_descriptor_sha256] = report_id
+                task = EvaluationTask.model_validate({
+                    **previous.model_dump(),
+                    "static_report_ids": tuple(reports_by_target.values()),
+                })
+            for report_id in task.static_report_ids:
+                if db.execute(f"SELECT 1 FROM {_T_SKILL_ANALYSIS_REPORTS} WHERE id=?", (report_id,)).fetchone() is None:
+                    raise ValueError("unknown static report")
+            try:
+                if not row:
+                    db.execute("INSERT INTO evaluation_tasks VALUES(?,?,?)",
+                               (task.id, task.created_at.isoformat(), canonical_json(task)))
+                    db.executemany("INSERT INTO evaluation_task_runs VALUES(?,?)",
+                                   [(run_id, task.id) for run_id in task.run_ids])
+                else:
+                    db.execute("UPDATE evaluation_tasks SET payload=? WHERE id=?", (canonical_json(task), task.id))
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("run does not exist or already belongs to another task") from exc
+        return task
+
+    def get_evaluation_task(self, task_id: str) -> EvaluationTask | None:
+        with self._connect() as db:
+            row = db.execute("SELECT payload FROM evaluation_tasks WHERE id=?", (task_id,)).fetchone()
+        return EvaluationTask.model_validate_json(row["payload"]) if row else None
+
+    def list_evaluation_tasks(self) -> list[EvaluationTask]:
+        with self._connect() as db:
+            rows = db.execute("SELECT payload FROM evaluation_tasks ORDER BY created_at DESC,id").fetchall()
+        return [EvaluationTask.model_validate_json(row["payload"]) for row in rows]
+
+    @staticmethod
+    def _migrate_table_prefix(db: sqlite3.Connection) -> None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        names = (_T_API_KEYS, _T_TARGET_DESCRIPTORS, _T_SKILL_ANALYSIS_REPORTS,
+                 _T_SKILL_ANALYSIS_REVIEWS, _T_EVALUATORS, _T_EVALUATOR_DRAFTS,
+                 _T_EVALUATOR_VERSIONS, _T_DATASETS, _T_DATASET_VERSIONS,
+                 _T_RUN_ASSET_REFS, _T_TRACES, _T_RESULTS, _T_RUNS)
+        if any(name in tables and name.removeprefix(TABLE_PREFIX) in tables for name in names):
+            raise ValueError("Both legacy and prefixed tables exist; restore a backup before migration")
+        db.execute("BEGIN IMMEDIATE")
+        for name in names:
+            old = name.removeprefix(TABLE_PREFIX)
+            if old in tables:
+                db.execute(f'ALTER TABLE "{old}" RENAME TO "{name}"')
+        db.commit()
+
+    @staticmethod
+    def _ensure_identity_columns(db: sqlite3.Connection) -> None:
+        # Additive migration: retain original payloads, immutable hashes and associations.
+        for table in (_T_DATASETS, _T_DATASET_VERSIONS, _T_EVALUATORS,
+                      _T_EVALUATOR_DRAFTS, _T_EVALUATOR_VERSIONS, _T_RUNS):
+            columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for name in ("user_team_id", "user_id", "user_name"):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+                    db.execute(f"UPDATE {table} SET {name}=COALESCE(json_extract(payload, '$.{name}'), '')")
+            if table == _T_RUNS:
+                for name, kind in (("api_key", "TEXT"), ("case_max_parallel", "INTEGER")):
+                    if name not in columns:
+                        db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     @staticmethod
     def _ensure_runs_schema(db: sqlite3.Connection) -> None:

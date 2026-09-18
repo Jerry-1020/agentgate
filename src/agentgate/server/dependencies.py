@@ -124,6 +124,7 @@ class ServerDependencies:
     ) -> EvaluationRun:
         """Create one POC Loan Agent Run and dispatch it when eligible."""
 
+        from agentgate.domain.evaluation_task import EvaluationTask
         run = self._create_demo_run(
             version,
             dataset_id=dataset_id,
@@ -134,9 +135,11 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            persist=False,
             api_key=api_key,
             case_max_parallel=case_max_parallel,
         )
+        self.repository.save_task_runs(EvaluationTask(id=run.id, kind="single", run_ids=(run.id,)), [run])
         if run.status is RunStatus.SCHEDULED:
             return run
         return self.runs.dispatch_run(run.id, self.dispatcher)
@@ -192,6 +195,27 @@ class ServerDependencies:
         finally:
             capture.shutdown()
 
+    def submit_stability_runs(self, version: str, repetitions: int, **settings):
+        from agentgate.domain.evaluation_task import EvaluationTask
+        if isinstance(repetitions, bool) or not 2 <= repetitions <= 20:
+            raise ValueError("repetitions must be 2 to 20")
+        template = self._create_demo_run(version, persist=False, **settings)
+        if template.status != RunStatus.PENDING:
+            raise ValueError("stability does not support scheduling")
+        runs = [template, *(EvaluationRun(manifest=template.manifest,
+            user_team_id=template.user_team_id, user_id=template.user_id,
+            user_name=template.user_name, case_max_parallel=template.case_max_parallel)
+            for _ in range(repetitions - 1))]
+        task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
+        self.repository.save_task_runs(task, runs)
+        for run in runs:
+            try:
+                self.runs.dispatch_run(run.id, self.dispatcher)
+            except RuntimeError:
+                # Dispatch failures are persisted by RunManagement; retain the group for inspection.
+                continue
+        return task
+
     def _create_demo_run(
         self,
         version: str,
@@ -204,6 +228,7 @@ class ServerDependencies:
         max_parallel_cases: int,
         max_retries: int,
         scheduled_for: datetime | None = None,
+        persist: bool = True,
         api_key: str | None = None,
         case_max_parallel: int | None = None,
     ) -> EvaluationRun:
@@ -218,6 +243,7 @@ class ServerDependencies:
             max_parallel_cases=max_parallel_cases,
             max_retries=max_retries,
             scheduled_for=scheduled_for,
+            persist=persist,
             api_key=api_key,
             case_max_parallel=case_max_parallel,
         )
@@ -247,11 +273,9 @@ def _select_dispatcher() -> JobDispatcher:
 
     dispatcher_type = os.getenv("AGENT_TASK_DISPATCHER_TYPE", "celery").lower()
     if dispatcher_type == "bjs":
-        from agentgate.integrations.job_dispatchers.bjs_job_dispatcher import (
-            BjsJobDispatcher,
-        )
-
-        return BjsJobDispatcher()  # type: ignore[return-value]
+        raise RuntimeError("BJS dispatcher is not implemented; use AGENT_TASK_DISPATCHER_TYPE=celery")
+    if dispatcher_type != "celery":
+        raise ValueError("unsupported AGENT_TASK_DISPATCHER_TYPE")
     return CeleryJobDispatcher()
 
 

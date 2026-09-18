@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import json
 
 import pytest
 
@@ -203,6 +204,7 @@ def test_builds_deterministic_request_with_explicit_model_settings() -> None:
     assert first.timeout_seconds == 12
     assert first.response_format == "json_object"
     assert "requires human review" in first.system_prompt
+    assert "at most 50 unique identifiers" in first.system_prompt
     assert '"cluster_id":"cluster-1"' in first.user_prompt
     assert '"result_ids":["result-1"]' in first.user_prompt
     assert SPAN_ID in first.user_prompt
@@ -215,6 +217,14 @@ def test_redacts_evidence_but_preserves_reference_allowlists() -> None:
     assert "secret request" not in built.user_prompt
     assert '"protected":true' in built.user_prompt
     assert '"result_ids":["result-1"]' in built.user_prompt
+
+
+def test_citation_allowlist_excludes_unrelated_spans_in_same_trace():
+    original = trace()
+    extra = original.spans[0].model_copy(update={"span_id": "f" * 16, "sequence": 2})
+    built = request(traces=(trace(spans=(*original.spans, extra)),))
+    references = json.loads(built.user_prompt.split("reference_ids:\n", 1)[1].splitlines()[0])
+    assert references["span_ids"] == [SPAN_ID]
 
 
 def test_bounds_detailed_evidence_without_truncating_reference_ids() -> None:

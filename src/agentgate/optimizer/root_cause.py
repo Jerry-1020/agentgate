@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from agentgate.domain import (
     Case,
@@ -13,6 +14,7 @@ from agentgate.domain import (
     SkillAnalysisFinding,
     Trace,
     content_sha256,
+    canonical_json,
 )
 from agentgate.evaluator.judge.model_protocol import (
     JudgeModelClient,
@@ -46,6 +48,7 @@ def _allowed_span_ids(
     traces: tuple[Trace, ...],
 ) -> tuple[str, ...]:
     trace_ids = {member.trace_id for member in cluster.members}
+    supported = {span_id for member in cluster.members for span_id in member.span_ids}
     return tuple(
         sorted(
             {
@@ -53,6 +56,7 @@ def _allowed_span_ids(
                 for trace in traces
                 if trace.trace_id in trace_ids
                 for span in trace.spans
+                if span.span_id in supported
             }
         )
     )
@@ -151,23 +155,34 @@ def infer_root_causes(
             max_input_chars=MAX_INPUT_CHARS,
             redact=redact_value,
         )
-        response = model_client.complete(request)
-        try:
-            parsed = parse_root_cause_response(
-                response.text,
-                expected_cluster_id=cluster.id,
-                allowed_result_ids={member.result_id for member in cluster.members},
-                allowed_span_ids=_allowed_span_ids(cluster, trace_items),
-                allowed_static_finding_ids=_allowed_finding_ids(
-                    cluster,
-                    routing_matrix,
-                    finding_items,
-                ),
-            )
-        except RootCauseContractError as error:
-            raise JudgeModelInvalidResponse(
-                "Root-cause model returned invalid structured output"
-            ) from error
+        for attempt in range(2):
+            response = model_client.complete(request)
+            try:
+                parsed = parse_root_cause_response(
+                    response.text,
+                    expected_cluster_id=cluster.id,
+                    allowed_result_ids={member.result_id for member in cluster.members},
+                    allowed_span_ids=_allowed_span_ids(cluster, trace_items),
+                    allowed_static_finding_ids=_allowed_finding_ids(cluster, routing_matrix, finding_items),
+                )
+                break
+            except RootCauseContractError as error:
+                if attempt:
+                    raise JudgeModelInvalidResponse(
+                        "Root-cause model returned invalid structured output"
+                    ) from error
+                request = replace(request, system_prompt=(request.system_prompt or "") + (
+                    " This is the final contract-correction attempt. The previous output was invalid. "
+                    "Copy identifiers exactly from reference_ids, never from Case or check IDs. "
+                    "Use only 1 to 3 representative result_ids and at most 3 span_ids. "
+                    "Confidence MUST be nonnegative certainty in your hypothesis (0.0 to 1.0). "
+                    "A confident diagnosis of a bad Agent or bad test expectation uses positive "
+                    "confidence such as 0.9, NEVER -0.9 or -1. Use 0.0 if uncertain. "
+                    "Do not invent or shorten identifiers. Return all required fields and no extra fields."
+                    " Allowed span_ids are exactly " + canonical_json(_allowed_span_ids(cluster, trace_items)) +
+                    "; if empty, return span_ids: []. Other IDs visible inside Trace are NOT valid citations. "
+                    "Do not output confidence=-1 as an unknown sentinel; use confidence=0.0 instead."
+                ))
 
         hypotheses.append(
             RootCauseHypothesis(
