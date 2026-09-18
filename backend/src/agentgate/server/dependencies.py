@@ -119,6 +119,8 @@ class ServerDependencies:
         max_parallel_cases: int = 1,
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
+        api_key: str | None = None,
+        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         """Create one POC Loan Agent Run and dispatch it when eligible."""
 
@@ -134,6 +136,8 @@ class ServerDependencies:
             max_retries=max_retries,
             scheduled_for=scheduled_for,
             persist=False,
+            api_key=api_key,
+            case_max_parallel=case_max_parallel,
         )
         self.repository.save_task_runs(EvaluationTask(id=run.id, kind="single", run_ids=(run.id,)), [run])
         if run.status is RunStatus.SCHEDULED:
@@ -198,7 +202,10 @@ class ServerDependencies:
         template = self._create_demo_run(version, persist=False, **settings)
         if template.status != RunStatus.PENDING:
             raise ValueError("stability does not support scheduling")
-        runs = [template, *(EvaluationRun(manifest=template.manifest) for _ in range(repetitions - 1))]
+        runs = [template, *(EvaluationRun(manifest=template.manifest,
+            user_team_id=template.user_team_id, user_id=template.user_id,
+            user_name=template.user_name, case_max_parallel=template.case_max_parallel)
+            for _ in range(repetitions - 1))]
         task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
         self.repository.save_task_runs(task, runs)
         for run in runs:
@@ -222,6 +229,8 @@ class ServerDependencies:
         max_retries: int,
         scheduled_for: datetime | None = None,
         persist: bool = True,
+        api_key: str | None = None,
+        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         target = self._resolve_demo_target(version)
         return self.runs.create_run(
@@ -235,6 +244,8 @@ class ServerDependencies:
             max_retries=max_retries,
             scheduled_for=scheduled_for,
             persist=persist,
+            api_key=api_key,
+            case_max_parallel=case_max_parallel,
         )
 
     def _resolve_demo_target(self, version: str) -> TargetSnapshot:
@@ -255,6 +266,21 @@ def get_dependencies(request: Request) -> ServerDependencies:
     if not isinstance(dependencies, ServerDependencies):
         raise RuntimeError("AgentGate server dependencies are not configured")
     return dependencies
+
+
+def _select_dispatcher() -> JobDispatcher:
+    """Build the configured job dispatcher from the environment."""
+
+    dispatcher_type = os.getenv("AGENT_TASK_DISPATCHER_TYPE", "celery").lower()
+    if dispatcher_type == "bjs":
+        from agentgate.integrations.job_dispatchers.bjs_job_dispatcher import (
+            BjsJobDispatcher,
+        )
+
+        raise RuntimeError("BJS dispatcher is not implemented; use AGENT_TASK_DISPATCHER_TYPE=celery")
+    if dispatcher_type != "celery":
+        raise ValueError("unsupported AGENT_TASK_DISPATCHER_TYPE")
+    return CeleryJobDispatcher()
 
 
 def build_dependencies(
@@ -328,7 +354,7 @@ def build_dependencies(
                 if configured_api_key_encryptor is not None
                 else None
             ),
-            dispatcher=dispatcher or CeleryJobDispatcher(),
+            dispatcher=dispatcher or _select_dispatcher(),
             demo_state={},
             _judge_client=(
                 configured_judge.client if configured_judge is not None else None

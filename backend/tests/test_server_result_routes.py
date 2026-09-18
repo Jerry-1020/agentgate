@@ -90,7 +90,7 @@ def test_samples_are_available_without_a_final_report(tmp_path, monkeypatch) -> 
         assert "release_gate" not in evidence
         # A terminal failure must not hide already committed samples.
         original = dependencies.repository.get_run
-        monkeypatch.setattr(dependencies.repository, "get_run", lambda id:
+        monkeypatch.setattr(dependencies.repository, "get_run", lambda id, **kwargs:
             done.model_copy(update={"status": RunStatus.FAILED, "error": "test"}) if id == done.id else original(id))
         partial = client.get(f"/api/runs/{done.id}/samples").json()
         assert partial["complete"] is False

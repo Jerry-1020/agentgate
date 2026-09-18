@@ -16,6 +16,7 @@ from agentgate.application.result_case_writeback import (
 from agentgate.domain import Case, EvaluationReport, Trace
 from agentgate.result.analytics import ResultAnalytics
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
+from agentgate.server.user_context import get_user_info
 from agentgate.server.errors import (
     raise_conflict,
     raise_not_found,
@@ -65,7 +66,8 @@ def available_samples(run_id: str, dependencies: Dependencies):
 
     This is not a final report: no release gate or synthetic score is produced.
     """
-    run = dependencies.repository.get_run(run_id)
+    info = get_user_info()
+    run = dependencies.repository.get_run(run_id, user_team_id=info.user_team_id if info else "")
     if run is None:
         raise HTTPException(404, "unknown EvaluationRun: " + run_id)
     return {"run": run, "results": dependencies.repository.list_results(run_id),

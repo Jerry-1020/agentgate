@@ -2,6 +2,12 @@
 
 from agentgate.domain.evaluation_task import EvaluationTask, EvaluationTaskKind
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
+
+
+def _team_id() -> str:
+    info = get_user_info()
+    return info.user_team_id if info else ""
 
 
 class EvaluationTaskManagement:
@@ -9,7 +15,7 @@ class EvaluationTaskManagement:
         self.repository = repository
 
     def save(self, task: EvaluationTask) -> EvaluationTask:
-        runs = [self.repository.get_run(run_id) for run_id in task.run_ids]
+        runs = [self.repository.get_run(run_id, user_team_id=_team_id()) for run_id in task.run_ids]
         if any(run is None for run in runs):
             raise LookupError("task references an unknown run")
         if task.kind == EvaluationTaskKind.STABILITY and any(run.manifest != runs[0].manifest for run in runs):
@@ -37,9 +43,10 @@ class EvaluationTaskManagement:
 
     def get(self, task_id: str) -> EvaluationTask:
         task = self.repository.get_evaluation_task(task_id)
-        if task is None:
+        if task is None or any(self.repository.get_run(run_id, user_team_id=_team_id()) is None for run_id in task.run_ids):
             raise LookupError("unknown evaluation task")
         return task
 
     def list(self) -> list[EvaluationTask]:
-        return self.repository.list_evaluation_tasks()
+        return [task for task in self.repository.list_evaluation_tasks()
+                if all(self.repository.get_run(run_id, user_team_id=_team_id()) is not None for run_id in task.run_ids)]

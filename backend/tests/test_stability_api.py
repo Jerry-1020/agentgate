@@ -55,7 +55,7 @@ def test_invalid_repetitions_create_nothing(tmp_path, count):
     app = create_app(tmp_path / "runs.db", dispatcher=Dispatcher())
     with TestClient(app) as client:
         assert client.post("/api/stability-experiments", json=body(count)).status_code == 422
-        assert app.state.dependencies.repository.list_runs() == []
+        assert app.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
 def test_dispatch_failure_retains_group_without_zero_scores(tmp_path):
@@ -84,4 +84,4 @@ def test_group_transaction_rolls_back_new_runs_on_task_conflict(tmp_path):
         with pytest.raises(sqlite3.IntegrityError):
             repo.save_task_runs(duplicate, runs)
         assert all(repo.get_run(r.id) is None for r in runs)
-        assert len(repo.list_runs()) == 2
+        assert len(repo.list_runs(user_team_id="")) == 2

@@ -57,6 +57,7 @@ from agentgate.evaluator.rule.json_schema import validate_json_schema
 from agentgate.evaluator.rule.operators import resolve_condition_operator
 from agentgate.evaluator.rule.policy import validate_policy_id
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
 
 
 class EvaluatorNotFound(UnknownEvaluator, ValueError):
@@ -134,7 +135,11 @@ class EvaluatorManagement:
         self,
         include_disabled: bool = False,
     ) -> tuple[Evaluator, ...]:
-        users = self.repository.list_evaluators(include_disabled=include_disabled)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        users = self.repository.list_evaluators(
+            include_disabled=include_disabled, user_team_id=user_team_id
+        )
         collisions = set(self._builtin_evaluators).intersection(
             evaluator.id for evaluator in users
         )
@@ -148,7 +153,9 @@ class EvaluatorManagement:
         builtin = self._builtin_evaluators.get(evaluator_id)
         if builtin is not None:
             return builtin
-        evaluator = self.repository.get_evaluator(evaluator_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        evaluator = self.repository.get_evaluator(evaluator_id, user_team_id=user_team_id)
         if evaluator is None:
             raise EvaluatorNotFound(f"unknown Evaluator: {evaluator_id}")
         return evaluator
@@ -169,12 +176,19 @@ class EvaluatorManagement:
         combination: CombinationPolicy | None = None,
     ) -> tuple[Evaluator, EvaluatorDraft]:
         created_at = utcnow()
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        user_id = info.user_id if info else ""
+        user_name = info.user_name if info else ""
         evaluator = Evaluator(
             id=str(uuid4()),
             name=name.strip(),
             description=description.strip(),
             created_at=created_at,
             updated_at=created_at,
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
         )
         draft = create_evaluator_draft(
             evaluator,
@@ -189,6 +203,9 @@ class EvaluatorManagement:
             config=config,
             children=children,
             combination=combination,
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
         )
         self.repository.save_evaluator_with_draft(evaluator, draft)
         return evaluator, draft
@@ -204,7 +221,11 @@ class EvaluatorManagement:
         evaluator = self._user_evaluator(evaluator_id)
         if name is None and description is None and enabled is None:
             raise ValueError("Evaluator update must contain at least one field")
-        if enabled and self.repository.get_latest_evaluator_version(evaluator_id) is None:
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        if enabled and self.repository.get_latest_evaluator_version(
+            evaluator_id, user_team_id=user_team_id
+        ) is None:
             raise EvaluatorCatalogConflict(
                 "unpublished Evaluator cannot be enabled"
             )
@@ -223,15 +244,23 @@ class EvaluatorManagement:
 
     def delete_evaluator(self, evaluator_id: str) -> None:
         self._user_evaluator(evaluator_id)
-        if self.repository.get_latest_evaluator_version(evaluator_id) is not None:
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        if self.repository.get_latest_evaluator_version(
+            evaluator_id, user_team_id=user_team_id
+        ) is not None:
             raise EvaluatorCatalogConflict(
                 "published Evaluator cannot be deleted; disable it instead"
             )
-        self.repository.delete_unpublished_evaluator(evaluator_id)
+        self.repository.delete_unpublished_evaluator(
+            evaluator_id, user_team_id=user_team_id
+        )
 
     def get_draft(self, evaluator_id: str) -> EvaluatorDraft:
         self._user_evaluator(evaluator_id)
-        draft = self.repository.get_evaluator_draft(evaluator_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        draft = self.repository.get_evaluator_draft(evaluator_id, user_team_id=user_team_id)
         if draft is None:
             raise EvaluatorDraftNotFound(
                 f"Evaluator has no active draft: {evaluator_id}"
@@ -244,12 +273,18 @@ class EvaluatorManagement:
         based_on_version: str | None = None,
     ) -> EvaluatorDraft:
         evaluator = self._user_evaluator(evaluator_id)
-        if self.repository.get_evaluator_draft(evaluator_id) is not None:
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        if self.repository.get_evaluator_draft(
+            evaluator_id, user_team_id=user_team_id
+        ) is not None:
             raise EvaluatorCatalogConflict("Evaluator already has an active draft")
         base = (
             self.get_version(evaluator_id, based_on_version)
             if based_on_version is not None
-            else self.repository.get_latest_evaluator_version(evaluator_id)
+            else self.repository.get_latest_evaluator_version(
+                evaluator_id, user_team_id=user_team_id
+            )
         )
         if base is None:
             raise EvaluatorCatalogConflict(
@@ -297,14 +332,24 @@ class EvaluatorManagement:
 
     def discard_draft(self, evaluator_id: str) -> None:
         draft = self.get_draft(evaluator_id)
-        self.repository.delete_evaluator_draft(evaluator_id, draft.id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        self.repository.delete_evaluator_draft(
+            evaluator_id, draft.id, user_team_id=user_team_id
+        )
 
     def list_versions(self, evaluator_id: str) -> tuple[EvaluatorSpec, ...]:
         builtin = self._builtin_specs_by_id.get(evaluator_id)
         if builtin is not None:
             return (builtin,)
         self._user_evaluator(evaluator_id)
-        return tuple(self.repository.list_evaluator_versions(evaluator_id))
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        return tuple(
+            self.repository.list_evaluator_versions(
+                evaluator_id, user_team_id=user_team_id
+            )
+        )
 
     def get_version(self, evaluator_id: str, version: str) -> EvaluatorSpec:
         builtin = self._builtin_specs_by_id.get(evaluator_id)
@@ -315,7 +360,11 @@ class EvaluatorManagement:
                 f"unknown Evaluator version: {evaluator_id}@{version}"
             )
         self._user_evaluator(evaluator_id)
-        published = self.repository.get_evaluator_version(evaluator_id, version)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        published = self.repository.get_evaluator_version(
+            evaluator_id, version, user_team_id=user_team_id
+        )
         if published is None:
             raise EvaluatorVersionNotFound(
                 f"unknown Evaluator version: {evaluator_id}@{version}"
@@ -325,7 +374,11 @@ class EvaluatorManagement:
     def publish_draft(self, evaluator_id: str) -> EvaluatorSpec:
         evaluator = self._user_evaluator(evaluator_id)
         draft = self.get_draft(evaluator_id)
-        latest = self.repository.get_latest_evaluator_version(evaluator_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        latest = self.repository.get_latest_evaluator_version(
+            evaluator_id, user_team_id=user_team_id
+        )
         next_version = int(latest.version) + 1 if latest is not None else 1
         published = build_evaluator_publication(
             evaluator,
@@ -459,7 +512,9 @@ class EvaluatorManagement:
             raise BuiltinEvaluatorMutation(
                 f"built-in Evaluator is read-only: {evaluator_id}"
             )
-        evaluator = self.repository.get_evaluator(evaluator_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        evaluator = self.repository.get_evaluator(evaluator_id, user_team_id=user_team_id)
         if evaluator is None:
             raise EvaluatorNotFound(f"unknown Evaluator: {evaluator_id}")
         return evaluator
@@ -551,7 +606,11 @@ class EvaluatorManagement:
         else:
             spec = self._builtin_specs_by_id.get(evaluator_id)
             if spec is None:
-                spec = self.repository.get_latest_evaluator_version(evaluator_id)
+                info = get_user_info()
+                user_team_id = info.user_team_id if info else ""
+                spec = self.repository.get_latest_evaluator_version(
+                    evaluator_id, user_team_id=user_team_id
+                )
                 if spec is None:
                     raise EvaluatorCatalogConflict(
                         f"unpublished Evaluator cannot be selected: {evaluator_id}"

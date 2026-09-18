@@ -18,6 +18,14 @@ from agentgate.dataset.versioning import (
 )
 from agentgate.domain import Case, Dataset, DatasetVersion, utcnow
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
+
+
+def _user_context() -> tuple[str, str, str]:
+    info = get_user_info()
+    if info is None:
+        return "", "", ""
+    return info.user_team_id, info.user_id, info.user_name
 
 
 class DatasetManagement:
@@ -27,16 +35,27 @@ class DatasetManagement:
         self.repository = repository
 
     def list_datasets(self, include_archived: bool = False) -> list[Dataset]:
-        return self.repository.list_datasets(include_archived=include_archived)
+        user_team_id, _, _ = _user_context()
+        return self.repository.list_datasets(
+            include_archived=include_archived, user_team_id=user_team_id
+        )
 
     def get_dataset(self, dataset_id: str) -> Dataset:
-        dataset = self.repository.get_dataset(dataset_id)
+        user_team_id, _, _ = _user_context()
+        dataset = self.repository.get_dataset(dataset_id, user_team_id=user_team_id)
         if dataset is None:
             raise ValueError(f"unknown Dataset: {dataset_id}")
         return dataset
 
     def create_dataset(self, name: str, description: str = "") -> Dataset:
-        dataset = Dataset(name=name.strip(), description=description.strip())
+        user_team_id, user_id, user_name = _user_context()
+        dataset = Dataset(
+            name=name.strip(),
+            description=description.strip(),
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
+        )
         self.repository.save_dataset(dataset)
         return dataset
 
@@ -69,27 +88,35 @@ class DatasetManagement:
         self, dataset_id: str, include_draft: bool = True
     ) -> list[DatasetVersion]:
         self.get_dataset(dataset_id)
+        user_team_id, _, _ = _user_context()
         return self.repository.list_dataset_versions(
-            dataset_id, include_draft=include_draft
+            dataset_id, include_draft=include_draft, user_team_id=user_team_id
         )
 
     def get_version(self, dataset_id: str, version: int) -> DatasetVersion:
         self.get_dataset(dataset_id)
-        item = self.repository.get_published_dataset_version(dataset_id, version)
+        user_team_id, _, _ = _user_context()
+        item = self.repository.get_published_dataset_version(
+            dataset_id, version, user_team_id=user_team_id
+        )
         if item is None:
             raise ValueError(f"unknown Dataset version: {dataset_id} v{version}")
         return item
 
     def latest_published(self, dataset_id: str) -> DatasetVersion:
         self.get_dataset(dataset_id)
-        version = self.repository.get_latest_published_dataset_version(dataset_id)
+        user_team_id, _, _ = _user_context()
+        version = self.repository.get_latest_published_dataset_version(
+            dataset_id, user_team_id=user_team_id
+        )
         if version is None:
             raise ValueError(f"Dataset has no published version: {dataset_id}")
         return version
 
     def get_draft(self, dataset_id: str) -> DatasetVersion | None:
         self.get_dataset(dataset_id)
-        return self.repository.get_dataset_draft(dataset_id)
+        user_team_id, _, _ = _user_context()
+        return self.repository.get_dataset_draft(dataset_id, user_team_id=user_team_id)
 
     def create_draft(
         self, dataset_id: str, based_on_version: int | None = None
@@ -97,20 +124,33 @@ class DatasetManagement:
         dataset = self.get_dataset(dataset_id)
         if dataset.archived:
             raise ValueError("archived Dataset cannot be edited")
-        if self.repository.get_dataset_draft(dataset_id) is not None:
+        user_team_id, user_id, user_name = _user_context()
+        if self.repository.get_dataset_draft(
+            dataset_id, user_team_id=user_team_id
+        ) is not None:
             raise ValueError("Dataset already has an active draft")
         base = (
             self.get_version(dataset_id, based_on_version)
             if based_on_version is not None
-            else self.repository.get_latest_published_dataset_version(dataset_id)
+            else self.repository.get_latest_published_dataset_version(
+                dataset_id, user_team_id=user_team_id
+            )
         )
         draft = build_draft(dataset, base, str(uuid4()), utcnow())
+        draft = draft.model_copy(update={
+            "user_team_id": user_team_id,
+            "user_id": user_id,
+            "user_name": user_name,
+        })
         self.repository.save_dataset_version(draft)
         return draft
 
     def discard_draft(self, dataset_id: str) -> None:
         draft = self._draft(dataset_id)
-        self.repository.delete_dataset_draft(dataset_id, draft.id)
+        user_team_id, _, _ = _user_context()
+        self.repository.delete_dataset_draft(
+            dataset_id, draft.id, user_team_id=user_team_id
+        )
 
     def _draft(self, dataset_id: str) -> DatasetVersion:
         draft = self.get_draft(dataset_id)
@@ -152,7 +192,10 @@ class DatasetManagement:
 
     def publish_draft(self, dataset_id: str) -> DatasetVersion:
         draft = self._draft(dataset_id)
-        latest = self.repository.get_latest_published_dataset_version(dataset_id)
+        user_team_id, _, _ = _user_context()
+        latest = self.repository.get_latest_published_dataset_version(
+            dataset_id, user_team_id=user_team_id
+        )
         next_version = (latest.version if latest and latest.version else 0) + 1
         published = build_publication(
             draft,
@@ -160,6 +203,11 @@ class DatasetManagement:
             version=next_version,
             published_at=utcnow(),
         )
+        published = published.model_copy(update={
+            "user_team_id": draft.user_team_id,
+            "user_id": draft.user_id,
+            "user_name": draft.user_name,
+        })
         self.repository.replace_dataset_draft(draft.id, published)
         return published
 
@@ -174,7 +222,13 @@ class DatasetManagement:
             if source_version is not None
             else self.latest_published(source_dataset_id)
         )
-        dataset = Dataset(name=name.strip())
+        user_team_id, user_id, user_name = _user_context()
+        dataset = Dataset(
+            name=name.strip(),
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
+        )
         draft = DatasetVersion(
             dataset_id=dataset.id,
             dataset_name=dataset.name,
@@ -184,6 +238,9 @@ class DatasetManagement:
                 for case in source.cases
             ),
             notes=f"Copied from {source_dataset_id} v{source.version}",
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
         )
         self.repository.save_dataset_with_version(dataset, draft)
         return dataset, draft
@@ -192,7 +249,18 @@ class DatasetManagement:
         self, source: str | bytes | Mapping[str, Any]
     ) -> tuple[Dataset, DatasetVersion]:
         dataset, version = load_dataset(source, "json")
-        if self.repository.get_dataset(dataset.id) is not None:
+        user_team_id, user_id, user_name = _user_context()
+        dataset = dataset.model_copy(update={
+            "user_team_id": user_team_id,
+            "user_id": user_id,
+            "user_name": user_name,
+        })
+        version = version.model_copy(update={
+            "user_team_id": user_team_id,
+            "user_id": user_id,
+            "user_name": user_name,
+        })
+        if self.repository.get_dataset(dataset.id, user_team_id=user_team_id) is not None:
             raise ValueError(f"Dataset already exists: {dataset.id}")
         self.repository.save_dataset_with_version(dataset, version)
         return dataset, version
@@ -201,12 +269,22 @@ class DatasetManagement:
         self, source: bytes, name: str, description: str = ""
     ) -> tuple[Dataset, DatasetVersion]:
         cases = load_cases(source, "xlsx")
-        dataset = Dataset(name=name.strip(), description=description.strip())
+        user_team_id, user_id, user_name = _user_context()
+        dataset = Dataset(
+            name=name.strip(),
+            description=description.strip(),
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
+        )
         draft = DatasetVersion(
             dataset_id=dataset.id,
             dataset_name=dataset.name,
             dataset_description=dataset.description,
             cases=cases,
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
         )
         self.repository.save_dataset_with_version(dataset, draft)
         return dataset, draft

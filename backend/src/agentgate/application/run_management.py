@@ -23,6 +23,7 @@ from agentgate.run.engine import RunEngine, TraceResolver
 from agentgate.run.retry import retry_delay_seconds
 from agentgate.run.target_protocol import TargetAdapterProtocol
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
 
 from .dataset_management import DatasetManagement
 from .evaluator_management import EvaluatorManagement
@@ -61,6 +62,8 @@ class RunManagement:
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
         persist: bool = True,
+        api_key: str | None = None,
+        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         """Resolve exact inputs and persist a pending or scheduled Run."""
 
@@ -87,6 +90,10 @@ class RunManagement:
             if scheduled_for is not None
             else None
         )
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        user_id = info.user_id if info else ""
+        user_name = info.user_name if info else ""
         run = EvaluationRun(
             manifest=RunManifest(
                 dataset=dataset,
@@ -97,7 +104,7 @@ class RunManagement:
                 metric_plan=metric_plan or MetricPlan(),
                 gate_spec=gate_spec or ReleaseGateSpec(),
                 timeout_seconds=timeout_seconds,
-                max_parallel_cases=max_parallel_cases,
+                max_parallel_cases=case_max_parallel if case_max_parallel is not None else max_parallel_cases,
                 max_retries=max_retries,
             ),
             status=(
@@ -107,6 +114,11 @@ class RunManagement:
             ),
             created_at=created_at,
             scheduled_for=normalized_schedule,
+            user_team_id=user_team_id,
+            user_id=user_id,
+            user_name=user_name,
+            api_key=api_key,
+            case_max_parallel=case_max_parallel,
         )
         if persist:
             self.repository.save_run(run)
@@ -115,7 +127,11 @@ class RunManagement:
     def create_rerun(self, source_run_id: str, *, persist: bool = True) -> EvaluationRun:
         """Create a pending Run from one terminal Run's exact manifest."""
 
-        source = self.repository.get_run(source_run_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        source = self.repository.get_run(
+            source_run_id, user_team_id=user_team_id
+        )
         if source is None:
             raise LookupError(f"unknown EvaluationRun: {source_run_id}")
         if source.status in {
@@ -127,7 +143,14 @@ class RunManagement:
                 f"cannot rerun {source.status.value} EvaluationRun"
             )
 
-        rerun = EvaluationRun(manifest=source.manifest)
+        rerun = EvaluationRun(
+            manifest=source.manifest,
+            user_team_id=source.user_team_id,
+            user_id=source.user_id,
+            user_name=source.user_name,
+            api_key=source.api_key,
+            case_max_parallel=source.case_max_parallel,
+        )
         if persist:
             self.repository.save_run(rerun)
         return rerun
@@ -157,7 +180,9 @@ class RunManagement:
     ) -> EvaluationRun:
         """Submit one persisted pending Run for worker-side execution."""
 
-        run = self.repository.get_run(run_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        run = self.repository.get_run(run_id, user_team_id=user_team_id)
         if run is None:
             raise ValueError(f"unknown EvaluationRun: {run_id}")
         if run.status is not RunStatus.PENDING:
@@ -186,7 +211,9 @@ class RunManagement:
     ) -> EvaluationRun:
         """Persist cancellation and best-effort signal its dispatched job."""
 
-        run = self.repository.get_run(run_id)
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        run = self.repository.get_run(run_id, user_team_id=user_team_id)
         if run is None:
             raise LookupError(f"unknown EvaluationRun: {run_id}")
         if run.status is RunStatus.CANCELLED:
@@ -195,9 +222,11 @@ class RunManagement:
             raise ValueError(f"cannot cancel {run.status.value} EvaluationRun")
         was_dispatched = run.status in {RunStatus.PENDING, RunStatus.RUNNING}
 
-        cancelled = self.repository.cancel_run(run.id, utcnow())
+        cancelled = self.repository.cancel_run(
+            run.id, utcnow(), user_team_id=user_team_id
+        )
         if cancelled is None:
-            current = self.repository.get_run(run.id)
+            current = self.repository.get_run(run.id, user_team_id=user_team_id)
             if current is None:
                 raise LookupError(f"unknown EvaluationRun: {run_id}")
             if current.status is RunStatus.CANCELLED:

@@ -1,6 +1,14 @@
 # AgentGate Project Progress
 
-Last updated: 2026-09-17
+Last updated: 2026-09-18
+
+## Upstream 33db48a integration — 2026-09-18
+
+- Integrated the new open-fin-sub/agentgate refactor-1 backend into an isolated delivery copy, retaining the existing UI, local-bank adapter, SDK, task links and UUID redaction fix.
+- Added safe legacy table-prefix/identity migration; verified all 16 old tables and 112 historical runs on a read-only-source SQLite backup.
+- Adapted task/sample/stability visibility and effective concurrency snapshots. Explicitly reject unsupported raw per-run API keys and nonfunctional BJS dispatch. Retain explicit external model environment loading.
+- Backend: 1033 passed / 1 skipped; tested agents: 19 passed; frontend build passed. Three live browser runs covered 24 cases / 27 turns, with 297 raw SDK/database/API evidence checks passing. Live Judge, composite, static analysis and root-cause reports also persisted successfully; Judge review outcomes remain unchanged.
+- Full checkpoint, delivery upgrade instructions and customer factory limitations: workspace-root docs/bank-agents/upstream-sync-20260918.md. Customer Pod create/readiness/upload/delete are not wired into the current local adapter and remain unverified in the customer environment.
 
 ## Reproducible bank-target delivery — 2026-09-17
 

@@ -10,6 +10,7 @@ from agentgate.domain import EvaluationRun
 from agentgate.integrations.targets.local_bank import LocalBankClient, local_bank_target
 from agentgate.run.target_protocol import TargetExecutionError
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
+from agentgate.server.user_context import get_user_info
 
 router = APIRouter(prefix="/api", tags=["bank-targets"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -63,7 +64,8 @@ def launch(request: BankLaunch, dependencies: Dependencies):
             for turn in case.turns:
                 if set(turn.input) != {"txt"} or not isinstance(turn.input["txt"], str) or not 1 <= len(turn.input["txt"].strip()) <= 4000:
                     raise ValueError("bank turns require nonblank txt up to 4000 characters")
-        runs = [run, *(EvaluationRun(manifest=run.manifest) for _ in range(request.repetitions - 1))]
+        runs = [run, *(EvaluationRun(manifest=run.manifest, user_team_id=run.user_team_id,
+            user_id=run.user_id, user_name=run.user_name) for _ in range(request.repetitions - 1))]
         task = EvaluationTask(id=run.id, kind="stability" if request.repetitions > 1 else "single", run_ids=tuple(r.id for r in runs))
         dependencies.repository.save_task_runs(task, runs)
         for item in runs:
@@ -87,7 +89,8 @@ def launch(request: BankLaunch, dependencies: Dependencies):
 
 @router.get("/runs/{run_id}/target-descriptor")
 def run_target(run_id: str, dependencies: Dependencies):
-    run = dependencies.repository.get_run(run_id)
+    info = get_user_info()
+    run = dependencies.repository.get_run(run_id, user_team_id=info.user_team_id if info else "")
     if run is None:
         raise HTTPException(404, "unknown run")
     descriptor = dependencies.repository.get_target_descriptor(run.manifest.target.descriptor_sha256)

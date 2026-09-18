@@ -16,6 +16,12 @@ from agentgate.optimizer.pipeline import ANALYZER_VERSION
 from agentgate.evaluator.judge.model_protocol import JudgeModelClient
 from agentgate.optimizer import build_optimization_report
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
+
+
+def _user_team_id() -> str:
+    info = get_user_info()
+    return info.user_team_id if info else ""
 
 
 class OptimizationRunNotFound(LookupError):
@@ -82,7 +88,7 @@ class OptimizationAnalysis:
         skill_analysis_report_id: str | None = None,
     ) -> OptimizationReport:
         identifier = require_non_blank(run_id, "EvaluationRun id")
-        run = self.repository.get_run(identifier)
+        run = self.repository.get_run(identifier, user_team_id=_user_team_id())
         if run is None:
             raise OptimizationRunNotFound(
                 f"unknown EvaluationRun: {identifier}"

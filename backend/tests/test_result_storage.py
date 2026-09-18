@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.sqlite import SQLiteRepository, _T_RESULTS
 
 
 def completed_run(tmp_path, execute_demo):
@@ -53,7 +53,7 @@ def test_result_batch_rolls_back_when_a_later_result_conflicts(tmp_path, execute
     repository, run, results = completed_run(tmp_path, execute_demo)
     first, second = results[:2]
     with sqlite3.connect(repository.path) as connection:
-        connection.execute("DELETE FROM results WHERE id = ?", (first.id,))
+        connection.execute(f"DELETE FROM {_T_RESULTS} WHERE id = ?", (first.id,))
 
     conflict = second.model_copy(update={"id": str(uuid4())})
     with pytest.raises(ValueError, match="already have an EvaluationResult"):

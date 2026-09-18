@@ -4,6 +4,7 @@ from statistics import mean, variance, stdev
 from fastapi import APIRouter, HTTPException
 from pydantic import Field, ConfigDict
 from agentgate.server.routes.runs import LaunchRequest, Dependencies
+from agentgate.application.evaluation_task_management import EvaluationTaskManagement
 
 router = APIRouter(prefix="/api/stability-experiments", tags=["stability"])
 
@@ -25,12 +26,15 @@ def launch(body: StabilityRequest, dependencies: Dependencies):
 
 @router.get("")
 def list_experiments(dependencies: Dependencies):
-    return [t for t in dependencies.repository.list_evaluation_tasks() if t.kind == "stability"]
+    return [t for t in EvaluationTaskManagement(dependencies.repository).list() if t.kind == "stability"]
 
 
 @router.get("/{task_id}")
 def summary(task_id: str, dependencies: Dependencies):
-    task = dependencies.repository.get_evaluation_task(task_id)
+    try:
+        task = EvaluationTaskManagement(dependencies.repository).get(task_id)
+    except LookupError:
+        raise HTTPException(404, "unknown stability experiment") from None
     if task is None or task.kind != "stability":
         raise HTTPException(404, "unknown stability experiment")
     rows, scores = [], []

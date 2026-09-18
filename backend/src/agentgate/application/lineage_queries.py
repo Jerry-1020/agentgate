@@ -26,8 +26,14 @@ from agentgate.domain import (
 )
 from agentgate.domain.base import require_non_blank, require_sha256
 from agentgate.storage.repository import AgentGateRepository
+from agentgate.server.user_context import get_user_info
 
 from .target_catalog import TargetCatalog
+
+
+def _user_team_id() -> str:
+    info = get_user_info()
+    return info.user_team_id if info else ""
 
 
 LineageNodeKind: TypeAlias = Literal[
@@ -144,7 +150,7 @@ class LineageQueries:
 
     def get_run_lineage(self, run_id: str) -> LineageGraph:
         run_identity = require_non_blank(run_id, "EvaluationRun id")
-        run = self.repository.get_run(run_identity)
+        run = self.repository.get_run(run_identity, user_team_id=_user_team_id())
         if run is None:
             raise LookupError(f"unknown EvaluationRun: {run_identity}")
         descriptor = self.target_catalog.resolve_descriptor(
@@ -156,15 +162,16 @@ class LineageQueries:
     def get_dataset_lineage(
         self, dataset_id: str, version: int, limit: int = 50
     ) -> LineageGraph:
+        team_id = _user_team_id()
         dataset = self.repository.get_published_dataset_version(
-            require_non_blank(dataset_id, "Dataset id"), version
+            require_non_blank(dataset_id, "Dataset id"), version, user_team_id=team_id
         )
         if dataset is None:
             raise LookupError(f"unknown published DatasetVersion: {dataset_id} v{version}")
         return self._expand_reverse(
             _dataset_node(dataset),
             self.repository.list_runs_by_dataset_version(
-                dataset.dataset_id, version, limit
+                dataset.dataset_id, version, limit, user_team_id=team_id
             ),
         )
 
@@ -175,8 +182,9 @@ class LineageQueries:
         case_id: str,
         limit: int = 50,
     ) -> LineageGraph:
+        team_id = _user_team_id()
         dataset = self.repository.get_published_dataset_version(
-            require_non_blank(dataset_id, "Dataset id"), version
+            require_non_blank(dataset_id, "Dataset id"), version, user_team_id=team_id
         )
         if dataset is None:
             raise LookupError(f"unknown published DatasetVersion: {dataset_id} v{version}")
@@ -195,6 +203,7 @@ class LineageQueries:
                 case.id,
                 case_hash,
                 limit,
+                user_team_id=team_id,
             ),
         )
 
@@ -214,6 +223,7 @@ class LineageQueries:
             ref.external_version_id,
             limit,
             content_sha256=descriptor.content_sha256,
+            user_team_id=_user_team_id(),
         )
         return self._expand_reverse(root, runs, require_root_in_run=True)
 
@@ -258,6 +268,7 @@ class LineageQueries:
             skill_version,
             limit,
             content_sha256=root.content_sha256,
+            user_team_id=_user_team_id(),
         )
         return self._expand_reverse(root, runs, require_root_in_run=True)
 
@@ -271,7 +282,7 @@ class LineageQueries:
         identity = require_non_blank(evaluator_id, "Evaluator id")
         evaluator_version = require_non_blank(version, "Evaluator version")
         runs = self.repository.list_runs_by_evaluator_version(
-            identity, evaluator_version, limit
+            identity, evaluator_version, limit, user_team_id=_user_team_id()
         )
         candidates = {
             node.id: node

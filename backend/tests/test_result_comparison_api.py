@@ -121,7 +121,7 @@ def test_launch_run_comparison_rejects_unknown_evaluator_version(tmp_path) -> No
     assert response.json()["detail"] == (
         "unknown Evaluator version: final-state@999"
     )
-    assert application.state.dependencies.repository.list_runs() == []
+    assert application.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
 def test_launch_run_comparison_rejects_identical_versions(tmp_path) -> None:
@@ -138,7 +138,7 @@ def test_launch_run_comparison_rejects_identical_versions(tmp_path) -> None:
         "A/B variants must use different Agent versions"
     )
     assert dispatcher.run_ids == []
-    assert application.state.dependencies.repository.list_runs() == []
+    assert application.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
 def test_launch_run_comparison_rejects_unknown_demo_version(tmp_path) -> None:
@@ -155,7 +155,7 @@ def test_launch_run_comparison_rejects_unknown_demo_version(tmp_path) -> None:
         "unknown demo Target version: unknown-version"
     )
     assert dispatcher.run_ids == []
-    assert application.state.dependencies.repository.list_runs() == []
+    assert application.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
 def test_launch_run_comparison_rejects_raw_target_configuration(tmp_path) -> None:
@@ -169,7 +169,7 @@ def test_launch_run_comparison_rejects_raw_target_configuration(tmp_path) -> Non
 
     assert response.status_code == 422
     assert dispatcher.run_ids == []
-    assert application.state.dependencies.repository.list_runs() == []
+    assert application.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
 def test_launch_run_comparison_returns_partial_dispatch_states(tmp_path) -> None:

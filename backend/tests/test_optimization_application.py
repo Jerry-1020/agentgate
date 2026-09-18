@@ -297,7 +297,9 @@ class RepositoryStub:
     def save_optimization_report(self, key, report):
         return self.optimizations.setdefault(key, report)
 
-    def get_run(self, run_id: str) -> EvaluationRun | None:
+    def get_run(
+        self, run_id: str, *, user_team_id: str | None = None
+    ) -> EvaluationRun | None:
         return self.run if self.run is not None and self.run.id == run_id else None
 
     def list_results(self, run_id: str) -> list[EvaluationResult]:

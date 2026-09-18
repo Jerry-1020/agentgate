@@ -95,6 +95,11 @@ class RunEngine:
         run: EvaluationRun,
         target_adapter: TargetAdapterProtocol,
     ) -> None:
+        max_parallel = (
+            run.case_max_parallel
+            if run.case_max_parallel and run.case_max_parallel > 0
+            else run.manifest.max_parallel_cases
+        )
         pending_cases = iter(run.manifest.execution_cases)
         active: deque[ActiveCase] = deque()
         exhausted = False
@@ -102,7 +107,7 @@ class RunEngine:
         try:
             while active or not exhausted:
                 self._raise_if_cancelled(run.id)
-                while not exhausted and len(active) < run.manifest.max_parallel_cases:
+                while not exhausted and len(active) < max_parallel:
                     self._raise_if_cancelled(run.id)
                     try:
                         case = next(pending_cases)

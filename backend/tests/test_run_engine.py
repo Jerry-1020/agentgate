@@ -582,7 +582,7 @@ def test_engine_observes_cancellation_after_wait_and_cancels_parallel_handles(
 
     class CancelOnWaitAdapter(WindowedTargetAdapter):
         def wait(self, handle, timeout_seconds):
-            cancelled = repository.cancel_run(run.id, utcnow())
+            cancelled = repository.cancel_run(run.id, utcnow(), user_team_id="")
             assert cancelled is not None
             return super().wait(handle, timeout_seconds)
 
@@ -608,7 +608,7 @@ def test_engine_observes_cancellation_during_evaluation_before_results(
     target_adapter = StubTargetAdapter()
 
     def cancel_during_evaluation(case, trace, specs):
-        cancelled = repository.cancel_run(run.id, utcnow())
+        cancelled = repository.cancel_run(run.id, utcnow(), user_team_id="")
         assert cancelled is not None
         return evaluate_case(case, trace, specs)
 
@@ -632,7 +632,7 @@ def test_engine_observes_cancellation_during_retry_backoff(tmp_path) -> None:
 
     def cancel_during_backoff(delay):
         delays.append(delay)
-        cancelled = repository.cancel_run(run.id, utcnow())
+        cancelled = repository.cancel_run(run.id, utcnow(), user_team_id="")
         assert cancelled is not None
 
     cancelled = RunEngine(
@@ -662,7 +662,7 @@ def test_engine_preserves_cancellation_that_wins_completion_race(
 
     def cancel_before_completion(value):
         if value.status is RunStatus.COMPLETED:
-            cancelled = repository.cancel_run(value.id, value.completed_at)
+            cancelled = repository.cancel_run(value.id, value.completed_at, user_team_id="")
             assert cancelled is not None
         original_save_run(value)
 

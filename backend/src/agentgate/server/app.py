@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.dependencies import build_dependencies
+from agentgate.server.logging_config import setup_logging
+from agentgate.server.user_context import UserInfo, set_user_info, reset_user_info
 from agentgate.server.routes import (
     bank_targets,
     catalogs,
@@ -29,6 +34,8 @@ from agentgate.server.routes import (
     telemetry,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def create_app(
     database_path: str | Path | None = None,
@@ -36,6 +43,8 @@ def create_app(
     api_key_encryptor: ApiKeyEncryptor | None = None,
 ) -> FastAPI:
     """Build one AgentGate HTTP application with isolated dependencies."""
+
+    setup_logging()
 
     dependencies = build_dependencies(
         database_path,
@@ -62,6 +71,22 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    class UserContextMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            info = UserInfo(
+                user_team_id=request.headers.get("user_team_id", ""),
+                user_id=request.headers.get("user_id", ""),
+                user_name=request.headers.get("user_name", ""),
+            )
+            token = set_user_info(info)
+            try:
+                return await call_next(request)
+            finally:
+                reset_user_info(token)
+
+    application.add_middleware(UserContextMiddleware)
+
     application.state.dependencies = dependencies
     application.include_router(system.router)
     application.include_router(bank_targets.router)

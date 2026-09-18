@@ -4,6 +4,8 @@
 
 **本次交付入口：[安装与端到端验收](docs/bank-agents/README.md)。**
 
+2026-09-18 更新：已集成后端上游 `33db48a`，包括用户/团队上下文、并发参数和旧数据库迁移。前端、被测智能体和 SDK 源码保持原样。已有部署请先阅读[升级与回退说明](docs/bank-agents/upstream-sync-20260918.md#七本次代码交付与升级)。
+
 ## 快速开始
 
 准备 Python 3.11、uv、Node.js 22/npm、Redis 和有效的支持工具调用的模型配置。
@@ -47,4 +49,4 @@ backend/.venv/bin/python scripts/verify-bank-traces.py
 
 三模式启动必须有有效模型配置，无 Mock fallback。旧 Demo 入口 start-macos.command 仍保留；旧日期能力记录是历史资料，不应覆盖本次交付说明。现有历史浏览器测试包含固定数据依赖，新机器请使用上述验收脚本。
 
-后端来源：open-fin/agentgate 的 refactor-1，基线 e3760d16602c9423b54be968ea97839a5144d691，另有本地接入与修复。后端 Apache-2.0 许可保留在 backend/LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。
+后端原基线：open-fin/agentgate 的 refactor-1，提交 e3760d16602c9423b54be968ea97839a5144d691；2026-09-18 集成 open-fin-sub/agentgate 的 refactor-1 提交 33db48afcb83b0331e6e012abbd100c823268313，并保留本地接入与兼容性修复。后端 Apache-2.0 许可保留在 backend/LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。

@@ -25,7 +25,7 @@ def main():
             rid = run["run_id"]
             for case in run["samples"]["run"]["manifest"]["dataset"]["cases"]:
                 trace = json.loads(platform.execute(
-                    "SELECT payload FROM traces WHERE run_id=? AND case_id=?",
+                    "SELECT payload FROM agentgate_traces WHERE run_id=? AND case_id=?",
                     (rid, case["id"]),
                 ).fetchone()[0])
                 response = client.get(f"http://127.0.0.1:8097/api/runs/{rid}/traces/{case['id']}")

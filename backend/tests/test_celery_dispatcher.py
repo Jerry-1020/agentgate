@@ -202,7 +202,7 @@ def test_worker_skips_run_cancelled_before_delivery(tmp_path, monkeypatch) -> No
     run = RunManagement(repository, management).create_run(
         target(), dataset_id=LOAN_DATASET.id
     )
-    cancelled = repository.cancel_run(run.id, run.created_at)
+    cancelled = repository.cancel_run(run.id, run.created_at, user_team_id="")
     assert cancelled is not None
 
     status = execute_evaluation_run.run(run.id)

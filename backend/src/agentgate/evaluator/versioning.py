@@ -38,6 +38,9 @@ def create_evaluator_draft(
     config: Mapping[str, Any],
     children: Sequence[EvaluatorRef],
     combination: CombinationPolicy | None,
+    user_team_id: str = "",
+    user_id: str = "",
+    user_name: str = "",
 ) -> EvaluatorDraft:
     """Create a complete draft without a base publication."""
 
@@ -59,6 +62,9 @@ def create_evaluator_draft(
         combination=combination,
         created_at=created,
         updated_at=created,
+        user_team_id=user_team_id,
+        user_id=user_id,
+        user_name=user_name,
     )
 
 
@@ -86,6 +92,9 @@ def clone_evaluator_version_to_draft(
         config=base_spec.config,
         children=base_spec.children,
         combination=base_spec.combination,
+        user_team_id=base_spec.user_team_id,
+        user_id=base_spec.user_id,
+        user_name=base_spec.user_name,
     ).model_copy(update={"based_on_version": base_spec.version})
 
 
@@ -123,6 +132,9 @@ def replace_evaluator_draft(
         combination=combination,
         created_at=draft.created_at,
         updated_at=updated,
+        user_team_id=draft.user_team_id,
+        user_id=draft.user_id,
+        user_name=draft.user_name,
     )
 
 
@@ -151,4 +163,7 @@ def publish_evaluator_draft(
         config=draft.config,
         children=draft.children,
         combination=draft.combination,
+        user_team_id=draft.user_team_id,
+        user_id=draft.user_id,
+        user_name=draft.user_name,
     )

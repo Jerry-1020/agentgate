@@ -20,7 +20,7 @@ def seed(database):
     output = []
     for mode in ("base", "workflow", "cloudshrimp"):
         name = f"独立贷款智能体 · {mode} · test-policy-v1"
-        existing = next((d for d in repo.list_datasets() if d.name == name), None)
+        existing = next((d for d in datasets.list_datasets() if d.name == name), None)
         if existing:
             output.append({"mode": mode, "dataset_id": existing.id, "existing": True})
             continue

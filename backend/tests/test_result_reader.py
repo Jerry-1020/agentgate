@@ -252,7 +252,7 @@ def test_progress_tolerates_worker_claim_during_queue_lookup(
     pending = management.create_run(target(), dataset_id=LOAN_DATASET.id)
     original_list = repository.list_runs_by_status
 
-    def claim_then_list(status, *, limit=None, oldest_first=False):
+    def claim_then_list(status, *, limit=None, oldest_first=False, user_team_id=None):
         if status is RunStatus.PENDING:
             repository.claim_pending_run(
                 pending.id, pending.created_at + timedelta(seconds=1)

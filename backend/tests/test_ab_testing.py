@@ -94,7 +94,7 @@ def test_create_ab_runs_rejects_same_version_before_persisting(tmp_path) -> None
             dataset_id=LOAN_DATASET.id,
         )
 
-    assert repository.list_runs() == []
+    assert repository.list_runs(user_team_id="") == []
 
 
 def test_create_ab_runs_rejects_different_agent_before_persisting(tmp_path) -> None:
@@ -124,7 +124,7 @@ def test_create_ab_runs_rejects_different_agent_before_persisting(tmp_path) -> N
             dataset_id=LOAN_DATASET.id,
         )
 
-    assert repository.list_runs() == []
+    assert repository.list_runs(user_team_id="") == []
 
 
 def test_create_ab_runs_preflights_both_descriptors_before_persisting(tmp_path) -> None:
@@ -147,7 +147,7 @@ def test_create_ab_runs_preflights_both_descriptors_before_persisting(tmp_path) 
             dataset_id=LOAN_DATASET.id,
         )
 
-    assert repository.list_runs() == []
+    assert repository.list_runs(user_team_id="") == []
 
 
 def test_create_ab_runs_dispatches_candidate_after_baseline_failure(tmp_path) -> None:

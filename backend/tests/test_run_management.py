@@ -192,8 +192,7 @@ def test_create_rerun_accepts_failed_and_cancelled_sources(tmp_path) -> None:
     repository.save_run(failed)
     cancelled = repository.cancel_run(
         cancelled_pending.id,
-        cancelled_pending.created_at,
-    )
+        cancelled_pending.created_at, user_team_id="")
     assert cancelled is not None
 
     failed_rerun = management.create_rerun(failed.id)
@@ -224,7 +223,7 @@ def test_create_rerun_rejects_unknown_and_active_sources(tmp_path) -> None:
     with pytest.raises(ValueError, match="cannot rerun running"):
         management.create_rerun(running.id)
 
-    assert {run.id for run in repository.list_runs()} == {pending.id, running.id}
+    assert {run.id for run in repository.list_runs(user_team_id="")} == {pending.id, running.id}
 
 
 def test_create_run_snapshots_latest_enabled_user_evaluator_version(tmp_path) -> None:
@@ -429,7 +428,7 @@ def test_create_run_requires_persisted_matching_target_descriptor(tmp_path) -> N
     with pytest.raises(ValueError, match="does not match TargetSnapshot"):
         management.create_run(mismatched, dataset_id=LOAN_DATASET.id)
 
-    assert repository.list_runs() == []
+    assert repository.list_runs(user_team_id="") == []
 
 
 def test_dispatch_run_submits_only_the_persisted_run_id(tmp_path) -> None:
@@ -497,8 +496,7 @@ def test_cancel_run_is_idempotent_and_rejects_unknown_or_terminal_runs(
     failed_pending = management.create_run(target(), dataset_id=LOAN_DATASET.id)
     cancelled = repository.cancel_run(
         already_cancelled.id,
-        already_cancelled.created_at,
-    )
+        already_cancelled.created_at, user_team_id="")
     assert cancelled is not None
     completed_running = repository.claim_pending_run(
         completed_pending.id,
@@ -564,7 +562,7 @@ def test_cancel_run_preserves_concurrently_completed_state(
     run = management.create_run(target(), dataset_id=LOAN_DATASET.id)
     dispatcher = RecordingDispatcher()
 
-    def complete_instead(run_id, cancelled_at):
+    def complete_instead(run_id, cancelled_at, *, user_team_id=""):
         running = repository.claim_pending_run(run_id, cancelled_at)
         assert running is not None
         completed = transition_run(
@@ -781,4 +779,4 @@ def test_create_run_rejects_invalid_case_subset(tmp_path) -> None:
             case_ids=("missing-case",),
         )
 
-    assert repository.list_runs() == []
+    assert repository.list_runs(user_team_id="") == []

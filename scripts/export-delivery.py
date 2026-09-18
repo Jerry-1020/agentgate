@@ -14,8 +14,8 @@ source = sqlite3.connect(f'file:{root / "runtime/agentgate.db"}?mode=ro', uri=Tr
 db = sqlite3.connect(destination)
 source.backup(db)
 source.close()
-removed = db.execute('SELECT count(*) FROM api_keys').fetchone()[0]
-db.execute('DELETE FROM api_keys')
+removed = db.execute('SELECT count(*) FROM agentgate_api_keys').fetchone()[0]
+db.execute('DELETE FROM agentgate_api_keys')
 db.commit()
 db.execute('VACUUM')
 patterns = {
@@ -42,7 +42,7 @@ integrity = db.execute('PRAGMA integrity_check').fetchone()[0]
 assert integrity == 'ok', integrity
 assert not db.execute('PRAGMA foreign_key_check').fetchall()
 with (output / 'execution-traces.jsonl').open('w') as stream:
-    for row in db.execute('SELECT payload FROM traces ORDER BY run_id, case_id'):
+    for row in db.execute('SELECT payload FROM agentgate_traces ORDER BY run_id, case_id'):
         stream.write(json.dumps(json.loads(row[0]), ensure_ascii=False) + '\n')
 db.close()
 print(json.dumps({'tables': counts, 'credentials_removed': removed, 'integrity': integrity}, ensure_ascii=False))

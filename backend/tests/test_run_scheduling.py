@@ -118,7 +118,7 @@ def test_scheduled_run_can_be_cancelled_before_release(tmp_path) -> None:
         scheduled_for=utcnow() + timedelta(hours=1),
     )
 
-    cancelled = repository.cancel_run(run.id, run.created_at)
+    cancelled = repository.cancel_run(run.id, run.created_at, user_team_id="")
 
     assert cancelled is not None
     assert cancelled.status is RunStatus.CANCELLED

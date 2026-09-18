@@ -124,7 +124,7 @@ def execute_evaluation_run(run_id: str) -> str:
             )
         )
         if run.manifest.target.adapter_type == LocalBankAdapter.adapter_type:
-            if run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1:
+            if run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1 or run.case_max_parallel not in (None, 1):
                 raise ValueError("local bank execution requires no retries and serial cases")
             completed = RunManagement(repository, evaluator_management).execute_run(
                 run.id, LocalBankAdapter(), resolve_local_bank_trace,
