@@ -1,0 +1,11 @@
+.engine-state {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, .16);
+}
+
+.engine-state.online { background: #dff8ec; color: #08765f; }
+.engine-state.offline { background: #fff1df; color: #8f5316; }
