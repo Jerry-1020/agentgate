@@ -24,3 +24,11 @@ runtime/
 **/*.egg-info/
 dump.rdb
 .idea/
+web/test-results/
+web/playwright-report/
+node_modules/
+web/dist/
+/pyproject.toml
+/script/start_services.sh
+/web/vite.config.ts
+/uv.lock
