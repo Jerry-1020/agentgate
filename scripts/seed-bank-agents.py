@@ -1,5 +1,6 @@
 """Persist the standalone runtime's synthetic acceptance cases in AgentGate."""
 import argparse
+from contextlib import closing
 import json
 import sys
 from pathlib import Path
@@ -10,11 +11,15 @@ sys.path.insert(0, str(root / "src"))
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.domain import Case, CaseTurn
 from agentgate.integrations.targets.local_bank import LocalBankClient
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.configuration import create_repository, load_database_config
 
 
-def seed(database):
-    repo = SQLiteRepository(database)
+def seed(database=None):
+    with closing(create_repository(load_database_config(database_path=database))) as repo:
+        return _seed_cases(repo)
+
+
+def _seed_cases(repo):
     datasets = DatasetManagement(repo)
     records = LocalBankClient().call("/test-cases")
     output = []
@@ -50,5 +55,5 @@ def seed(database):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--database", type=Path, default=root / "runtime/agentgate.db")
+    parser.add_argument("--database", type=Path, default=None)
     print(json.dumps(seed(parser.parse_args().database), ensure_ascii=False, indent=2))

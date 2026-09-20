@@ -259,6 +259,9 @@ class SQLiteRepository:
         self.busy_timeout_ms = busy_timeout_ms
         self._initialize()
 
+    def close(self) -> None:
+        """No persistent connection is held; each operation closes its connection."""
+
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(

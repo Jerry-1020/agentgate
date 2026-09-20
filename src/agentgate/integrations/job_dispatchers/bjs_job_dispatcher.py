@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
@@ -33,7 +34,13 @@ class BjsJobDispatcher:
         )
         self._job_id = job_id if job_id is not None else os.getenv(JOB_ID_ENV)
         self._opener = opener
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive and finite")
         self._timeout_seconds = timeout_seconds
+        self._submit_url = self._validated_submit_url()
+        if not isinstance(self._job_id, str) or not self._job_id.strip():
+            raise ValueError(f"{JOB_ID_ENV} must not be blank")
+        self._job_id = self._job_id.strip()
 
     def submit(self, run_id: str) -> None:
         """Submit one persisted Run to BJS and fail on rejected submissions."""
@@ -65,7 +72,7 @@ class BjsJobDispatcher:
         except (TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeError("BJS submission returned invalid JSON") from exc
         if not isinstance(payload, dict):
-            raise RuntimeError("BJS submission returned an invalid response")
+            raise RuntimeError("BJS submission returned an invalid response")  # noqa: TRY004
 
         code = str(payload.get("code", ""))
         message = str(payload.get("message", ""))
@@ -83,9 +90,22 @@ class BjsJobDispatcher:
         submit_url = self._submit_url
         if not isinstance(submit_url, str) or not submit_url.strip():
             raise ValueError(f"{SUBMIT_URL_ENV} must not be blank")
-        normalized = submit_url.strip().rstrip("/")
-        parsed = urlsplit(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        normalized = submit_url.strip()
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError:
+            raise ValueError(f"{SUBMIT_URL_ENV} must be a valid HTTP(S) URL") from None
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or (port is not None and port < 1)
+            or parsed.username is not None
+            or parsed.password is not None
+            or "?" in normalized
+            or "#" in normalized
+            or any(character.isspace() or ord(character) < 32 for character in normalized)
+        ):
             raise ValueError(f"{SUBMIT_URL_ENV} must be an absolute HTTP(S) URL")
         return normalized
 

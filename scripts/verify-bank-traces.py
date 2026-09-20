@@ -4,11 +4,14 @@ import json
 import sqlite3
 import sys
 from collections import Counter
+from contextlib import closing
 from pathlib import Path
 
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+from agentgate.storage.configuration import create_repository, load_database_config
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "runtime/bank-acceptance"
 
 
@@ -18,16 +21,16 @@ def main():
         raise RuntimeError("browser acceptance has not passed")
     checks = []
     client = httpx.Client(timeout=30, trust_env=False)
-    with sqlite3.connect(f"file:{ROOT / 'runtime/agentgate.db'}?mode=ro", uri=True) as platform, \
+    with closing(create_repository(load_database_config())) as platform, \
          sqlite3.connect(f"file:{ROOT / 'runtime/bank-agents/bank.db'}?mode=ro", uri=True) as bank, client:
         bank.row_factory = sqlite3.Row
         for run in browser["runs"]:
             rid = run["run_id"]
             for case in run["samples"]["run"]["manifest"]["dataset"]["cases"]:
-                trace = json.loads(platform.execute(
-                    "SELECT payload FROM agentgate_traces WHERE run_id=? AND case_id=?",
-                    (rid, case["id"]),
-                ).fetchone()[0])
+                stored_trace = platform.get_trace(rid, case["id"])
+                if stored_trace is None:
+                    raise RuntimeError("expected platform Trace is missing")
+                trace = stored_trace.model_dump(mode="json")
                 response = client.get(f"http://127.0.0.1:8097/api/runs/{rid}/traces/{case['id']}")
                 response.raise_for_status()
                 public = {s["span_id"]: s for s in response.json()["spans"]}
