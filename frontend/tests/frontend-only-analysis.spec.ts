@@ -1,4 +1,4 @@
-import {staticChinese} from '../src/revision/static-chinese'
+import {staticChinese} from '../src/views/evaluation/utils/static-chinese'
 import {test,expect} from '@playwright/test'
 test('static analysis renders partial report findings and errors',async({page,request})=>{
  const list=await (await request.get('/api/skill-analysis/reports?target_descriptor_sha256=5a5e3c9cc8c3f6faa7108dd82e771f1e7c86b127dc8b936033f3a2111e3539bd')).json()
