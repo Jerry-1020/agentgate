@@ -4,8 +4,14 @@
   padding: 3px 8px;
   border-radius: 12px;
   font-size: 12px;
-  background: rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, 0.16);
 }
 
-.engine-state.online { background: #dff8ec; color: #08765f; }
-.engine-state.offline { background: #fff1df; color: #8f5316; }
+.engine-state.online {
+  background: #dff8ec;
+  color: #08765f;
+}
+.engine-state.offline {
+  background: #fff1df;
+  color: #8f5316;
+}

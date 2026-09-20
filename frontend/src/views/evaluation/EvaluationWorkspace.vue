@@ -1,327 +1,3132 @@
 <template>
   <div class="app">
-    <header class="topbar"><div class="brand">智能体评测中心 <small>版本化评测 · 结果分析 · 持续回归</small></div><div class="user">研发工作台　管理员　<span :class="['engine-state', engineOnline ? 'online' : 'offline']">{{ engineMessage }}</span></div></header>
+    <header class="topbar">
+      <div class="brand">智能体评测中心 <small>版本化评测 · 结果分析 · 持续回归</small></div>
+      <div class="user">
+        研发工作台 管理员
+        <span :class="['engine-state', engineOnline ? 'online' : 'offline']">{{
+          engineMessage
+        }}</span>
+      </div>
+    </header>
     <div class="shell">
       <aside class="sidebar">
         <div class="nav-group">评测工作台</div>
-        <button v-for="item in primaryNav" :key="item.key" :class="['nav-item', { active: page === item.key }]" @click="go(item.key)">{{ item.label }}</button>
+        <button
+          v-for="item in primaryNav"
+          :key="item.key"
+          :class="['nav-item', { active: page === item.key }]"
+          @click="go(item.key)"
+        >
+          {{ item.label }}
+        </button>
         <div class="nav-group">分析与改进</div>
-        <button v-for="item in analysisNav" :key="item.key" :class="['nav-item', { active: page === item.key }]" @click="go(item.key)">{{ item.label }}</button>
+        <button
+          v-for="item in analysisNav"
+          :key="item.key"
+          :class="['nav-item', { active: page === item.key }]"
+          @click="go(item.key)"
+        >
+          {{ item.label }}
+        </button>
       </aside>
       <main class="content">
         <section v-if="page === 'overview'" class="page">
-          <div class="page-head"><div><h1 class="page-title">评测总览</h1><div class="page-sub">掌握目标资产、任务执行与质量趋势</div></div><div class="actions"><button class="secondary" @click="go('datasets')">管理评测集</button><button class="primary" @click="go('create')">新建评测任务</button></div></div>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">评测总览</h1>
+              <div class="page-sub">掌握目标资产、任务执行与质量趋势</div>
+            </div>
+            <div class="actions">
+              <button class="secondary" @click="go('datasets')">管理评测集</button
+              ><button class="primary" @click="go('create')">新建评测任务</button>
+            </div>
+          </div>
           <div class="grid metric-grid">
-            <div class="card metric"><div class="metric-label">已接入评测目标</div><div class="metric-value">24</div><div class="muted">16 个 Agent · 8 个 Skill</div></div>
-            <div class="card metric"><div class="metric-label">评测集 / 用例</div><div class="metric-value">12 <span class="muted">/ 428</span></div><div class="up">本周新增 36 条用例</div></div>
-            <div class="card metric"><div class="metric-label">今日评测任务</div><div class="metric-value">8</div><div class="muted">运行中 2 · 等待中 1</div></div>
-            <div class="card metric"><div class="metric-label">最近七日平均通过率</div><div class="metric-value">91.6%</div><div class="up">较上周期 +2.8%</div></div>
+            <div class="card metric">
+              <div class="metric-label">已接入评测目标</div>
+              <div class="metric-value">24</div>
+              <div class="muted">16 个 Agent · 8 个 Skill</div>
+            </div>
+            <div class="card metric">
+              <div class="metric-label">评测集 / 用例</div>
+              <div class="metric-value">12 <span class="muted">/ 428</span></div>
+              <div class="up">本周新增 36 条用例</div>
+            </div>
+            <div class="card metric">
+              <div class="metric-label">今日评测任务</div>
+              <div class="metric-value">8</div>
+              <div class="muted">运行中 2 · 等待中 1</div>
+            </div>
+            <div class="card metric">
+              <div class="metric-label">最近七日平均通过率</div>
+              <div class="metric-value">91.6%</div>
+              <div class="up">较上周期 +2.8%</div>
+            </div>
           </div>
           <div class="split">
-            <section class="card"><h2 class="section-title">通过率趋势</h2><p class="section-note">最近 7 日已完成任务的加权通过率</p><div class="chart-placeholder"><div v-for="(height, index) in [104,126,112,140,133,158,170]" :key="index" :class="['bar', { active: index === 6 }]" :style="{height: height + 'px'}"><span>{{ ['一','二','三','四','五','六','日'][index] }}</span></div></div></section>
-            <section class="card"><h2 class="section-title">常见失败类型</h2><p class="section-note">按最近 30 天失败 Case 聚合</p><div class="fail-row"><span>Skill 路由不正确</span><b>27</b></div><div class="fail-row"><span>工具参数缺失</span><b>19</b></div><div class="fail-row"><span>输出字段不完整</span><b>14</b></div><div class="fail-row"><span>多轮上下文丢失</span><b>8</b></div><button class="ghost" @click="go('optimizer')">进入调优中心 →</button></section>
+            <section class="card">
+              <h2 class="section-title">通过率趋势</h2>
+              <p class="section-note">最近 7 日已完成任务的加权通过率</p>
+              <div class="chart-placeholder">
+                <div
+                  v-for="(height, index) in [104, 126, 112, 140, 133, 158, 170]"
+                  :key="index"
+                  :class="['bar', { active: index === 6 }]"
+                  :style="{ height: height + 'px' }"
+                >
+                  <span>{{ ['一', '二', '三', '四', '五', '六', '日'][index] }}</span>
+                </div>
+              </div>
+            </section>
+            <section class="card">
+              <h2 class="section-title">常见失败类型</h2>
+              <p class="section-note">按最近 30 天失败 Case 聚合</p>
+              <div class="fail-row"><span>Skill 路由不正确</span><b>27</b></div>
+              <div class="fail-row"><span>工具参数缺失</span><b>19</b></div>
+              <div class="fail-row"><span>输出字段不完整</span><b>14</b></div>
+              <div class="fail-row"><span>多轮上下文丢失</span><b>8</b></div>
+              <button class="ghost" @click="go('optimizer')">进入调优中心 →</button>
+            </section>
           </div>
-          <section class="card" style="margin-top:16px"><div class="toolbar"><div><h2 class="section-title">最近评测任务</h2><p class="section-note">任务创建时锁定目标、评测集和评估器版本</p></div><button class="ghost" @click="go('tasks')">查看全部 →</button></div><TaskTable :tasks="tasks.slice(0, 4)" @open="openTask" /></section>
+          <section class="card" style="margin-top: 16px">
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">最近评测任务</h2>
+                <p class="section-note">任务创建时锁定目标、评测集和评估器版本</p>
+              </div>
+              <button class="ghost" @click="go('tasks')">查看全部 →</button>
+            </div>
+            <TaskTable :tasks="tasks.slice(0, 4)" @open="openTask" />
+          </section>
         </section>
 
         <section v-else-if="page === 'targets'" class="page">
-          <div class="page-head"><div><h1 class="page-title">评估对象</h1><div class="page-sub">从外部 Agent 平台读取 Agent、Skill 及其版本；评测系统只保存引用与运行快照</div></div><div class="actions"><button class="secondary" @click="showToast('已同步外部资产目录。')">同步对象</button><button class="primary" @click="go('create')">发起评测</button></div></div>
-          <section class="card"><div class="toolbar"><div class="actions"><select v-model="targetType" class="input"><option>Agent</option><option>Skill</option></select><input class="search" placeholder="搜索对象名称、ID 或版本" v-model="targetQuery" /></div><div class="muted">对象版本由 Skill Studio 管理；评测运行时锁定必要快照。</div></div><table class="data-table"><thead><tr><th>对象</th><th>类型</th><th>当前版本</th><th>能力说明</th><th>更新时间</th><th>操作</th></tr></thead><tbody><tr v-for="target in filteredTargets" :key="target.id"><td><b>{{ target.name }}</b><div class="muted">{{ target.id }}</div></td><td><span :class="['badge',target.type==='Agent'?'info':'success']">{{ target.type }}</span></td><td><span class="tag">{{ target.version }}</span></td><td>{{ target.description }}</td><td>{{ target.updatedAt }}</td><td><button class="link" @click="selectedTargetId=target.id;go('create')">选择并评测</button>　<button class="link" @click="selectedObject=target">查看快照</button></td></tr></tbody></table></section>
-          <section class="card" style="margin-top:16px"><h2 class="section-title">对象与版本使用规则</h2><div class="mini-cards"><div class="mini-card"><span class="muted">资产来源</span><b style="font-size:18px">外部平台</b><p class="muted">创建、编辑、发布 Agent/Skill 均在 Skill Studio 完成；评测系统不写回资产。</p></div><div class="mini-card"><span class="muted">任务快照</span><b style="font-size:18px">不可变引用</b><p class="muted">提交任务时记录对象 ID、版本 ID、Prompt、工具定义与必要配置。</p></div><div class="mini-card"><span class="muted">后续改进</span><b style="font-size:18px">回归或 A/B</b><p class="muted">对象更新后选择新版本，复用发布评测集与评估器进行可比验证。</p></div></div></section>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">评估对象</h1>
+              <div class="page-sub">
+                从外部 Agent 平台读取 Agent、Skill 及其版本；评测系统只保存引用与运行快照
+              </div>
+            </div>
+            <div class="actions">
+              <button class="secondary" @click="showToast('已同步外部资产目录。')">同步对象</button
+              ><button class="primary" @click="go('create')">发起评测</button>
+            </div>
+          </div>
+          <section class="card">
+            <div class="toolbar">
+              <div class="actions">
+                <select v-model="targetType" class="input">
+                  <option>Agent</option>
+                  <option>Skill</option></select
+                ><input
+                  class="search"
+                  placeholder="搜索对象名称、ID 或版本"
+                  v-model="targetQuery"
+                />
+              </div>
+              <div class="muted">对象版本由 Skill Studio 管理；评测运行时锁定必要快照。</div>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>对象</th>
+                  <th>类型</th>
+                  <th>当前版本</th>
+                  <th>能力说明</th>
+                  <th>更新时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="target in filteredTargets" :key="target.id">
+                  <td>
+                    <b>{{ target.name }}</b>
+                    <div class="muted">{{ target.id }}</div>
+                  </td>
+                  <td>
+                    <span :class="['badge', target.type === 'Agent' ? 'info' : 'success']">{{
+                      target.type
+                    }}</span>
+                  </td>
+                  <td>
+                    <span class="tag">{{ target.version }}</span>
+                  </td>
+                  <td>{{ target.description }}</td>
+                  <td>{{ target.updatedAt }}</td>
+                  <td>
+                    <button
+                      class="link"
+                      @click="
+                        selectedTargetId = target.id;
+                        go('create');
+                      "
+                    >
+                      选择并评测
+                    </button>
+                    <button class="link" @click="selectedObject = target">查看快照</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+          <section class="card" style="margin-top: 16px">
+            <h2 class="section-title">对象与版本使用规则</h2>
+            <div class="mini-cards">
+              <div class="mini-card">
+                <span class="muted">资产来源</span><b style="font-size: 18px">外部平台</b>
+                <p class="muted">
+                  创建、编辑、发布 Agent/Skill 均在 Skill Studio 完成；评测系统不写回资产。
+                </p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">任务快照</span><b style="font-size: 18px">不可变引用</b>
+                <p class="muted">提交任务时记录对象 ID、版本 ID、Prompt、工具定义与必要配置。</p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">后续改进</span><b style="font-size: 18px">回归或 A/B</b>
+                <p class="muted">对象更新后选择新版本，复用发布评测集与评估器进行可比验证。</p>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section v-else-if="page === 'tasks'" class="page">
-          <div class="page-head"><div><h1 class="page-title">评测任务</h1><div class="page-sub">创建、跟踪与复核版本化评测任务</div></div><button class="primary" @click="go('create')">新建评测任务</button></div>
-          <section class="card"><div class="toolbar"><div class="actions"><input class="search" placeholder="按任务名称或 ID 搜索" v-model="taskQuery" /><select class="input" v-model="taskFilter"><option value="">全部状态</option><option>等待中</option><option>运行中</option><option>已完成</option><option>已失败</option><option>已终止</option></select></div><button class="secondary" @click="showToast('任务清单已生成，可由接口层提供文件下载。')">导出清单</button></div><TaskTable :tasks="filteredTasks" @open="openTask" /></section>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">评测任务</h1>
+              <div class="page-sub">创建、跟踪与复核版本化评测任务</div>
+            </div>
+            <button class="primary" @click="go('create')">新建评测任务</button>
+          </div>
+          <section class="card">
+            <div class="toolbar">
+              <div class="actions">
+                <input
+                  class="search"
+                  placeholder="按任务名称或 ID 搜索"
+                  v-model="taskQuery"
+                /><select class="input" v-model="taskFilter">
+                  <option value="">全部状态</option>
+                  <option>等待中</option>
+                  <option>运行中</option>
+                  <option>已完成</option>
+                  <option>已失败</option>
+                  <option>已终止</option>
+                </select>
+              </div>
+              <button
+                class="secondary"
+                @click="showToast('任务清单已生成，可由接口层提供文件下载。')"
+              >
+                导出清单
+              </button>
+            </div>
+            <TaskTable :tasks="filteredTasks" @open="openTask" />
+          </section>
         </section>
 
         <section v-else-if="page === 'create'" class="page">
-          <div class="page-head"><div><h1 class="page-title">新建评测任务</h1><div class="page-sub">分步配置，提交后形成不可变的运行清单</div></div><button class="secondary" @click="go('tasks')">返回任务列表</button></div>
-          <div class="create-layout"><aside class="card steps"><div v-for="(name, index) in steps" :key="name" :class="['step',{active:createStep===index+1,done:createStep>index+1}]"><i>{{ createStep>index+1 ? '✓' : index+1 }}</i>{{ name }}</div></aside>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">新建评测任务</h1>
+              <div class="page-sub">分步配置，提交后形成不可变的运行清单</div>
+            </div>
+            <button class="secondary" @click="go('tasks')">返回任务列表</button>
+          </div>
+          <div class="create-layout">
+            <aside class="card steps">
+              <div
+                v-for="(name, index) in steps"
+                :key="name"
+                :class="[
+                  'step',
+                  { active: createStep === index + 1, done: createStep > index + 1 },
+                ]"
+              >
+                <i>{{ createStep > index + 1 ? '✓' : index + 1 }}</i
+                >{{ name }}
+              </div>
+            </aside>
             <section class="card">
-              <template v-if="createStep===1"><h2 class="section-title">选择评测对象及版本</h2><p class="section-note">对象来自外部资产平台，本系统仅保存 ID、版本 ID 与必要快照。</p><div class="form-grid"><div class="field"><label>评测对象类型</label><div class="choice-grid"><button :class="['choice',{selected:targetType==='Agent'}]" @click="targetType='Agent'"> <b>Agent</b><span>评估意图、路由、多轮与最终输出</span></button><button :class="['choice',{selected:targetType==='Skill'}]" @click="targetType='Skill'"> <b>Skill</b><span>评估触发、步骤、工具参数与规则</span></button></div></div><div class="field"><label>目标资产</label><select class="input" v-model="selectedTargetId"><option v-for="target in eligibleTargets" :key="target.id" :value="target.id">{{ target.name }} · {{ target.version }}</option></select><small>{{ selectedTarget.description }}</small></div><div class="field full"><label>评测快照</label><div class="callout">将记录：{{ selectedTarget.id }} · {{ selectedTarget.version }} · Prompt、工具定义与必要配置快照。历史任务不会随外部资产更新而改变。</div></div></div></template>
-              <template v-else-if="createStep===2"><h2 class="section-title">选择评测集版本</h2><p class="section-note">评测集包含单轮/多轮 Case、预期结果、标签和难度。</p><div class="grid" style="grid-template-columns:repeat(3,1fr)"><button v-for="dataset in datasets" :key="dataset.id" :class="['choice',{selected:selectedDatasetId===dataset.id}]" @click="selectedDatasetId=dataset.id"><b>{{ dataset.name }}</b><span>{{ dataset.version }} · {{ dataset.cases }} 条 Case</span><br><span>{{ dataset.scope }}</span></button></div><div class="callout" style="margin-top:16px">未找到合适评测集？请进入“评测集”手动创建草稿、导入或维护 Case，发布新版本后返回此处选择。</div></template>
-              <template v-else-if="createStep===3"><h2 class="section-title">选择评估器与执行配置</h2><p class="section-note">当前任务仅可选择已由评测引擎加载的规则评估器；模型 Key 仅在 LLM 评估器接入后才需要配置。</p><div class="form-grid"><div class="field full"><label>评估器版本</label><select class="input" v-model="selectedEvaluatorId"><option v-for="evaluator in evaluatorItems" :key="evaluator.id" :value="evaluator.id">{{ evaluator.name }} · {{ evaluator.version }}（{{ evaluator.kind }}）</option></select><small>{{ evaluatorExecutionHint }}</small></div><div class="field"><label>并发数</label><select class="input" v-model="concurrency"><option>2</option><option>5</option><option>10</option></select></div><div class="field"><label>超时 / 重试</label><select class="input" v-model="timeout"><option>30 秒 / 1 次</option><option>60 秒 / 1 次</option><option>30 秒 / 0 次</option></select></div><div class="field full"><label>执行方式</label><div class="choice-grid"><button :class="['choice',{selected:runMode==='立即执行'}]" @click="runMode='立即执行'"><b>立即执行</b><span>提交后进入排队或运行状态</span></button><button :class="['choice',{selected:runMode==='预约执行'}]" @click="runMode='预约执行'"><b>预约执行</b><span>设置为低峰时段执行</span></button></div></div></div></template>
-              <template v-else><h2 class="section-title">确认并提交</h2><p class="section-note">请确认以下运行清单。提交后版本引用将被锁定。</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="mini-card"><span class="muted">评测对象</span><b style="font-size:18px">{{ selectedTarget.name }}</b><div class="version-line">{{ selectedTarget.type }} · {{ selectedTarget.version }}</div></div><div class="mini-card"><span class="muted">评测集</span><b style="font-size:18px">{{ selectedDataset.name }}</b><div class="version-line">{{ selectedDataset.version }} · {{ selectedDataset.cases }} 条 Case</div></div><div class="mini-card"><span class="muted">评估器</span><b style="font-size:18px">{{ selectedEvaluator.name }}</b><div class="version-line">{{ selectedEvaluator.version }} · {{ selectedEvaluator.kind }}</div></div><div class="mini-card"><span class="muted">执行配置</span><b style="font-size:18px">{{ runMode }}</b><div class="version-line">并发 {{ concurrency }} · {{ timeout }}</div></div></div><div class="notice" style="margin-top:16px">运行清单将包含目标快照、评测集版本、评估器版本和执行参数。当前规则评估不传递模型 Key。</div></template>
-              <div class="form-footer"><button class="secondary" v-if="createStep>1" @click="createStep--">上一步</button><button class="primary" v-if="createStep<4" @click="createStep++">下一步</button><button class="primary" v-else @click="submitTask">提交{{ runMode }}</button></div>
-            </section></div>
+              <template v-if="createStep === 1"
+                ><h2 class="section-title">选择评测对象及版本</h2>
+                <p class="section-note">
+                  对象来自外部资产平台，本系统仅保存 ID、版本 ID 与必要快照。
+                </p>
+                <div class="form-grid">
+                  <div class="field">
+                    <label>评测对象类型</label>
+                    <div class="choice-grid">
+                      <button
+                        :class="['choice', { selected: targetType === 'Agent' }]"
+                        @click="targetType = 'Agent'"
+                      >
+                        <b>Agent</b><span>评估意图、路由、多轮与最终输出</span></button
+                      ><button
+                        :class="['choice', { selected: targetType === 'Skill' }]"
+                        @click="targetType = 'Skill'"
+                      >
+                        <b>Skill</b><span>评估触发、步骤、工具参数与规则</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label>目标资产</label
+                    ><select class="input" v-model="selectedTargetId">
+                      <option v-for="target in eligibleTargets" :key="target.id" :value="target.id">
+                        {{ target.name }} · {{ target.version }}
+                      </option></select
+                    ><small>{{ selectedTarget.description }}</small>
+                  </div>
+                  <div class="field full">
+                    <label>评测快照</label>
+                    <div class="callout">
+                      将记录：{{ selectedTarget.id }} · {{ selectedTarget.version }} ·
+                      Prompt、工具定义与必要配置快照。历史任务不会随外部资产更新而改变。
+                    </div>
+                  </div>
+                </div></template
+              >
+              <template v-else-if="createStep === 2"
+                ><h2 class="section-title">选择评测集版本</h2>
+                <p class="section-note">评测集包含单轮/多轮 Case、预期结果、标签和难度。</p>
+                <div class="grid" style="grid-template-columns: repeat(3, 1fr)">
+                  <button
+                    v-for="dataset in datasets"
+                    :key="dataset.id"
+                    :class="['choice', { selected: selectedDatasetId === dataset.id }]"
+                    @click="selectedDatasetId = dataset.id"
+                  >
+                    <b>{{ dataset.name }}</b
+                    ><span>{{ dataset.version }} · {{ dataset.cases }} 条 Case</span><br /><span>{{
+                      dataset.scope
+                    }}</span>
+                  </button>
+                </div>
+                <div class="callout" style="margin-top: 16px">
+                  未找到合适评测集？请进入“评测集”手动创建草稿、导入或维护
+                  Case，发布新版本后返回此处选择。
+                </div></template
+              >
+              <template v-else-if="createStep === 3"
+                ><h2 class="section-title">选择评估器与执行配置</h2>
+                <p class="section-note">
+                  当前任务仅可选择已由评测引擎加载的规则评估器；模型 Key 仅在 LLM
+                  评估器接入后才需要配置。
+                </p>
+                <div class="form-grid">
+                  <div class="field full">
+                    <label>评估器版本</label
+                    ><select class="input" v-model="selectedEvaluatorId">
+                      <option
+                        v-for="evaluator in evaluatorItems"
+                        :key="evaluator.id"
+                        :value="evaluator.id"
+                      >
+                        {{ evaluator.name }} · {{ evaluator.version }}（{{ evaluator.kind }}）
+                      </option></select
+                    ><small>{{ evaluatorExecutionHint }}</small>
+                  </div>
+                  <div class="field">
+                    <label>并发数</label
+                    ><select class="input" v-model="concurrency">
+                      <option>2</option>
+                      <option>5</option>
+                      <option>10</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>超时 / 重试</label
+                    ><select class="input" v-model="timeout">
+                      <option>30 秒 / 1 次</option>
+                      <option>60 秒 / 1 次</option>
+                      <option>30 秒 / 0 次</option>
+                    </select>
+                  </div>
+                  <div class="field full">
+                    <label>执行方式</label>
+                    <div class="choice-grid">
+                      <button
+                        :class="['choice', { selected: runMode === '立即执行' }]"
+                        @click="runMode = '立即执行'"
+                      >
+                        <b>立即执行</b><span>提交后进入排队或运行状态</span></button
+                      ><button
+                        :class="['choice', { selected: runMode === '预约执行' }]"
+                        @click="runMode = '预约执行'"
+                      >
+                        <b>预约执行</b><span>设置为低峰时段执行</span>
+                      </button>
+                    </div>
+                  </div>
+                </div></template
+              >
+              <template v-else
+                ><h2 class="section-title">确认并提交</h2>
+                <p class="section-note">请确认以下运行清单。提交后版本引用将被锁定。</p>
+                <div class="grid" style="grid-template-columns: 1fr 1fr">
+                  <div class="mini-card">
+                    <span class="muted">评测对象</span
+                    ><b style="font-size: 18px">{{ selectedTarget.name }}</b>
+                    <div class="version-line">
+                      {{ selectedTarget.type }} · {{ selectedTarget.version }}
+                    </div>
+                  </div>
+                  <div class="mini-card">
+                    <span class="muted">评测集</span
+                    ><b style="font-size: 18px">{{ selectedDataset.name }}</b>
+                    <div class="version-line">
+                      {{ selectedDataset.version }} · {{ selectedDataset.cases }} 条 Case
+                    </div>
+                  </div>
+                  <div class="mini-card">
+                    <span class="muted">评估器</span
+                    ><b style="font-size: 18px">{{ selectedEvaluator.name }}</b>
+                    <div class="version-line">
+                      {{ selectedEvaluator.version }} · {{ selectedEvaluator.kind }}
+                    </div>
+                  </div>
+                  <div class="mini-card">
+                    <span class="muted">执行配置</span><b style="font-size: 18px">{{ runMode }}</b>
+                    <div class="version-line">并发 {{ concurrency }} · {{ timeout }}</div>
+                  </div>
+                </div>
+                <div class="notice" style="margin-top: 16px">
+                  运行清单将包含目标快照、评测集版本、评估器版本和执行参数。当前规则评估不传递模型
+                  Key。
+                </div></template
+              >
+              <div class="form-footer">
+                <button class="secondary" v-if="createStep > 1" @click="createStep--">上一步</button
+                ><button class="primary" v-if="createStep < 4" @click="createStep++">下一步</button
+                ><button class="primary" v-else @click="submitTask">提交{{ runMode }}</button>
+              </div>
+            </section>
+          </div>
         </section>
 
         <section v-else-if="page === 'datasets'" class="page">
-          <div class="page-head"><div><h1 class="page-title">评测集</h1><div class="page-sub">以草稿、发布版本和内容 Hash 管理可复现的测试资产</div></div><div class="actions"><button class="primary" @click="showToast('请选择 JSON 或 Excel 文件；导入后会进入字段映射与草稿校验。')">导入评测集</button></div></div>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">评测集</h1>
+              <div class="page-sub">以草稿、发布版本和内容 Hash 管理可复现的测试资产</div>
+            </div>
+            <div class="actions">
+              <button
+                class="primary"
+                @click="showToast('请选择 JSON 或 Excel 文件；导入后会进入字段映射与草稿校验。')"
+              >
+                导入评测集
+              </button>
+            </div>
+          </div>
           <section class="card dataset-version-card">
-            <div class="toolbar"><div><h2 class="section-title">评测集与版本 <span class="muted">{{ activeDatasetVersion.cases.length }} 条用例</span></h2><p class="section-note">历史评测任务仅关联发布版本，草稿修改不会影响既有结果。</p></div><div class="actions"><button v-if="activeDatasetVersion.status === '草稿'" class="secondary" @click="discardDraft">丢弃草稿</button><button v-if="activeDatasetVersion.status === '草稿'" class="primary" @click="publishDraft">发布草稿</button><button v-else class="primary" @click="createDraft">基于此版本创建草稿</button></div></div>
-            <div class="form-grid version-fields"><div class="field"><label>评测集</label><select class="input" v-model="selectedCollectionId" @change="selectCollection"><option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">{{ dataset.name }}</option></select></div><div class="field"><label>版本</label><select class="input" v-model="selectedDatasetVersionId" @change="selectDatasetVersion"><option v-for="version in collectionVersions" :key="version.id" :value="version.id">{{ version.label }} · {{ version.status }}</option></select></div></div>
-            <div class="version-state"><span :class="['badge', activeDatasetVersion.status === '已发布' ? 'success' : activeDatasetVersion.status === '草稿' ? 'warn' : 'info']">{{ activeDatasetVersion.status }}</span><span class="muted">内容 Hash {{ activeDatasetVersion.hash }}</span><span class="muted">{{ activeDatasetVersion.note }}</span></div>
-            <div v-if="activeDatasetVersion.status === '草稿'" class="notice version-notice">当前为草稿，基于已发布版本 <b>{{ activeDatasetVersion.baseVersion }}</b>。发布后将生成新的不可变版本与内容 Hash。<input v-model="releaseNote" class="input release-note" placeholder="发布说明（可选）" /></div>
-            <div v-else class="notice version-notice">已发布版本不可修改。评测任务引用的正是这些不可变版本，因此历史结果可复现。</div>
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">
+                  评测集与版本
+                  <span class="muted">{{ activeDatasetVersion.cases.length }} 条用例</span>
+                </h2>
+                <p class="section-note">历史评测任务仅关联发布版本，草稿修改不会影响既有结果。</p>
+              </div>
+              <div class="actions">
+                <button
+                  v-if="activeDatasetVersion.status === '草稿'"
+                  class="secondary"
+                  @click="discardDraft"
+                >
+                  丢弃草稿</button
+                ><button
+                  v-if="activeDatasetVersion.status === '草稿'"
+                  class="primary"
+                  @click="publishDraft"
+                >
+                  发布草稿</button
+                ><button v-else class="primary" @click="createDraft">基于此版本创建草稿</button>
+              </div>
+            </div>
+            <div class="form-grid version-fields">
+              <div class="field">
+                <label>评测集</label
+                ><select class="input" v-model="selectedCollectionId" @change="selectCollection">
+                  <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
+                    {{ dataset.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="field">
+                <label>版本</label
+                ><select
+                  class="input"
+                  v-model="selectedDatasetVersionId"
+                  @change="selectDatasetVersion"
+                >
+                  <option
+                    v-for="version in collectionVersions"
+                    :key="version.id"
+                    :value="version.id"
+                  >
+                    {{ version.label }} · {{ version.status }}
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div class="version-state">
+              <span
+                :class="[
+                  'badge',
+                  activeDatasetVersion.status === '已发布'
+                    ? 'success'
+                    : activeDatasetVersion.status === '草稿'
+                      ? 'warn'
+                      : 'info',
+                ]"
+                >{{ activeDatasetVersion.status }}</span
+              ><span class="muted">内容 Hash {{ activeDatasetVersion.hash }}</span
+              ><span class="muted">{{ activeDatasetVersion.note }}</span>
+            </div>
+            <div v-if="activeDatasetVersion.status === '草稿'" class="notice version-notice">
+              当前为草稿，基于已发布版本 <b>{{ activeDatasetVersion.baseVersion }}</b
+              >。发布后将生成新的不可变版本与内容 Hash。<input
+                v-model="releaseNote"
+                class="input release-note"
+                placeholder="发布说明（可选）"
+              />
+            </div>
+            <div v-else class="notice version-notice">
+              已发布版本不可修改。评测任务引用的正是这些不可变版本，因此历史结果可复现。
+            </div>
           </section>
           <section class="dataset-editor">
-            <aside class="card case-list-panel"><div class="toolbar"><div><h2 class="section-title">用例列表 <span class="muted">{{ filteredDatasetCases.length }} / {{ activeDatasetVersion.cases.length }}</span></h2></div><input v-model="datasetCaseQuery" class="search case-search" placeholder="搜索编号、标题或标签" /></div>
-              <div class="case-scroll"><div v-for="(item,index) in filteredDatasetCases" :key="item.id" :class="['dataset-case',{selected:selectedDatasetCaseId===item.id}]"><button class="case-select" @click="selectedDatasetCaseId=item.id"><div class="case-head"><b>{{item.id}}</b><span :class="['badge',item.risk==='高'?'error':item.risk==='中'?'warn':'success']">{{item.risk}}风险</span></div><div class="case-name">{{item.title}}</div><div class="case-tags"><span class="tag">{{item.category}}</span><span v-for="tag in item.tags" :key="tag" class="tag">{{tag}}</span></div></button><div v-if="activeDatasetVersion.status === '草稿'" class="case-actions"><button class="mini-action" :disabled="index===0" @click="moveCase(item.id,-1)">↑</button><button class="mini-action" :disabled="index===filteredDatasetCases.length-1" @click="moveCase(item.id,1)">↓</button><button class="mini-action" @click="copyCase(item)">复制</button><button class="mini-action danger-text" @click="deleteCase(item.id)">删除</button></div></div><div v-if="!filteredDatasetCases.length" class="empty">没有匹配的用例</div></div>
+            <aside class="card case-list-panel">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">
+                    用例列表
+                    <span class="muted"
+                      >{{ filteredDatasetCases.length }} /
+                      {{ activeDatasetVersion.cases.length }}</span
+                    >
+                  </h2>
+                </div>
+                <input
+                  v-model="datasetCaseQuery"
+                  class="search case-search"
+                  placeholder="搜索编号、标题或标签"
+                />
+              </div>
+              <div class="case-scroll">
+                <div
+                  v-for="(item, index) in filteredDatasetCases"
+                  :key="item.id"
+                  :class="['dataset-case', { selected: selectedDatasetCaseId === item.id }]"
+                >
+                  <button class="case-select" @click="selectedDatasetCaseId = item.id">
+                    <div class="case-head">
+                      <b>{{ item.id }}</b
+                      ><span
+                        :class="[
+                          'badge',
+                          item.risk === '高' ? 'error' : item.risk === '中' ? 'warn' : 'success',
+                        ]"
+                        >{{ item.risk }}风险</span
+                      >
+                    </div>
+                    <div class="case-name">{{ item.title }}</div>
+                    <div class="case-tags">
+                      <span class="tag">{{ item.category }}</span
+                      ><span v-for="tag in item.tags" :key="tag" class="tag">{{ tag }}</span>
+                    </div>
+                  </button>
+                  <div v-if="activeDatasetVersion.status === '草稿'" class="case-actions">
+                    <button
+                      class="mini-action"
+                      :disabled="index === 0"
+                      @click="moveCase(item.id, -1)"
+                    >
+                      ↑</button
+                    ><button
+                      class="mini-action"
+                      :disabled="index === filteredDatasetCases.length - 1"
+                      @click="moveCase(item.id, 1)"
+                    >
+                      ↓</button
+                    ><button class="mini-action" @click="copyCase(item)">复制</button
+                    ><button class="mini-action danger-text" @click="deleteCase(item.id)">
+                      删除
+                    </button>
+                  </div>
+                </div>
+                <div v-if="!filteredDatasetCases.length" class="empty">没有匹配的用例</div>
+              </div>
             </aside>
-            <section class="card case-detail-panel"><div class="toolbar"><div><h2 class="section-title">用例详情</h2><p class="section-note"><span :class="['badge',activeDatasetVersion.status === '草稿'?'warn':'success']">{{activeDatasetVersion.status}}</span>　{{activeDatasetVersion.status === '草稿' ? '可编辑' : '只读'}}</p></div><button v-if="activeDatasetVersion.status === '草稿'" class="secondary" @click="showToast('Case 编辑表单已保存至当前草稿。')">保存修改</button></div>
-              <template v-if="activeDatasetCase"><div class="detail-title"><div><span class="muted">{{activeDatasetCase.id}}</span><h3>{{activeDatasetCase.title}}</h3></div><div class="case-tags"><span class="tag">{{activeDatasetCase.category}}</span><span v-for="tag in activeDatasetCase.tags" :key="tag" class="tag">{{tag}}</span></div></div><div class="detail-block"><b>对话输入</b><ol><li v-for="turn in activeDatasetCase.turns" :key="turn">{{turn}}</li></ol></div><div class="detail-block"><b>期望结果</b><p class="muted">以下各项分别由对应的评估器断言。</p><dl class="assertions"><dt>必须调用工具</dt><dd><code v-for="tool in activeDatasetCase.requiredTools" :key="tool">{{tool}}</code><span class="assertion-type">工具调用合规</span></dd><dt>禁止调用工具</dt><dd><span v-if="!activeDatasetCase.forbiddenTools.length" class="muted">无</span><code v-for="tool in activeDatasetCase.forbiddenTools" :key="tool">{{tool}}</code></dd><dt>参数约束</dt><dd><code v-for="constraint in activeDatasetCase.constraints" :key="constraint">{{constraint}}</code><span class="assertion-type">工具参数校验</span></dd><dt>期望终态</dt><dd><code>{{activeDatasetCase.finalState}}</code><span class="assertion-type">终态一致性</span></dd><dt>策略约束</dt><dd><ul><li v-for="policy in activeDatasetCase.policies" :key="policy">{{policy}}</li></ul><span class="assertion-type">业务流程策略</span></dd></dl></div></template><div v-else class="empty">请选择一条用例</div>
+            <section class="card case-detail-panel">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">用例详情</h2>
+                  <p class="section-note">
+                    <span
+                      :class="[
+                        'badge',
+                        activeDatasetVersion.status === '草稿' ? 'warn' : 'success',
+                      ]"
+                      >{{ activeDatasetVersion.status }}</span
+                    >
+                    {{ activeDatasetVersion.status === '草稿' ? '可编辑' : '只读' }}
+                  </p>
+                </div>
+                <button
+                  v-if="activeDatasetVersion.status === '草稿'"
+                  class="secondary"
+                  @click="showToast('Case 编辑表单已保存至当前草稿。')"
+                >
+                  保存修改
+                </button>
+              </div>
+              <template v-if="activeDatasetCase"
+                ><div class="detail-title">
+                  <div>
+                    <span class="muted">{{ activeDatasetCase.id }}</span>
+                    <h3>{{ activeDatasetCase.title }}</h3>
+                  </div>
+                  <div class="case-tags">
+                    <span class="tag">{{ activeDatasetCase.category }}</span
+                    ><span v-for="tag in activeDatasetCase.tags" :key="tag" class="tag">{{
+                      tag
+                    }}</span>
+                  </div>
+                </div>
+                <div class="detail-block">
+                  <b>对话输入</b>
+                  <ol>
+                    <li v-for="turn in activeDatasetCase.turns" :key="turn">{{ turn }}</li>
+                  </ol>
+                </div>
+                <div class="detail-block">
+                  <b>期望结果</b>
+                  <p class="muted">以下各项分别由对应的评估器断言。</p>
+                  <dl class="assertions">
+                    <dt>必须调用工具</dt>
+                    <dd>
+                      <code v-for="tool in activeDatasetCase.requiredTools" :key="tool">{{
+                        tool
+                      }}</code
+                      ><span class="assertion-type">工具调用合规</span>
+                    </dd>
+                    <dt>禁止调用工具</dt>
+                    <dd>
+                      <span v-if="!activeDatasetCase.forbiddenTools.length" class="muted">无</span
+                      ><code v-for="tool in activeDatasetCase.forbiddenTools" :key="tool">{{
+                        tool
+                      }}</code>
+                    </dd>
+                    <dt>参数约束</dt>
+                    <dd>
+                      <code v-for="constraint in activeDatasetCase.constraints" :key="constraint">{{
+                        constraint
+                      }}</code
+                      ><span class="assertion-type">工具参数校验</span>
+                    </dd>
+                    <dt>期望终态</dt>
+                    <dd>
+                      <code>{{ activeDatasetCase.finalState }}</code
+                      ><span class="assertion-type">终态一致性</span>
+                    </dd>
+                    <dt>策略约束</dt>
+                    <dd>
+                      <ul>
+                        <li v-for="policy in activeDatasetCase.policies" :key="policy">
+                          {{ policy }}
+                        </li>
+                      </ul>
+                      <span class="assertion-type">业务流程策略</span>
+                    </dd>
+                  </dl>
+                </div></template
+              >
+              <div v-else class="empty">请选择一条用例</div>
             </section>
           </section>
         </section>
 
         <section v-else-if="page === 'evaluators'" class="page">
-          <div class="page-head"><div><h1 class="page-title">评估器</h1><div class="page-sub">围绕评测集期望与运行 Trace 判定结果；页面只展示当前引擎真实支持的能力。</div></div></div>
-          <section class="card evaluator-section implemented"><div class="toolbar"><div><h2 class="section-title">规则评估器 <span class="badge success">已实现并可执行</span></h2><p class="section-note">固定规则从评测集的 Case 期望读取约束，并在每一轮对话的 Trace 中查找路由、工具调用、参数、终态与输出证据。</p></div><span class="tag">当前加载 {{ ruleEvaluatorItems.length }} 项</span></div><div class="evaluator-rule-grid"><article v-for="evaluator in ruleEvaluatorItems" :key="evaluator.id" class="rule-evaluator-card"><div class="toolbar"><div><b>{{ evaluator.name }}</b><span class="muted">{{ evaluator.version }}</span></div><span :class="['badge', getRuleDefinition(evaluator).severity==='阻断' ? 'error' : 'info']">{{ getRuleDefinition(evaluator).severity }}</span></div><dl><dt>评估维度</dt><dd>{{ evaluator.coverage }}</dd><dt>固定实现</dt><dd><code>{{ getRuleDefinition(evaluator).implementationId }}</code></dd><dt>判定方式</dt><dd>{{ getRuleDefinition(evaluator).operator }}</dd></dl><button class="link" @click="openRuleDefinition(evaluator)">查看固定规则与运行依据 →</button></article></div></section>
-          <div class="grid evaluator-design-grid"><section class="card evaluator-section"><div class="toolbar"><div><h2 class="section-title">LLM 评估器 <span class="badge warn">设计已定义，未接入执行</span></h2><p class="section-note">适用于语义完整性、表达质量等不能由确定性规则覆盖的判断。</p></div></div><dl class="evaluator-fields"><dt>配置内容</dt><dd>Provider / Model、credential_ref、评估提示词、结构化判定输出</dd><dt>输入依据</dt><dd>Case 输入与期望、运行 Trace、最终输出</dd><dt>预期结果</dt><dd>通过/不通过或评分，并附可追溯理由</dd><dt>当前状态</dt><dd>引擎尚未实现 Provider 调用、提示词解析、重试与结果落库。</dd></dl></section><section class="card evaluator-section"><div class="toolbar"><div><h2 class="section-title">复合评估器 <span class="badge warn">设计已定义，未接入执行</span></h2><p class="section-note">将多个子评估器的结果汇总为一个发布判断。</p></div></div><dl class="evaluator-fields"><dt>配置内容</dt><dd>子评估器精确版本、组合策略、各子项权重</dd><dt>权重规则</dt><dd>参与加权的子项权重总和必须为 100%</dd><dt>组合策略</dt><dd>全部通过、任一通过或按权重计算综合得分</dd><dt>当前状态</dt><dd>引擎已定义组合数据模型，尚未实现子结果合并和综合判定。</dd></dl></section></div>
-          <section class="card evaluator-section" style="margin-top:16px"><h2 class="section-title">评估如何运行</h2><div class="mini-cards"><div class="mini-card"><span class="muted">输入</span><b style="font-size:18px">评测集期望</b><p class="muted">每条 Case 定义应路由的 Skill、必需/禁用工具、参数条件、期望终态和策略约束。</p></div><div class="mini-card"><span class="muted">证据</span><b style="font-size:18px">运行 Trace</b><p class="muted">执行过程记录路由结果、工具 Span、实参、状态和最终输出，作为规则判定依据。</p></div><div class="mini-card"><span class="muted">产出</span><b style="font-size:18px">逐项 Check</b><p class="muted">每项检查输出通过/失败、实际值、期望值、关联 Span 和失败阶段，汇总为 Case 结果。</p></div></div></section>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">评估器</h1>
+              <div class="page-sub">
+                围绕评测集期望与运行 Trace 判定结果；页面只展示当前引擎真实支持的能力。
+              </div>
+            </div>
+          </div>
+          <section class="card evaluator-section implemented">
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">
+                  规则评估器 <span class="badge success">已实现并可执行</span>
+                </h2>
+                <p class="section-note">
+                  固定规则从评测集的 Case 期望读取约束，并在每一轮对话的 Trace
+                  中查找路由、工具调用、参数、终态与输出证据。
+                </p>
+              </div>
+              <span class="tag">当前加载 {{ ruleEvaluatorItems.length }} 项</span>
+            </div>
+            <div class="evaluator-rule-grid">
+              <article
+                v-for="evaluator in ruleEvaluatorItems"
+                :key="evaluator.id"
+                class="rule-evaluator-card"
+              >
+                <div class="toolbar">
+                  <div>
+                    <b>{{ evaluator.name }}</b
+                    ><span class="muted">{{ evaluator.version }}</span>
+                  </div>
+                  <span
+                    :class="[
+                      'badge',
+                      getRuleDefinition(evaluator).severity === '阻断' ? 'error' : 'info',
+                    ]"
+                    >{{ getRuleDefinition(evaluator).severity }}</span
+                  >
+                </div>
+                <dl>
+                  <dt>评估维度</dt>
+                  <dd>{{ evaluator.coverage }}</dd>
+                  <dt>固定实现</dt>
+                  <dd>
+                    <code>{{ getRuleDefinition(evaluator).implementationId }}</code>
+                  </dd>
+                  <dt>判定方式</dt>
+                  <dd>{{ getRuleDefinition(evaluator).operator }}</dd>
+                </dl>
+                <button class="link" @click="openRuleDefinition(evaluator)">
+                  查看固定规则与运行依据 →
+                </button>
+              </article>
+            </div>
+          </section>
+          <div class="grid evaluator-design-grid">
+            <section class="card evaluator-section">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">
+                    LLM 评估器 <span class="badge warn">设计已定义，未接入执行</span>
+                  </h2>
+                  <p class="section-note">
+                    适用于语义完整性、表达质量等不能由确定性规则覆盖的判断。
+                  </p>
+                </div>
+              </div>
+              <dl class="evaluator-fields">
+                <dt>配置内容</dt>
+                <dd>Provider / Model、credential_ref、评估提示词、结构化判定输出</dd>
+                <dt>输入依据</dt>
+                <dd>Case 输入与期望、运行 Trace、最终输出</dd>
+                <dt>预期结果</dt>
+                <dd>通过/不通过或评分，并附可追溯理由</dd>
+                <dt>当前状态</dt>
+                <dd>引擎尚未实现 Provider 调用、提示词解析、重试与结果落库。</dd>
+              </dl>
+            </section>
+            <section class="card evaluator-section">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">
+                    复合评估器 <span class="badge warn">设计已定义，未接入执行</span>
+                  </h2>
+                  <p class="section-note">将多个子评估器的结果汇总为一个发布判断。</p>
+                </div>
+              </div>
+              <dl class="evaluator-fields">
+                <dt>配置内容</dt>
+                <dd>子评估器精确版本、组合策略、各子项权重</dd>
+                <dt>权重规则</dt>
+                <dd>参与加权的子项权重总和必须为 100%</dd>
+                <dt>组合策略</dt>
+                <dd>全部通过、任一通过或按权重计算综合得分</dd>
+                <dt>当前状态</dt>
+                <dd>引擎已定义组合数据模型，尚未实现子结果合并和综合判定。</dd>
+              </dl>
+            </section>
+          </div>
+          <section class="card evaluator-section" style="margin-top: 16px">
+            <h2 class="section-title">评估如何运行</h2>
+            <div class="mini-cards">
+              <div class="mini-card">
+                <span class="muted">输入</span><b style="font-size: 18px">评测集期望</b>
+                <p class="muted">
+                  每条 Case 定义应路由的 Skill、必需/禁用工具、参数条件、期望终态和策略约束。
+                </p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">证据</span><b style="font-size: 18px">运行 Trace</b>
+                <p class="muted">
+                  执行过程记录路由结果、工具 Span、实参、状态和最终输出，作为规则判定依据。
+                </p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">产出</span><b style="font-size: 18px">逐项 Check</b>
+                <p class="muted">
+                  每项检查输出通过/失败、实际值、期望值、关联 Span 和失败阶段，汇总为 Case 结果。
+                </p>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section v-else-if="page === 'results'" class="page">
-          <div class="page-head"><div><h1 class="page-title">结果中心</h1><div class="page-sub">从总体指标下钻到单条 Case、输出与 Trace</div></div><select class="input" v-model="resultTaskId"><option v-for="task in completedTasks" :key="task.id" :value="task.id">{{task.id}} · {{task.name}}</option></select></div>
-          <div class="result-summary"><section class="card"><div class="toolbar"><div><h2 class="section-title">{{ currentResultTask.name }}</h2><p class="section-note">{{ currentResultTask.id }} · 完成于 2026-09-06 14:42</p></div><span class="badge success">通过发布门槛</span></div><div class="grid metric-grid"><div class="metric"><div class="metric-label">总分</div><div class="score">92.4</div></div><div class="metric"><div class="metric-label">通过率</div><div class="metric-value">92.4%</div></div><div class="metric"><div class="metric-label">平均延迟</div><div class="metric-value">1.8s</div></div><div class="metric"><div class="metric-label">Badcase</div><div class="metric-value">7</div></div></div></section><section class="card"><h2 class="section-title">规则执行拆分</h2><p class="section-note">当前结果只统计已接入的确定性规则；LLM 与复合评估器不参与本次结果。</p><div class="fail-row"><span>路由准确率</span><b>94.1%</b></div><div class="fail-row"><span>工具调用正确率</span><b>97.6%</b></div><div class="fail-row"><span>终态一致性</span><b>95.8%</b></div><div class="fail-row"><span>策略合规通过率</span><b>100.0%</b></div></section></div>
-          <section class="card" style="margin-top:16px"><div class="tabs"><button :class="['tab',{active:resultTab==='cases'}]" @click="resultTab='cases'">Case 详情</button><button :class="['tab',{active:resultTab==='badcase'}]" @click="resultTab='badcase'">Badcase（7）</button><button :class="['tab',{active:resultTab==='lineage'}]" @click="resultTab='lineage'">版本引用</button></div><div v-if="resultTab==='cases'" class="case-layout"><div><button v-for="item in caseItems" :key="item.id" :class="['case-item',{selected:selectedCase===item.id}]" @click="selectedCase=item.id"><b>{{item.id}}</b><div class="muted">{{item.title}}</div><span :class="['badge',item.ok?'success':'error']">{{item.ok?'通过':'失败'}}</span></button></div><div><h2 class="section-title">{{activeCase.title}}</h2><p class="section-note">{{activeCase.kind}} · 难度 {{activeCase.level}} · {{activeCase.ok?'通过':'失败'}}</p><div class="grid" style="grid-template-columns:1fr 1fr"><div class="mini-card"><span class="muted">用户输入</span><p>{{activeCase.input}}</p><span class="muted">期望结果</span><p>{{activeCase.expected}}</p></div><div class="mini-card"><span class="muted">实际输出</span><p>{{activeCase.actual}}</p><button class="link" @click="showToast('已将此 Case 加入新评测集版本草稿。')">写入新版本并加入回归集</button></div></div><h3 style="margin:18px 0 8px">Trace</h3><div class="trace">{{activeCase.trace}}</div></div></div><div v-else-if="resultTab==='badcase'"><div class="notice">Badcase 已按失败模式聚类，可进入调优中心查看根因与优化建议。</div><table class="data-table"><thead><tr><th>聚类</th><th>关联 Case</th><th>主要失败</th><th>建议动作</th></tr></thead><tbody><tr><td>路由混淆</td><td>3</td><td>相近 Skill 被错误触发</td><td><button class="link" @click="go('optimizer')">查看分析</button></td></tr><tr><td>字段缺失</td><td>2</td><td>输出结构不完整</td><td><button class="link" @click="go('optimizer')">查看分析</button></td></tr><tr><td>上下文丢失</td><td>2</td><td>多轮输入未继承</td><td><button class="link" @click="go('optimizer')">查看分析</button></td></tr></tbody></table></div><div v-else class="grid" style="grid-template-columns:repeat(4,1fr)"><div class="mini-card"><span class="muted">目标快照</span><b style="font-size:16px">{{currentResultTask.target.name}}</b><p class="muted">{{currentResultTask.target.id}} · {{currentResultTask.target.version}}</p></div><div class="mini-card"><span class="muted">评测集</span><b style="font-size:16px">{{currentResultTask.dataset.name}}</b><p class="muted">{{currentResultTask.dataset.version}}</p></div><div class="mini-card"><span class="muted">评估器</span><b style="font-size:16px">{{currentResultTask.evaluator.name}}</b><p class="muted">{{currentResultTask.evaluator.version}}</p></div><div class="mini-card"><span class="muted">执行配置</span><b style="font-size:16px">{{currentResultTask.config}}</b><p class="muted">Key 类型：平台公共 Key</p></div></div></section>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">结果中心</h1>
+              <div class="page-sub">从总体指标下钻到单条 Case、输出与 Trace</div>
+            </div>
+            <select class="input" v-model="resultTaskId">
+              <option v-for="task in completedTasks" :key="task.id" :value="task.id">
+                {{ task.id }} · {{ task.name }}
+              </option>
+            </select>
+          </div>
+          <div class="result-summary">
+            <section class="card">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">{{ currentResultTask.name }}</h2>
+                  <p class="section-note">{{ currentResultTask.id }} · 完成于 2026-09-06 14:42</p>
+                </div>
+                <span class="badge success">通过发布门槛</span>
+              </div>
+              <div class="grid metric-grid">
+                <div class="metric">
+                  <div class="metric-label">总分</div>
+                  <div class="score">92.4</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">通过率</div>
+                  <div class="metric-value">92.4%</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">平均延迟</div>
+                  <div class="metric-value">1.8s</div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Badcase</div>
+                  <div class="metric-value">7</div>
+                </div>
+              </div>
+            </section>
+            <section class="card">
+              <h2 class="section-title">规则执行拆分</h2>
+              <p class="section-note">
+                当前结果只统计已接入的确定性规则；LLM 与复合评估器不参与本次结果。
+              </p>
+              <div class="fail-row"><span>路由准确率</span><b>94.1%</b></div>
+              <div class="fail-row"><span>工具调用正确率</span><b>97.6%</b></div>
+              <div class="fail-row"><span>终态一致性</span><b>95.8%</b></div>
+              <div class="fail-row"><span>策略合规通过率</span><b>100.0%</b></div>
+            </section>
+          </div>
+          <section class="card" style="margin-top: 16px">
+            <div class="tabs">
+              <button
+                :class="['tab', { active: resultTab === 'cases' }]"
+                @click="resultTab = 'cases'"
+              >
+                Case 详情</button
+              ><button
+                :class="['tab', { active: resultTab === 'badcase' }]"
+                @click="resultTab = 'badcase'"
+              >
+                Badcase（7）</button
+              ><button
+                :class="['tab', { active: resultTab === 'lineage' }]"
+                @click="resultTab = 'lineage'"
+              >
+                版本引用
+              </button>
+            </div>
+            <div v-if="resultTab === 'cases'" class="case-layout">
+              <div>
+                <button
+                  v-for="item in caseItems"
+                  :key="item.id"
+                  :class="['case-item', { selected: selectedCase === item.id }]"
+                  @click="selectedCase = item.id"
+                >
+                  <b>{{ item.id }}</b>
+                  <div class="muted">{{ item.title }}</div>
+                  <span :class="['badge', item.ok ? 'success' : 'error']">{{
+                    item.ok ? '通过' : '失败'
+                  }}</span>
+                </button>
+              </div>
+              <div>
+                <h2 class="section-title">{{ activeCase.title }}</h2>
+                <p class="section-note">
+                  {{ activeCase.kind }} · 难度 {{ activeCase.level }} ·
+                  {{ activeCase.ok ? '通过' : '失败' }}
+                </p>
+                <div class="grid" style="grid-template-columns: 1fr 1fr">
+                  <div class="mini-card">
+                    <span class="muted">用户输入</span>
+                    <p>{{ activeCase.input }}</p>
+                    <span class="muted">期望结果</span>
+                    <p>{{ activeCase.expected }}</p>
+                  </div>
+                  <div class="mini-card">
+                    <span class="muted">实际输出</span>
+                    <p>{{ activeCase.actual }}</p>
+                    <button class="link" @click="showToast('已将此 Case 加入新评测集版本草稿。')">
+                      写入新版本并加入回归集
+                    </button>
+                  </div>
+                </div>
+                <h3 style="margin: 18px 0 8px">Trace</h3>
+                <div class="trace">{{ activeCase.trace }}</div>
+              </div>
+            </div>
+            <div v-else-if="resultTab === 'badcase'">
+              <div class="notice">Badcase 已按失败模式聚类，可进入调优中心查看根因与优化建议。</div>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>聚类</th>
+                    <th>关联 Case</th>
+                    <th>主要失败</th>
+                    <th>建议动作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>路由混淆</td>
+                    <td>3</td>
+                    <td>相近 Skill 被错误触发</td>
+                    <td><button class="link" @click="go('optimizer')">查看分析</button></td>
+                  </tr>
+                  <tr>
+                    <td>字段缺失</td>
+                    <td>2</td>
+                    <td>输出结构不完整</td>
+                    <td><button class="link" @click="go('optimizer')">查看分析</button></td>
+                  </tr>
+                  <tr>
+                    <td>上下文丢失</td>
+                    <td>2</td>
+                    <td>多轮输入未继承</td>
+                    <td><button class="link" @click="go('optimizer')">查看分析</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="grid" style="grid-template-columns: repeat(4, 1fr)">
+              <div class="mini-card">
+                <span class="muted">目标快照</span
+                ><b style="font-size: 16px">{{ currentResultTask.target.name }}</b>
+                <p class="muted">
+                  {{ currentResultTask.target.id }} · {{ currentResultTask.target.version }}
+                </p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">评测集</span
+                ><b style="font-size: 16px">{{ currentResultTask.dataset.name }}</b>
+                <p class="muted">{{ currentResultTask.dataset.version }}</p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">评估器</span
+                ><b style="font-size: 16px">{{ currentResultTask.evaluator.name }}</b>
+                <p class="muted">{{ currentResultTask.evaluator.version }}</p>
+              </div>
+              <div class="mini-card">
+                <span class="muted">执行配置</span
+                ><b style="font-size: 16px">{{ currentResultTask.config }}</b>
+                <p class="muted">Key 类型：平台公共 Key</p>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section v-else-if="page === 'experiments'" class="page">
-          <div class="page-head"><div><h1 class="page-title">A/B 实验</h1><div class="page-sub">在同一评测集上对比两组配置；保持其他条件一致，只改动一项资产，才能将差异归因到该变量。</div></div><div class="actions"><button class="secondary" @click="resetAbExperiment">重置实验</button><button class="primary" :disabled="!canRunAb" @click="runAbExperiment">运行 A/B 实验</button></div></div>
-          <section class="card ab-form-card"><div class="toolbar"><div><h2 class="section-title">实验配置 <span class="muted">建议只改动一项资产</span></h2></div><select class="input ab-repeat" v-model="abRepeat"><option value="1">每条用例重复 1 次</option><option value="3">每条用例重复 3 次</option><option value="5">每条用例重复 5 次</option></select></div><div class="form-grid"><div class="field"><label>实验名称</label><input class="input" v-model="abName" placeholder="例如：风险评估技能升级验证" /></div><div class="field"><label>运行说明</label><div class="callout">实验 B 将以实验 A 为基线复制配置；在 B 中修改资产后，系统自动标记对比变量。</div></div></div><div :class="['ab-diff-banner', abChangeCount===0?'neutral':abChangeCount===1?'valid':'invalid']"><b>{{abChangeCount===0?'无变量':abChangeCount===1?'单变量受控':'变量过多'}}</b><span>{{abDiffText}}</span></div>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">A/B 实验</h1>
+              <div class="page-sub">
+                在同一评测集上对比两组配置；保持其他条件一致，只改动一项资产，才能将差异归因到该变量。
+              </div>
+            </div>
+            <div class="actions">
+              <button class="secondary" @click="resetAbExperiment">重置实验</button
+              ><button class="primary" :disabled="!canRunAb" @click="runAbExperiment">
+                运行 A/B 实验
+              </button>
+            </div>
+          </div>
+          <section class="card ab-form-card">
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">
+                  实验配置 <span class="muted">建议只改动一项资产</span>
+                </h2>
+              </div>
+              <select class="input ab-repeat" v-model="abRepeat">
+                <option value="1">每条用例重复 1 次</option>
+                <option value="3">每条用例重复 3 次</option>
+                <option value="5">每条用例重复 5 次</option>
+              </select>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label>实验名称</label
+                ><input class="input" v-model="abName" placeholder="例如：风险评估技能升级验证" />
+              </div>
+              <div class="field">
+                <label>运行说明</label>
+                <div class="callout">
+                  实验 B 将以实验 A 为基线复制配置；在 B 中修改资产后，系统自动标记对比变量。
+                </div>
+              </div>
+            </div>
+            <div
+              :class="[
+                'ab-diff-banner',
+                abChangeCount === 0 ? 'neutral' : abChangeCount === 1 ? 'valid' : 'invalid',
+              ]"
+            >
+              <b>{{
+                abChangeCount === 0 ? '无变量' : abChangeCount === 1 ? '单变量受控' : '变量过多'
+              }}</b
+              ><span>{{ abDiffText }}</span>
+            </div>
             <div class="ab-variants">
-              <section class="ab-panel base"><div class="ab-panel-title"><span class="ab-letter">A</span><b>实验 A</b><small>基线配置</small></div><div class="field"><label>智能体</label><div class="compound-select"><select class="input" v-model="abA.agentId"><option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">{{agent.name}}</option></select><select class="input version-select" v-model="abA.version"><option v-for="version in agentVersions" :key="version">{{version}}</option></select></div></div><div class="field"><label>技能</label><div class="asset-list"><label v-for="skill in skillTargets" :key="skill.id" :class="['asset-row',{checked:abA.skillIds.includes(skill.id)}]"><input type="checkbox" :checked="abA.skillIds.includes(skill.id)" @change="toggleAbAsset('A','skill',skill.id)" /><span><b>{{skill.name}}</b><em>{{skill.description}}</em></span><select class="input asset-version" :value="skill.version"><option>{{skill.version}}</option></select></label></div></div><div class="field"><label>评测集</label><div class="compound-select"><select class="input" v-model="abA.dataset"><option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">{{dataset.name}} · {{dataset.cases}} 条</option></select><select class="input version-select" v-model="abA.datasetVersion"><option>v1.4</option><option>v2.1</option><option>v1.0</option></select></div></div><div class="field"><label>评估器</label><div class="asset-list"><label v-for="item in evaluatorItems" :key="item.id" :class="['asset-row',{checked:abA.evaluatorIds.includes(item.id)}]"><input type="checkbox" :checked="abA.evaluatorIds.includes(item.id)" @change="toggleAbAsset('A','evaluator',item.id)" /><span><b>{{item.name}}</b><em>{{item.kind}} · {{item.coverage}}</em></span><select class="input asset-version" :value="item.version"><option>{{item.version}}</option></select></label></div></div></section>
-              <section class="ab-panel candidate"><div class="ab-panel-title"><span class="ab-letter">B</span><b>实验 B</b><small>候选配置</small><button class="link" @click="copyAbBaseToCandidate">以实验 A 为基础配置实验 B</button></div><div class="field"><label>智能体</label><div class="compound-select"><select class="input" v-model="abB.agentId"><option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">{{agent.name}}</option></select><select class="input version-select" v-model="abB.version"><option v-for="version in agentVersions" :key="version">{{version}}</option></select></div></div><div class="field"><label>技能</label><div class="asset-list"><label v-for="skill in skillTargets" :key="skill.id" :class="['asset-row',{checked:abB.skillIds.includes(skill.id)}]"><input type="checkbox" :checked="abB.skillIds.includes(skill.id)" @change="toggleAbAsset('B','skill',skill.id)" /><span><b>{{skill.name}}</b><em>{{skill.description}}</em></span><select class="input asset-version" :value="skill.id===abChangedSkillId?'v5.2':skill.version" @change="setAbSkillVersion($event,skill.id)"><option>{{skill.version}}</option><option>v5.2</option><option>v5.1</option></select></label></div></div><div class="field"><label>评测集</label><div class="compound-select"><select class="input" v-model="abB.dataset"><option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">{{dataset.name}} · {{dataset.cases}} 条</option></select><select class="input version-select" v-model="abB.datasetVersion"><option>v1.4</option><option>v2.1</option><option>v1.0</option></select></div></div><div class="field"><label>评估器</label><div class="asset-list"><label v-for="item in evaluatorItems" :key="item.id" :class="['asset-row',{checked:abB.evaluatorIds.includes(item.id)}]"><input type="checkbox" :checked="abB.evaluatorIds.includes(item.id)" @change="toggleAbAsset('B','evaluator',item.id)" /><span><b>{{item.name}}</b><em>{{item.kind}} · {{item.coverage}}</em></span><select class="input asset-version" :value="item.version"><option>{{item.version}}</option></select></label></div></div></section>
+              <section class="ab-panel base">
+                <div class="ab-panel-title">
+                  <span class="ab-letter">A</span><b>实验 A</b><small>基线配置</small>
+                </div>
+                <div class="field">
+                  <label>智能体</label>
+                  <div class="compound-select">
+                    <select class="input" v-model="abA.agentId">
+                      <option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">
+                        {{ agent.name }}
+                      </option></select
+                    ><select class="input version-select" v-model="abA.version">
+                      <option v-for="version in agentVersions" :key="version">{{ version }}</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>技能</label>
+                  <div class="asset-list">
+                    <label
+                      v-for="skill in skillTargets"
+                      :key="skill.id"
+                      :class="['asset-row', { checked: abA.skillIds.includes(skill.id) }]"
+                      ><input
+                        type="checkbox"
+                        :checked="abA.skillIds.includes(skill.id)"
+                        @change="toggleAbAsset('A', 'skill', skill.id)"
+                      /><span
+                        ><b>{{ skill.name }}</b
+                        ><em>{{ skill.description }}</em></span
+                      ><select class="input asset-version" :value="skill.version">
+                        <option>{{ skill.version }}</option>
+                      </select></label
+                    >
+                  </div>
+                </div>
+                <div class="field">
+                  <label>评测集</label>
+                  <div class="compound-select">
+                    <select class="input" v-model="abA.dataset">
+                      <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
+                        {{ dataset.name }} · {{ dataset.cases }} 条
+                      </option></select
+                    ><select class="input version-select" v-model="abA.datasetVersion">
+                      <option>v1.4</option>
+                      <option>v2.1</option>
+                      <option>v1.0</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>评估器</label>
+                  <div class="asset-list">
+                    <label
+                      v-for="item in evaluatorItems"
+                      :key="item.id"
+                      :class="['asset-row', { checked: abA.evaluatorIds.includes(item.id) }]"
+                      ><input
+                        type="checkbox"
+                        :checked="abA.evaluatorIds.includes(item.id)"
+                        @change="toggleAbAsset('A', 'evaluator', item.id)"
+                      /><span
+                        ><b>{{ item.name }}</b
+                        ><em>{{ item.kind }} · {{ item.coverage }}</em></span
+                      ><select class="input asset-version" :value="item.version">
+                        <option>{{ item.version }}</option>
+                      </select></label
+                    >
+                  </div>
+                </div>
+              </section>
+              <section class="ab-panel candidate">
+                <div class="ab-panel-title">
+                  <span class="ab-letter">B</span><b>实验 B</b><small>候选配置</small
+                  ><button class="link" @click="copyAbBaseToCandidate">
+                    以实验 A 为基础配置实验 B
+                  </button>
+                </div>
+                <div class="field">
+                  <label>智能体</label>
+                  <div class="compound-select">
+                    <select class="input" v-model="abB.agentId">
+                      <option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">
+                        {{ agent.name }}
+                      </option></select
+                    ><select class="input version-select" v-model="abB.version">
+                      <option v-for="version in agentVersions" :key="version">{{ version }}</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>技能</label>
+                  <div class="asset-list">
+                    <label
+                      v-for="skill in skillTargets"
+                      :key="skill.id"
+                      :class="['asset-row', { checked: abB.skillIds.includes(skill.id) }]"
+                      ><input
+                        type="checkbox"
+                        :checked="abB.skillIds.includes(skill.id)"
+                        @change="toggleAbAsset('B', 'skill', skill.id)"
+                      /><span
+                        ><b>{{ skill.name }}</b
+                        ><em>{{ skill.description }}</em></span
+                      ><select
+                        class="input asset-version"
+                        :value="skill.id === abChangedSkillId ? 'v5.2' : skill.version"
+                        @change="setAbSkillVersion($event, skill.id)"
+                      >
+                        <option>{{ skill.version }}</option>
+                        <option>v5.2</option>
+                        <option>v5.1</option>
+                      </select></label
+                    >
+                  </div>
+                </div>
+                <div class="field">
+                  <label>评测集</label>
+                  <div class="compound-select">
+                    <select class="input" v-model="abB.dataset">
+                      <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
+                        {{ dataset.name }} · {{ dataset.cases }} 条
+                      </option></select
+                    ><select class="input version-select" v-model="abB.datasetVersion">
+                      <option>v1.4</option>
+                      <option>v2.1</option>
+                      <option>v1.0</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>评估器</label>
+                  <div class="asset-list">
+                    <label
+                      v-for="item in evaluatorItems"
+                      :key="item.id"
+                      :class="['asset-row', { checked: abB.evaluatorIds.includes(item.id) }]"
+                      ><input
+                        type="checkbox"
+                        :checked="abB.evaluatorIds.includes(item.id)"
+                        @change="toggleAbAsset('B', 'evaluator', item.id)"
+                      /><span
+                        ><b>{{ item.name }}</b
+                        ><em>{{ item.kind }} · {{ item.coverage }}</em></span
+                      ><select class="input asset-version" :value="item.version">
+                        <option>{{ item.version }}</option>
+                      </select></label
+                    >
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
-          <section v-if="abRan" class="card ab-result-card"><div class="toolbar"><div><h2 class="section-title">对比分析 <span class="muted">实验 A 与实验 B 的差异</span></h2><p class="section-note">对比变量：{{abDiffText}}</p></div><span class="badge success">实验完成</span></div><div class="ab-score-grid"><div class="ab-score base"><span>实验 A · {{abA.version}}</span><b>72.92%</b><p>通过 35 · 失败 13 / 48</p><em>门禁未通过</em></div><div class="ab-score candidate"><span>实验 B · {{abB.version}}</span><b>93.75%</b><p>通过 45 · 失败 3 / 48</p><em>门禁通过</em></div></div><h3 class="ab-section-title">用例结果流转</h3><div class="transition-grid"><div><span>35</span><small>保持通过</small></div><div class="negative"><span>0</span><small>新增失败</small></div><div class="positive"><span>10</span><small>修复通过</small></div><div><span>3</span><small>仍然失败</small></div></div><h3 class="ab-section-title">结论判定</h3><div class="ab-conclusion"><p>✓ 满足　通过率不低于实验 A</p><p>✓ 满足　无新增失败用例（pass → fail = 0）</p><p>✓ 满足　策略违规不增加</p><b>建议采用实验 B</b></div></section>
+          <section v-if="abRan" class="card ab-result-card">
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">
+                  对比分析 <span class="muted">实验 A 与实验 B 的差异</span>
+                </h2>
+                <p class="section-note">对比变量：{{ abDiffText }}</p>
+              </div>
+              <span class="badge success">实验完成</span>
+            </div>
+            <div class="ab-score-grid">
+              <div class="ab-score base">
+                <span>实验 A · {{ abA.version }}</span
+                ><b>72.92%</b>
+                <p>通过 35 · 失败 13 / 48</p>
+                <em>门禁未通过</em>
+              </div>
+              <div class="ab-score candidate">
+                <span>实验 B · {{ abB.version }}</span
+                ><b>93.75%</b>
+                <p>通过 45 · 失败 3 / 48</p>
+                <em>门禁通过</em>
+              </div>
+            </div>
+            <h3 class="ab-section-title">用例结果流转</h3>
+            <div class="transition-grid">
+              <div><span>35</span><small>保持通过</small></div>
+              <div class="negative"><span>0</span><small>新增失败</small></div>
+              <div class="positive"><span>10</span><small>修复通过</small></div>
+              <div><span>3</span><small>仍然失败</small></div>
+            </div>
+            <h3 class="ab-section-title">结论判定</h3>
+            <div class="ab-conclusion">
+              <p>✓ 满足 通过率不低于实验 A</p>
+              <p>✓ 满足 无新增失败用例（pass → fail = 0）</p>
+              <p>✓ 满足 策略违规不增加</p>
+              <b>建议采用实验 B</b>
+            </div>
+          </section>
         </section>
 
         <section v-if="page === 'experiments' && abRan" class="page ab-dynamic-result">
-          <section class="card ab-result-card"><div class="toolbar"><div><h2 class="section-title">对比分析 <span class="muted">实验 A 与实验 B 的差异</span></h2><p class="section-note">对比变量：{{abDiffText}} · 每条用例重复 {{abRepeat}} 次</p></div><span :class="['badge',abResult.tone]">实验完成</span></div><div class="ab-score-grid"><div class="ab-score base"><span>实验 A · {{abA.version}}</span><b>{{abResult.baseScore}}%</b><p>通过 {{abResult.basePass}} · 失败 {{abResult.total-abResult.basePass}} / {{abResult.total}}</p><em>基线结果</em></div><div :class="['ab-score','candidate',abResult.tone]"><span>实验 B · {{abB.version}}</span><b>{{abResult.candidateScore}}%</b><p>通过 {{abResult.candidatePass}} · 失败 {{abResult.total-abResult.candidatePass}} / {{abResult.total}}</p><em>{{abResult.gate}}</em></div></div><h3 class="ab-section-title">用例结果流转</h3><div class="transition-grid"><div><span>{{abResult.keepPass}}</span><small>保持通过</small></div><div :class="{negative:abResult.newFail>0}"><span>{{abResult.newFail}}</span><small>新增失败</small></div><div :class="{positive:abResult.fixedPass>0}"><span>{{abResult.fixedPass}}</span><small>修复通过</small></div><div><span>{{abResult.keepFail}}</span><small>仍然失败</small></div></div><h3 class="ab-section-title">结论判定</h3><div :class="['ab-conclusion',abResult.tone]"><p>{{abResult.candidatePass>=abResult.basePass?'✓ 满足':'✕ 未满足'}}　通过率不低于实验 A（{{abResult.candidateScore}}% / {{abResult.baseScore}}%）</p><p>{{abResult.newFail===0?'✓ 满足':'✕ 未满足'}}　无新增失败用例（pass → fail = {{abResult.newFail}}）</p><p>{{abResult.tone==='success'?'✓ 满足':'✕ 未满足'}}　发布门禁判定</p><b>{{abResult.gate}}</b></div></section>
+          <section class="card ab-result-card">
+            <div class="toolbar">
+              <div>
+                <h2 class="section-title">
+                  对比分析 <span class="muted">实验 A 与实验 B 的差异</span>
+                </h2>
+                <p class="section-note">
+                  对比变量：{{ abDiffText }} · 每条用例重复 {{ abRepeat }} 次
+                </p>
+              </div>
+              <span :class="['badge', abResult.tone]">实验完成</span>
+            </div>
+            <div class="ab-score-grid">
+              <div class="ab-score base">
+                <span>实验 A · {{ abA.version }}</span
+                ><b>{{ abResult.baseScore }}%</b>
+                <p>
+                  通过 {{ abResult.basePass }} · 失败 {{ abResult.total - abResult.basePass }} /
+                  {{ abResult.total }}
+                </p>
+                <em>基线结果</em>
+              </div>
+              <div :class="['ab-score', 'candidate', abResult.tone]">
+                <span>实验 B · {{ abB.version }}</span
+                ><b>{{ abResult.candidateScore }}%</b>
+                <p>
+                  通过 {{ abResult.candidatePass }} · 失败
+                  {{ abResult.total - abResult.candidatePass }} / {{ abResult.total }}
+                </p>
+                <em>{{ abResult.gate }}</em>
+              </div>
+            </div>
+            <h3 class="ab-section-title">用例结果流转</h3>
+            <div class="transition-grid">
+              <div>
+                <span>{{ abResult.keepPass }}</span
+                ><small>保持通过</small>
+              </div>
+              <div :class="{ negative: abResult.newFail > 0 }">
+                <span>{{ abResult.newFail }}</span
+                ><small>新增失败</small>
+              </div>
+              <div :class="{ positive: abResult.fixedPass > 0 }">
+                <span>{{ abResult.fixedPass }}</span
+                ><small>修复通过</small>
+              </div>
+              <div>
+                <span>{{ abResult.keepFail }}</span
+                ><small>仍然失败</small>
+              </div>
+            </div>
+            <h3 class="ab-section-title">结论判定</h3>
+            <div :class="['ab-conclusion', abResult.tone]">
+              <p>
+                {{ abResult.candidatePass >= abResult.basePass ? '✓ 满足' : '✕ 未满足' }}
+                通过率不低于实验 A（{{ abResult.candidateScore }}% / {{ abResult.baseScore }}%）
+              </p>
+              <p>
+                {{ abResult.newFail === 0 ? '✓ 满足' : '✕ 未满足' }} 无新增失败用例（pass → fail =
+                {{ abResult.newFail }}）
+              </p>
+              <p>{{ abResult.tone === 'success' ? '✓ 满足' : '✕ 未满足' }} 发布门禁判定</p>
+              <b>{{ abResult.gate }}</b>
+            </div>
+          </section>
         </section>
 
         <section v-else-if="page === 'optimizer'" class="page">
-          <div class="page-head"><div><h1 class="page-title">调优中心</h1><div class="page-sub">根据 Badcase 聚类和 Trace 形成可审查的改进闭环</div></div><button class="secondary" @click="go('results')">返回结果中心</button></div>
-          <div class="split"><section class="card"><h2 class="section-title">Badcase 聚类</h2><p class="section-note">基于失败结果、路由和 Trace 归类</p><button v-for="cluster in optimizerClusters" :key="cluster.id" :class="['mini-card', {selected: selectedCluster===cluster.id}]" style="width:100%;text-align:left;margin-bottom:12px" @click="selectedCluster=cluster.id"><span :class="['badge',cluster.level==='warn'?'warn':'error']">{{cluster.cases}} 条 Case</span><b style="font-size:18px">{{cluster.name}}</b><p class="muted">{{cluster.summary}}</p><span class="link">查看根因 →</span></button></section><section class="card"><div class="toolbar"><div><h2 class="section-title">根因与建议</h2><p class="section-note">建议仅供人工审查，不会自动修改外部资产。</p></div><span :class="['badge', activeCluster.status==='已确认'?'success':activeCluster.status==='已忽略'?'info':'warn']">{{activeCluster.status}}</span></div><div class="callout"><b>{{activeCluster.name}}</b><p>{{activeCluster.cause}}</p><p><b>建议：</b>{{activeCluster.suggestion}}</p></div><div class="form-footer"><button class="secondary" @click="setRootCauseStatus('已忽略')">忽略建议</button><button class="primary" @click="setRootCauseStatus('已确认');showToast('已创建回归任务草稿，等待选择新的外部目标版本。')">采纳并创建回归</button></div></section></div>
-          <section class="card" style="margin-top:16px"><h2 class="section-title">路由混淆矩阵</h2><p class="section-note">用于识别容易被彼此误路由的 Skill。</p><div class="matrix"><div class="head">实际 \ 预期</div><div class="head">订单查询</div><div class="head">订单变更</div><div class="head">人工服务</div><div class="head">订单查询</div><div class="heat3">32</div><div class="heat2">4</div><div class="heat1">1</div><div class="head">订单变更</div><div class="heat2">3</div><div class="heat3">27</div><div class="heat1">2</div><div class="head">人工服务</div><div class="heat1">0</div><div class="heat1">2</div><div class="heat3">29</div></div></section>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">调优中心</h1>
+              <div class="page-sub">根据 Badcase 聚类和 Trace 形成可审查的改进闭环</div>
+            </div>
+            <button class="secondary" @click="go('results')">返回结果中心</button>
+          </div>
+          <div class="split">
+            <section class="card">
+              <h2 class="section-title">Badcase 聚类</h2>
+              <p class="section-note">基于失败结果、路由和 Trace 归类</p>
+              <button
+                v-for="cluster in optimizerClusters"
+                :key="cluster.id"
+                :class="['mini-card', { selected: selectedCluster === cluster.id }]"
+                style="width: 100%; text-align: left; margin-bottom: 12px"
+                @click="selectedCluster = cluster.id"
+              >
+                <span :class="['badge', cluster.level === 'warn' ? 'warn' : 'error']"
+                  >{{ cluster.cases }} 条 Case</span
+                ><b style="font-size: 18px">{{ cluster.name }}</b>
+                <p class="muted">{{ cluster.summary }}</p>
+                <span class="link">查看根因 →</span>
+              </button>
+            </section>
+            <section class="card">
+              <div class="toolbar">
+                <div>
+                  <h2 class="section-title">根因与建议</h2>
+                  <p class="section-note">建议仅供人工审查，不会自动修改外部资产。</p>
+                </div>
+                <span
+                  :class="[
+                    'badge',
+                    activeCluster.status === '已确认'
+                      ? 'success'
+                      : activeCluster.status === '已忽略'
+                        ? 'info'
+                        : 'warn',
+                  ]"
+                  >{{ activeCluster.status }}</span
+                >
+              </div>
+              <div class="callout">
+                <b>{{ activeCluster.name }}</b>
+                <p>{{ activeCluster.cause }}</p>
+                <p><b>建议：</b>{{ activeCluster.suggestion }}</p>
+              </div>
+              <div class="form-footer">
+                <button class="secondary" @click="setRootCauseStatus('已忽略')">忽略建议</button
+                ><button
+                  class="primary"
+                  @click="
+                    setRootCauseStatus('已确认');
+                    showToast('已创建回归任务草稿，等待选择新的外部目标版本。');
+                  "
+                >
+                  采纳并创建回归
+                </button>
+              </div>
+            </section>
+          </div>
+          <section class="card" style="margin-top: 16px">
+            <h2 class="section-title">路由混淆矩阵</h2>
+            <p class="section-note">用于识别容易被彼此误路由的 Skill。</p>
+            <div class="matrix">
+              <div class="head">实际 \ 预期</div>
+              <div class="head">订单查询</div>
+              <div class="head">订单变更</div>
+              <div class="head">人工服务</div>
+              <div class="head">订单查询</div>
+              <div class="heat3">32</div>
+              <div class="heat2">4</div>
+              <div class="heat1">1</div>
+              <div class="head">订单变更</div>
+              <div class="heat2">3</div>
+              <div class="heat3">27</div>
+              <div class="heat1">2</div>
+              <div class="head">人工服务</div>
+              <div class="heat1">0</div>
+              <div class="heat1">2</div>
+              <div class="heat3">29</div>
+            </div>
+          </section>
         </section>
 
         <section v-else-if="page === 'analysis'" class="page">
-          <div class="page-head"><div><h1 class="page-title">Skill 静态分析</h1><div class="page-sub">选择一个 Skill 后分析描述、边界、Prompt 与输入输出定义</div></div><button class="primary" @click="runStaticAnalysis">发起分析</button></div>
-          <section class="card analysis-config" style="margin-bottom:16px"><div class="form-grid"><div class="field"><label>选择 Skill</label><select class="input" v-model="selectedSkillAnalysisId"><option v-for="skill in skillTargets" :key="skill.id" :value="skill.id">{{skill.name}} · {{skill.version}}</option></select><small>锁定待分析的 Skill 快照，不修改外部资产。</small></div><div class="field"><label>关联智能体与版本</label><div class="compound-select"><select class="input" v-model="selectedAnalysisAgentId"><option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">{{agent.name}}</option></select><select class="input version-select" v-model="selectedAnalysisVersion"><option>当前发布版本</option><option>上一发布版本</option><option>草稿版本</option></select></div><small>用于识别该 Skill 在指定智能体版本内的路由冲突与依赖关系。</small></div><div class="field full"><label>分析范围</label><div class="analysis-scope-list"><label v-for="scope in analysisScopeOptions" :key="scope" :class="['analysis-scope',{selected:selectedAnalysisScopes.includes(scope)}]"><input type="checkbox" :checked="selectedAnalysisScopes.includes(scope)" @change="toggleAnalysisScope(scope)" /><span>{{scope}}</span></label></div><small>可组合选择分析维度；至少选择一项后才能发起分析。</small></div></div></section><div v-if="analysisRan" class="grid" style="grid-template-columns:repeat(3,1fr)"><section v-for="finding in staticFindings" :key="finding.title" class="card"><span :class="['badge',finding.level]">{{finding.label}}</span><h2 class="section-title" style="margin-top:12px">{{finding.title}}</h2><p class="section-note">{{finding.detail}}</p><button class="link" @click="showToast(finding.action)">查看建议 →</button></section></div><div v-else class="empty card">选择 Skill、关联智能体版本和分析范围后，分析结果将在此展示。</div>
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Skill 静态分析</h1>
+              <div class="page-sub">选择一个 Skill 后分析描述、边界、Prompt 与输入输出定义</div>
+            </div>
+            <button class="primary" @click="runStaticAnalysis">发起分析</button>
+          </div>
+          <section class="card analysis-config" style="margin-bottom: 16px">
+            <div class="form-grid">
+              <div class="field">
+                <label>选择 Skill</label
+                ><select class="input" v-model="selectedSkillAnalysisId">
+                  <option v-for="skill in skillTargets" :key="skill.id" :value="skill.id">
+                    {{ skill.name }} · {{ skill.version }}
+                  </option></select
+                ><small>锁定待分析的 Skill 快照，不修改外部资产。</small>
+              </div>
+              <div class="field">
+                <label>关联智能体与版本</label>
+                <div class="compound-select">
+                  <select class="input" v-model="selectedAnalysisAgentId">
+                    <option v-for="agent in agentTargets" :key="agent.id" :value="agent.id">
+                      {{ agent.name }}
+                    </option></select
+                  ><select class="input version-select" v-model="selectedAnalysisVersion">
+                    <option>当前发布版本</option>
+                    <option>上一发布版本</option>
+                    <option>草稿版本</option>
+                  </select>
+                </div>
+                <small>用于识别该 Skill 在指定智能体版本内的路由冲突与依赖关系。</small>
+              </div>
+              <div class="field full">
+                <label>分析范围</label>
+                <div class="analysis-scope-list">
+                  <label
+                    v-for="scope in analysisScopeOptions"
+                    :key="scope"
+                    :class="[
+                      'analysis-scope',
+                      { selected: selectedAnalysisScopes.includes(scope) },
+                    ]"
+                    ><input
+                      type="checkbox"
+                      :checked="selectedAnalysisScopes.includes(scope)"
+                      @change="toggleAnalysisScope(scope)"
+                    /><span>{{ scope }}</span></label
+                  >
+                </div>
+                <small>可组合选择分析维度；至少选择一项后才能发起分析。</small>
+              </div>
+            </div>
+          </section>
+          <div v-if="analysisRan" class="grid" style="grid-template-columns: repeat(3, 1fr)">
+            <section v-for="finding in staticFindings" :key="finding.title" class="card">
+              <span :class="['badge', finding.level]">{{ finding.label }}</span>
+              <h2 class="section-title" style="margin-top: 12px">{{ finding.title }}</h2>
+              <p class="section-note">{{ finding.detail }}</p>
+              <button class="link" @click="showToast(finding.action)">查看建议 →</button>
+            </section>
+          </div>
+          <div v-else class="empty card">
+            选择 Skill、关联智能体版本和分析范围后，分析结果将在此展示。
+          </div>
         </section>
       </main>
     </div>
-    <div v-if="datasetModal" class="modal-backdrop"><div class="modal"><div class="modal-header"><b>自动生成评测集</b><button class="ghost" @click="datasetModal=false">✕</button></div><div class="modal-body"><div class="field"><label>选择 Agent</label><select class="input" v-model="generatorTargetId"><option v-for="target in targets.filter(t=>t.type==='Agent')" :key="target.id" :value="target.id">{{target.name}} · {{target.version}}</option></select><small>系统读取目标快照中的 Prompt、Skill 列表、工具定义与输入输出定义，无需填写能力描述。</small></div><div class="field" style="margin-top:16px"><label>生成范围</label><div class="choice-grid"><button :class="['choice',{selected:datasetGenerationScope==='标准覆盖'}]" @click="datasetGenerationScope='标准覆盖'"><b>标准覆盖</b><span>正例、负例、边界、单轮与多轮</span></button><button :class="['choice',{selected:datasetGenerationScope==='路由专项'}]" @click="datasetGenerationScope='路由专项'"><b>路由专项</b><span>Skill 触发与工具调用重点验证</span></button></div></div><div class="notice" style="margin-top:16px">当前选择：{{datasetGenerationScope}}。生成后创建评测集草稿，不影响已发布版本。</div></div><div class="modal-footer"><button class="secondary" @click="datasetModal=false">取消</button><button class="primary" @click="generateDatasetDraft">生成草稿</button></div></div></div>
-    <div v-if="abModal" class="modal-backdrop"><div class="modal ab-modal"><div class="modal-header"><b>创建 A/B 实验</b><button class="ghost" @click="abModal=false">✕</button></div><div class="modal-body"><div class="form-grid"><div class="field full"><label>实验名称</label><input class="input" v-model="abName" placeholder="例如：客户服务主智能体发布前 A/B 实验" /></div><div class="field"><label>选择智能体</label><select class="input" v-model="abTargetId"><option v-for="target in targets.filter(t=>t.type==='Agent')" :key="target.id" :value="target.id">{{target.name}} · {{target.version}}</option></select></div><div class="field"><label>评测集</label><select class="input" v-model="abDataset"><option>核心业务回归集 · v1.4</option><option>路由与工具调用集 · v2.1</option></select></div><div class="field"><label>基线版本</label><select class="input" v-model="abBaseline"><option>v2.3.2</option><option>v2.4.0</option></select></div><div class="field"><label>候选版本</label><select class="input" v-model="abCandidate"><option>v2.4.0</option><option>v2.5.0-candidate</option></select></div><div class="field full"><label>选择技能</label><div class="skill-picker"><button v-for="skill in skillTargets" :key="skill.id" :class="['skill-option',{selected:abSkillIds.includes(skill.id)}]" @click="toggleAbSkill(skill.id)"><b>{{skill.name}}</b><span>{{skill.version}}</span></button></div><small>仅对选择的技能及其路由、工具调用和输出约束进行对比分析。</small></div><div class="field"><label>评估器</label><select class="input" v-model="abEvaluator"><option v-for="item in evaluatorItems" :key="item.id">{{item.name}} · {{item.version}}</option></select></div><div class="field"><label>发布门槛</label><select class="input" v-model="abGate"><option>通过率不低于基线且 P0 全通过</option><option>通过率提升 2% 且 Badcase 减少</option></select></div><div class="field full"><label>运行策略</label><div class="choice-grid"><button :class="['choice',{selected:abRunMode==='立即执行'}]" @click="abRunMode='立即执行'"><b>立即执行</b><span>创建后同时运行基线和候选版本</span></button><button :class="['choice',{selected:abRunMode==='预约执行'}]" @click="abRunMode='预约执行'"><b>预约执行</b><span>在指定时间进入实验队列</span></button></div></div></div><div class="notice" style="margin-top:16px">A/B 实验将锁定智能体、两个版本、技能范围、评测集、评估器及运行策略；结果包含指标差异、Case 差异和发布结论。</div></div><div class="modal-footer"><button class="secondary" @click="abModal=false">取消</button><button class="primary" @click="createAbExperiment">创建并运行</button></div></div></div>
-    <div v-if="selectedTaskDetail" class="modal-backdrop"><div class="modal"><div class="modal-header"><b>评测任务详情</b><button class="ghost" @click="selectedTaskDetail=null">✕</button></div><div class="modal-body"><div class="grid" style="grid-template-columns:1fr 1fr"><div class="mini-card"><span class="muted">任务</span><b>{{selectedTaskDetail.name}}</b><p class="muted">{{selectedTaskDetail.id}}</p></div><div class="mini-card"><span class="muted">当前状态</span><b>{{selectedTaskDetail.status}}</b><p class="muted">{{selectedTaskDetail.config}}</p></div><div class="mini-card"><span class="muted">评测对象</span><b>{{selectedTaskDetail.target.name}}</b><p class="muted">{{selectedTaskDetail.target.version}}</p></div><div class="mini-card"><span class="muted">评测集 / 评估器</span><b>{{selectedTaskDetail.dataset.name}}</b><p class="muted">{{selectedTaskDetail.dataset.version}} · {{selectedTaskDetail.evaluator.version}}</p></div></div><div v-if="selectedTaskDetail.status==='运行中'" class="notice" style="margin-top:16px">任务正在执行。当前演示会展示已锁定的运行清单；接入引擎后此处轮询 Case 进度、排队位置和 Trace。</div><div v-else-if="selectedTaskDetail.status==='已失败'" class="notice" style="margin-top:16px">任务失败：演示数据模拟外部目标响应超时。可调整超时或目标版本后复制为新任务重新执行。</div></div><div class="modal-footer"><button v-if="selectedTaskDetail.status==='已失败'" class="secondary" @click="retryTask(selectedTaskDetail)">复制并重试</button><button class="primary" @click="selectedTaskDetail=null">关闭</button></div></div></div>
-    <div v-if="evaluatorModal" class="modal-backdrop"><div class="modal"><div class="modal-header"><b>新建评估器</b><button class="ghost" @click="evaluatorModal=false">✕</button></div><div class="modal-body"><div class="form-grid"><div class="field"><label>名称</label><input class="input" v-model="newEvaluator.name" placeholder="例如：输出字段完整性规则" /></div><div class="field"><label>类型</label><select class="input" v-model="newEvaluator.kind"><option>规则</option><option>LLM</option><option>复合</option></select></div><div class="field full"><label>适用范围</label><input class="input" v-model="newEvaluator.coverage" placeholder="例如：响应字段、枚举值与结构校验" /></div></div></div><div class="modal-footer"><button class="secondary" @click="evaluatorModal=false">取消</button><button class="primary" @click="createEvaluator">保存并启用</button></div></div></div>
-    <div v-if="selectedEvaluatorDetail" class="modal-backdrop"><div class="modal"><div class="modal-header"><b>评估器配置</b><button class="ghost" @click="selectedEvaluatorDetail=null">✕</button></div><div class="modal-body"><div class="grid" style="grid-template-columns:1fr 1fr"><div class="mini-card"><span class="muted">名称</span><b>{{selectedEvaluatorDetail.name}}</b><p>{{selectedEvaluatorDetail.kind}} · {{selectedEvaluatorDetail.version}}</p></div><div class="mini-card"><span class="muted">状态</span><b>{{selectedEvaluatorDetail.status}}</b><p>{{selectedEvaluatorDetail.coverage}}</p></div></div><div class="notice" style="margin-top:16px">演示环境中可完成评估器的创建、查看和启用状态管理；规则与模型参数写入引擎将在后续接口集成时实现。</div></div><div class="modal-footer"><button class="secondary" @click="toggleEvaluator(selectedEvaluatorDetail)">{{selectedEvaluatorDetail.status==='已启用'?'停用':'启用'}}</button><button class="primary" @click="selectedEvaluatorDetail=null">关闭</button></div></div></div>
-    <div v-if="selectedObject" class="modal-backdrop"><div class="modal"><div class="modal-header"><b>评估对象快照</b><button class="ghost" @click="selectedObject=null">✕</button></div><div class="modal-body"><div class="grid" style="grid-template-columns:1fr 1fr"><div class="mini-card"><span class="muted">对象</span><b style="font-size:18px">{{ selectedObject.name }}</b><p class="muted">{{ selectedObject.id }} · {{ selectedObject.type }}</p></div><div class="mini-card"><span class="muted">版本</span><b style="font-size:18px">{{ selectedObject.version }}</b><p class="muted">更新于 {{ selectedObject.updatedAt }}</p></div></div><div class="callout" style="margin-top:16px"><b>提交评测时的快照内容</b><p>对象 ID、版本 ID、Prompt、工具定义、输入输出定义及必要运行配置。该快照仅用于可复现评测，不会写回外部资产平台。</p></div></div><div class="modal-footer"><button class="secondary" @click="selectedObject=null">关闭</button><button class="primary" @click="selectedTargetId=selectedObject.id;selectedObject=null;go('create')">选择并评测</button></div></div></div>
-    <div v-if="evaluatorConfigModal" class="modal-backdrop"><div class="modal evaluator-config-modal"><div class="modal-header"><div><b>{{ editingEvaluator ? '评估器配置' : '新建评估器' }}</b><small v-if="editingEvaluator">{{ editingEvaluator.version }} · {{ editingEvaluator.status }}</small></div><button class="ghost" @click="closeEvaluatorConfig">✕</button></div><div class="modal-body"><div class="form-grid"><div class="field"><label>名称</label><input class="input" v-model="evaluatorDraft.name" placeholder="例如：响应字段完整性规则" /></div><div class="field"><label>评估器类型</label><select class="input" v-model="evaluatorDraft.kind" :disabled="Boolean(editingEvaluator)"><option>规则</option><option>LLM</option><option>复合</option></select><small>类型决定执行方式与可配置字段。</small></div><div class="field full"><label>评估范围</label><input class="input" v-model="evaluatorDraft.coverage" placeholder="例如：响应字段、枚举值与结构校验" /><small>说明该评估器检查目标输出、工具调用或流程中的哪一类质量要求。</small></div></div><div v-if="evaluatorDraft.kind==='规则'" class="evaluator-config-block"><b>规则配置</b><div class="form-grid"><div class="field"><label>规则类别</label><select class="input" v-model="evaluatorDraft.ruleType"><option>JSON Schema / 字段完整性</option><option>工具调用与参数约束</option><option>终态与业务策略</option></select></div><div class="field"><label>失败等级</label><select class="input" v-model="evaluatorDraft.failureLevel"><option>P0：阻断</option><option>P1：重要</option><option>P2：提示</option></select></div></div></div><div v-else-if="evaluatorDraft.kind==='LLM'" class="evaluator-config-block"><b>LLM 评估配置</b><div class="form-grid"><div class="field"><label>模型 Key 来源</label><select class="input" v-model="evaluatorDraft.keySource"><option>平台公共 Key</option><option>个人私有 Key（已加密）</option></select><small>页面只记录来源类型，不展示或保存明文 Key。</small></div><div class="field"><label>判定输出</label><select class="input" v-model="evaluatorDraft.judgeOutput"><option>通过 / 不通过 + 理由</option><option>0–100 分 + 理由</option></select></div><div class="field full"><label>评估提示词</label><textarea class="input" v-model="evaluatorDraft.prompt" rows="3" placeholder="描述模型需要判断的质量标准、禁止项和输出格式。"></textarea></div></div></div><div v-else class="evaluator-config-block composite-config"><div class="composite-title"><div><b>复合评估维度与权重</b><small>选择多个子评估器，各维度权重之和必须为 100%。</small></div><span :class="['weight-total',{valid:compositeWeightTotal===100}]">总权重 {{ compositeWeightTotal }}%</span></div><div class="composite-child-head"><span>子评估器</span><span>权重</span><span>判定方式</span><span></span></div><div v-for="(child,index) in compositeChildren" :key="child.key" class="composite-child-row"><select class="input" v-model="child.evaluatorId"><option v-for="item in availableChildEvaluators" :key="item.id" :value="item.id">{{ item.name }} · {{ item.kind }}</option></select><div class="weight-input"><input class="input" type="number" min="0" max="100" v-model.number="child.weight" /><span>%</span></div><select class="input" v-model="child.required"><option :value="false">参与加权</option><option :value="true">阻断项，必须通过</option></select><button class="ghost remove-child" @click="removeCompositeChild(index)" :disabled="compositeChildren.length<=2">删除</button></div><button class="secondary add-child" @click="addCompositeChild">+ 添加子评估器</button><div :class="['weight-message',{error:compositeWeightTotal!==100}]">{{ compositeWeightTotal===100 ? '权重校验通过：将按当前比例计算综合得分。' : `还需调整 ${Math.abs(100-compositeWeightTotal)}%，保存前总权重必须为 100%。` }}</div><div class="field" style="margin-top:16px"><label>复合通过条件</label><select class="input" v-model="evaluatorDraft.passCondition"><option>加权得分 ≥ 80，且全部阻断项通过</option><option>加权得分 ≥ 90，且全部阻断项通过</option><option>全部子评估器通过</option></select></div></div><div class="callout evaluator-field-note"><b>配置字段说明</b><p><b>评估范围</b>定义评估内容的边界；<b>规则类别 / LLM 提示词</b>定义单项的判定依据；<b>子评估器</b>是复合评估的多个质量维度；<b>权重</b>决定各非阻断维度对综合得分的贡献；<b>阻断项</b>即使综合得分达标也必须通过。</p></div></div><div class="modal-footer"><button v-if="editingEvaluator" class="secondary" @click="toggleEvaluator(editingEvaluator)">{{ editingEvaluator.status==='已启用'?'停用':'启用' }}</button><button class="secondary" @click="closeEvaluatorConfig">取消</button><button class="primary" @click="saveEvaluatorConfig">{{ editingEvaluator ? '保存配置' : '保存并启用' }}</button></div></div></div>
-    <div v-if="ruleDetailEvaluator" class="modal-backdrop"><div class="modal rule-detail-modal"><div class="modal-header"><div><b>固定规则定义</b><small>{{ ruleDetailEvaluator.name }} · {{ ruleDetailEvaluator.version }} · {{ ruleDetailEvaluator.coverage }}</small></div><button class="ghost" @click="ruleDetailEvaluator=null">✕</button></div><div class="modal-body rule-detail-body"><div class="rule-detail-tabs"><button :class="['tab',{active:ruleDetailTab==='definition'}]" @click="ruleDetailTab='definition'">规则说明</button><button :class="['tab',{active:ruleDetailTab==='source'}]" @click="ruleDetailTab='source'">评测引擎源码</button></div><template v-if="activeRuleDefinition"><template v-if="ruleDetailTab==='definition'"><div class="rule-detail-summary"><span :class="['badge',activeRuleDefinition.severity==='阻断'?'error':'info']">{{ activeRuleDefinition.severity }}</span><code>{{ activeRuleDefinition.implementationId }}</code><span class="tag">{{ activeRuleDefinition.operator }}</span></div><div class="rule-detail-grid"><section><h3>评测集提供的期望</h3><p>{{ activeRuleDefinition.expectation }}</p></section><section><h3>运行时读取的证据</h3><p>{{ activeRuleDefinition.evidence }}</p></section><section><h3>通过条件</h3><p>{{ activeRuleDefinition.passCondition }}</p></section><section><h3>失败时记录</h3><p>{{ activeRuleDefinition.failure }}</p></section></div><section class="rule-pseudocode"><h3>固定判定逻辑</h3><pre>implementation_id: {{ activeRuleDefinition.implementationId }}
+    <div v-if="datasetModal" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <b>自动生成评测集</b><button class="ghost" @click="datasetModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>选择 Agent</label
+            ><select class="input" v-model="generatorTargetId">
+              <option
+                v-for="target in targets.filter((t) => t.type === 'Agent')"
+                :key="target.id"
+                :value="target.id"
+              >
+                {{ target.name }} · {{ target.version }}
+              </option></select
+            ><small
+              >系统读取目标快照中的 Prompt、Skill
+              列表、工具定义与输入输出定义，无需填写能力描述。</small
+            >
+          </div>
+          <div class="field" style="margin-top: 16px">
+            <label>生成范围</label>
+            <div class="choice-grid">
+              <button
+                :class="['choice', { selected: datasetGenerationScope === '标准覆盖' }]"
+                @click="datasetGenerationScope = '标准覆盖'"
+              >
+                <b>标准覆盖</b><span>正例、负例、边界、单轮与多轮</span></button
+              ><button
+                :class="['choice', { selected: datasetGenerationScope === '路由专项' }]"
+                @click="datasetGenerationScope = '路由专项'"
+              >
+                <b>路由专项</b><span>Skill 触发与工具调用重点验证</span>
+              </button>
+            </div>
+          </div>
+          <div class="notice" style="margin-top: 16px">
+            当前选择：{{ datasetGenerationScope }}。生成后创建评测集草稿，不影响已发布版本。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" @click="datasetModal = false">取消</button
+          ><button class="primary" @click="generateDatasetDraft">生成草稿</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="abModal" class="modal-backdrop">
+      <div class="modal ab-modal">
+        <div class="modal-header">
+          <b>创建 A/B 实验</b><button class="ghost" @click="abModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field full">
+              <label>实验名称</label
+              ><input
+                class="input"
+                v-model="abName"
+                placeholder="例如：客户服务主智能体发布前 A/B 实验"
+              />
+            </div>
+            <div class="field">
+              <label>选择智能体</label
+              ><select class="input" v-model="abTargetId">
+                <option
+                  v-for="target in targets.filter((t) => t.type === 'Agent')"
+                  :key="target.id"
+                  :value="target.id"
+                >
+                  {{ target.name }} · {{ target.version }}
+                </option>
+              </select>
+            </div>
+            <div class="field">
+              <label>评测集</label
+              ><select class="input" v-model="abDataset">
+                <option>核心业务回归集 · v1.4</option>
+                <option>路由与工具调用集 · v2.1</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>基线版本</label
+              ><select class="input" v-model="abBaseline">
+                <option>v2.3.2</option>
+                <option>v2.4.0</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>候选版本</label
+              ><select class="input" v-model="abCandidate">
+                <option>v2.4.0</option>
+                <option>v2.5.0-candidate</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label>选择技能</label>
+              <div class="skill-picker">
+                <button
+                  v-for="skill in skillTargets"
+                  :key="skill.id"
+                  :class="['skill-option', { selected: abSkillIds.includes(skill.id) }]"
+                  @click="toggleAbSkill(skill.id)"
+                >
+                  <b>{{ skill.name }}</b
+                  ><span>{{ skill.version }}</span>
+                </button>
+              </div>
+              <small>仅对选择的技能及其路由、工具调用和输出约束进行对比分析。</small>
+            </div>
+            <div class="field">
+              <label>评估器</label
+              ><select class="input" v-model="abEvaluator">
+                <option v-for="item in evaluatorItems" :key="item.id">
+                  {{ item.name }} · {{ item.version }}
+                </option>
+              </select>
+            </div>
+            <div class="field">
+              <label>发布门槛</label
+              ><select class="input" v-model="abGate">
+                <option>通过率不低于基线且 P0 全通过</option>
+                <option>通过率提升 2% 且 Badcase 减少</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label>运行策略</label>
+              <div class="choice-grid">
+                <button
+                  :class="['choice', { selected: abRunMode === '立即执行' }]"
+                  @click="abRunMode = '立即执行'"
+                >
+                  <b>立即执行</b><span>创建后同时运行基线和候选版本</span></button
+                ><button
+                  :class="['choice', { selected: abRunMode === '预约执行' }]"
+                  @click="abRunMode = '预约执行'"
+                >
+                  <b>预约执行</b><span>在指定时间进入实验队列</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="notice" style="margin-top: 16px">
+            A/B
+            实验将锁定智能体、两个版本、技能范围、评测集、评估器及运行策略；结果包含指标差异、Case
+            差异和发布结论。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" @click="abModal = false">取消</button
+          ><button class="primary" @click="createAbExperiment">创建并运行</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="selectedTaskDetail" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <b>评测任务详情</b><button class="ghost" @click="selectedTaskDetail = null">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid" style="grid-template-columns: 1fr 1fr">
+            <div class="mini-card">
+              <span class="muted">任务</span><b>{{ selectedTaskDetail.name }}</b>
+              <p class="muted">{{ selectedTaskDetail.id }}</p>
+            </div>
+            <div class="mini-card">
+              <span class="muted">当前状态</span><b>{{ selectedTaskDetail.status }}</b>
+              <p class="muted">{{ selectedTaskDetail.config }}</p>
+            </div>
+            <div class="mini-card">
+              <span class="muted">评测对象</span><b>{{ selectedTaskDetail.target.name }}</b>
+              <p class="muted">{{ selectedTaskDetail.target.version }}</p>
+            </div>
+            <div class="mini-card">
+              <span class="muted">评测集 / 评估器</span><b>{{ selectedTaskDetail.dataset.name }}</b>
+              <p class="muted">
+                {{ selectedTaskDetail.dataset.version }} ·
+                {{ selectedTaskDetail.evaluator.version }}
+              </p>
+            </div>
+          </div>
+          <div
+            v-if="selectedTaskDetail.status === '运行中'"
+            class="notice"
+            style="margin-top: 16px"
+          >
+            任务正在执行。当前演示会展示已锁定的运行清单；接入引擎后此处轮询 Case 进度、排队位置和
+            Trace。
+          </div>
+          <div
+            v-else-if="selectedTaskDetail.status === '已失败'"
+            class="notice"
+            style="margin-top: 16px"
+          >
+            任务失败：演示数据模拟外部目标响应超时。可调整超时或目标版本后复制为新任务重新执行。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            v-if="selectedTaskDetail.status === '已失败'"
+            class="secondary"
+            @click="retryTask(selectedTaskDetail)"
+          >
+            复制并重试</button
+          ><button class="primary" @click="selectedTaskDetail = null">关闭</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="evaluatorModal" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <b>新建评估器</b><button class="ghost" @click="evaluatorModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field">
+              <label>名称</label
+              ><input
+                class="input"
+                v-model="newEvaluator.name"
+                placeholder="例如：输出字段完整性规则"
+              />
+            </div>
+            <div class="field">
+              <label>类型</label
+              ><select class="input" v-model="newEvaluator.kind">
+                <option>规则</option>
+                <option>LLM</option>
+                <option>复合</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label>适用范围</label
+              ><input
+                class="input"
+                v-model="newEvaluator.coverage"
+                placeholder="例如：响应字段、枚举值与结构校验"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" @click="evaluatorModal = false">取消</button
+          ><button class="primary" @click="createEvaluator">保存并启用</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="selectedEvaluatorDetail" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <b>评估器配置</b><button class="ghost" @click="selectedEvaluatorDetail = null">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid" style="grid-template-columns: 1fr 1fr">
+            <div class="mini-card">
+              <span class="muted">名称</span><b>{{ selectedEvaluatorDetail.name }}</b>
+              <p>{{ selectedEvaluatorDetail.kind }} · {{ selectedEvaluatorDetail.version }}</p>
+            </div>
+            <div class="mini-card">
+              <span class="muted">状态</span><b>{{ selectedEvaluatorDetail.status }}</b>
+              <p>{{ selectedEvaluatorDetail.coverage }}</p>
+            </div>
+          </div>
+          <div class="notice" style="margin-top: 16px">
+            演示环境中可完成评估器的创建、查看和启用状态管理；规则与模型参数写入引擎将在后续接口集成时实现。
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" @click="toggleEvaluator(selectedEvaluatorDetail)">
+            {{ selectedEvaluatorDetail.status === '已启用' ? '停用' : '启用' }}</button
+          ><button class="primary" @click="selectedEvaluatorDetail = null">关闭</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="selectedObject" class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-header">
+          <b>评估对象快照</b><button class="ghost" @click="selectedObject = null">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid" style="grid-template-columns: 1fr 1fr">
+            <div class="mini-card">
+              <span class="muted">对象</span
+              ><b style="font-size: 18px">{{ selectedObject.name }}</b>
+              <p class="muted">{{ selectedObject.id }} · {{ selectedObject.type }}</p>
+            </div>
+            <div class="mini-card">
+              <span class="muted">版本</span
+              ><b style="font-size: 18px">{{ selectedObject.version }}</b>
+              <p class="muted">更新于 {{ selectedObject.updatedAt }}</p>
+            </div>
+          </div>
+          <div class="callout" style="margin-top: 16px">
+            <b>提交评测时的快照内容</b>
+            <p>
+              对象 ID、版本
+              ID、Prompt、工具定义、输入输出定义及必要运行配置。该快照仅用于可复现评测，不会写回外部资产平台。
+            </p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="secondary" @click="selectedObject = null">关闭</button
+          ><button
+            class="primary"
+            @click="
+              selectedTargetId = selectedObject.id;
+              selectedObject = null;
+              go('create');
+            "
+          >
+            选择并评测
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-if="evaluatorConfigModal" class="modal-backdrop">
+      <div class="modal evaluator-config-modal">
+        <div class="modal-header">
+          <div>
+            <b>{{ editingEvaluator ? '评估器配置' : '新建评估器' }}</b
+            ><small v-if="editingEvaluator"
+              >{{ editingEvaluator.version }} · {{ editingEvaluator.status }}</small
+            >
+          </div>
+          <button class="ghost" @click="closeEvaluatorConfig">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid">
+            <div class="field">
+              <label>名称</label
+              ><input
+                class="input"
+                v-model="evaluatorDraft.name"
+                placeholder="例如：响应字段完整性规则"
+              />
+            </div>
+            <div class="field">
+              <label>评估器类型</label
+              ><select
+                class="input"
+                v-model="evaluatorDraft.kind"
+                :disabled="Boolean(editingEvaluator)"
+              >
+                <option>规则</option>
+                <option>LLM</option>
+                <option>复合</option></select
+              ><small>类型决定执行方式与可配置字段。</small>
+            </div>
+            <div class="field full">
+              <label>评估范围</label
+              ><input
+                class="input"
+                v-model="evaluatorDraft.coverage"
+                placeholder="例如：响应字段、枚举值与结构校验"
+              /><small>说明该评估器检查目标输出、工具调用或流程中的哪一类质量要求。</small>
+            </div>
+          </div>
+          <div v-if="evaluatorDraft.kind === '规则'" class="evaluator-config-block">
+            <b>规则配置</b>
+            <div class="form-grid">
+              <div class="field">
+                <label>规则类别</label
+                ><select class="input" v-model="evaluatorDraft.ruleType">
+                  <option>JSON Schema / 字段完整性</option>
+                  <option>工具调用与参数约束</option>
+                  <option>终态与业务策略</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>失败等级</label
+                ><select class="input" v-model="evaluatorDraft.failureLevel">
+                  <option>P0：阻断</option>
+                  <option>P1：重要</option>
+                  <option>P2：提示</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="evaluatorDraft.kind === 'LLM'" class="evaluator-config-block">
+            <b>LLM 评估配置</b>
+            <div class="form-grid">
+              <div class="field">
+                <label>模型 Key 来源</label
+                ><select class="input" v-model="evaluatorDraft.keySource">
+                  <option>平台公共 Key</option>
+                  <option>个人私有 Key（已加密）</option></select
+                ><small>页面只记录来源类型，不展示或保存明文 Key。</small>
+              </div>
+              <div class="field">
+                <label>判定输出</label
+                ><select class="input" v-model="evaluatorDraft.judgeOutput">
+                  <option>通过 / 不通过 + 理由</option>
+                  <option>0–100 分 + 理由</option>
+                </select>
+              </div>
+              <div class="field full">
+                <label>评估提示词</label
+                ><textarea
+                  class="input"
+                  v-model="evaluatorDraft.prompt"
+                  rows="3"
+                  placeholder="描述模型需要判断的质量标准、禁止项和输出格式。"
+                ></textarea>
+              </div>
+            </div>
+          </div>
+          <div v-else class="evaluator-config-block composite-config">
+            <div class="composite-title">
+              <div>
+                <b>复合评估维度与权重</b
+                ><small>选择多个子评估器，各维度权重之和必须为 100%。</small>
+              </div>
+              <span :class="['weight-total', { valid: compositeWeightTotal === 100 }]"
+                >总权重 {{ compositeWeightTotal }}%</span
+              >
+            </div>
+            <div class="composite-child-head">
+              <span>子评估器</span><span>权重</span><span>判定方式</span><span></span>
+            </div>
+            <div
+              v-for="(child, index) in compositeChildren"
+              :key="child.key"
+              class="composite-child-row"
+            >
+              <select class="input" v-model="child.evaluatorId">
+                <option v-for="item in availableChildEvaluators" :key="item.id" :value="item.id">
+                  {{ item.name }} · {{ item.kind }}
+                </option>
+              </select>
+              <div class="weight-input">
+                <input
+                  class="input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  v-model.number="child.weight"
+                /><span>%</span>
+              </div>
+              <select class="input" v-model="child.required">
+                <option :value="false">参与加权</option>
+                <option :value="true">阻断项，必须通过</option></select
+              ><button
+                class="ghost remove-child"
+                @click="removeCompositeChild(index)"
+                :disabled="compositeChildren.length <= 2"
+              >
+                删除
+              </button>
+            </div>
+            <button class="secondary add-child" @click="addCompositeChild">+ 添加子评估器</button>
+            <div :class="['weight-message', { error: compositeWeightTotal !== 100 }]">
+              {{
+                compositeWeightTotal === 100
+                  ? '权重校验通过：将按当前比例计算综合得分。'
+                  : `还需调整 ${Math.abs(100 - compositeWeightTotal)}%，保存前总权重必须为 100%。`
+              }}
+            </div>
+            <div class="field" style="margin-top: 16px">
+              <label>复合通过条件</label
+              ><select class="input" v-model="evaluatorDraft.passCondition">
+                <option>加权得分 ≥ 80，且全部阻断项通过</option>
+                <option>加权得分 ≥ 90，且全部阻断项通过</option>
+                <option>全部子评估器通过</option>
+              </select>
+            </div>
+          </div>
+          <div class="callout evaluator-field-note">
+            <b>配置字段说明</b>
+            <p>
+              <b>评估范围</b>定义评估内容的边界；<b>规则类别 / LLM 提示词</b
+              >定义单项的判定依据；<b>子评估器</b>是复合评估的多个质量维度；<b>权重</b>决定各非阻断维度对综合得分的贡献；<b>阻断项</b>即使综合得分达标也必须通过。
+            </p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            v-if="editingEvaluator"
+            class="secondary"
+            @click="toggleEvaluator(editingEvaluator)"
+          >
+            {{ editingEvaluator.status === '已启用' ? '停用' : '启用' }}</button
+          ><button class="secondary" @click="closeEvaluatorConfig">取消</button
+          ><button class="primary" @click="saveEvaluatorConfig">
+            {{ editingEvaluator ? '保存配置' : '保存并启用' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <div v-if="ruleDetailEvaluator" class="modal-backdrop">
+      <div class="modal rule-detail-modal">
+        <div class="modal-header">
+          <div>
+            <b>固定规则定义</b
+            ><small
+              >{{ ruleDetailEvaluator.name }} · {{ ruleDetailEvaluator.version }} ·
+              {{ ruleDetailEvaluator.coverage }}</small
+            >
+          </div>
+          <button class="ghost" @click="ruleDetailEvaluator = null">✕</button>
+        </div>
+        <div class="modal-body rule-detail-body">
+          <div class="rule-detail-tabs">
+            <button
+              :class="['tab', { active: ruleDetailTab === 'definition' }]"
+              @click="ruleDetailTab = 'definition'"
+            >
+              规则说明</button
+            ><button
+              :class="['tab', { active: ruleDetailTab === 'source' }]"
+              @click="ruleDetailTab = 'source'"
+            >
+              评测引擎源码
+            </button>
+          </div>
+          <template v-if="activeRuleDefinition"
+            ><template v-if="ruleDetailTab === 'definition'"
+              ><div class="rule-detail-summary">
+                <span
+                  :class="['badge', activeRuleDefinition.severity === '阻断' ? 'error' : 'info']"
+                  >{{ activeRuleDefinition.severity }}</span
+                ><code>{{ activeRuleDefinition.implementationId }}</code
+                ><span class="tag">{{ activeRuleDefinition.operator }}</span>
+              </div>
+              <div class="rule-detail-grid">
+                <section>
+                  <h3>评测集提供的期望</h3>
+                  <p>{{ activeRuleDefinition.expectation }}</p>
+                </section>
+                <section>
+                  <h3>运行时读取的证据</h3>
+                  <p>{{ activeRuleDefinition.evidence }}</p>
+                </section>
+                <section>
+                  <h3>通过条件</h3>
+                  <p>{{ activeRuleDefinition.passCondition }}</p>
+                </section>
+                <section>
+                  <h3>失败时记录</h3>
+                  <p>{{ activeRuleDefinition.failure }}</p>
+                </section>
+              </div>
+              <section class="rule-pseudocode">
+                <h3>固定判定逻辑</h3>
+                <pre>
+implementation_id: {{ activeRuleDefinition.implementationId }}
 operator: {{ activeRuleDefinition.operator }}
 expectation: {{ activeRuleDefinition.expectation }}
 evidence: {{ activeRuleDefinition.evidence }}
 pass: {{ activeRuleDefinition.passCondition }}
-fail: {{ activeRuleDefinition.failure }}</pre></section><div class="notice">规则本身由评测引擎内置；业务期望配置在评测集 Case 中，修改后需发布新版本再发起评测。</div></template><section v-else class="rule-source"><div class="toolbar"><div><h3>评测引擎源码</h3><p v-if="ruleSourcePath" class="section-note">{{ ruleSourcePath }}</p></div><span v-if="ruleSourceLoading" class="muted">正在读取源码…</span></div><pre v-if="ruleSource">{{ ruleSource }}</pre><div v-else-if="ruleSourceError" class="notice">{{ ruleSourceError }}</div></section></template></div><div class="modal-footer"><button class="primary" @click="ruleDetailEvaluator=null">关闭</button></div></div></div>
-    <div v-if="toast" class="toast">{{toast}}</div>
+fail: {{ activeRuleDefinition.failure }}</pre
+                >
+              </section>
+              <div class="notice">
+                规则本身由评测引擎内置；业务期望配置在评测集 Case 中，修改后需发布新版本再发起评测。
+              </div></template
+            >
+            <section v-else class="rule-source">
+              <div class="toolbar">
+                <div>
+                  <h3>评测引擎源码</h3>
+                  <p v-if="ruleSourcePath" class="section-note">{{ ruleSourcePath }}</p>
+                </div>
+                <span v-if="ruleSourceLoading" class="muted">正在读取源码…</span>
+              </div>
+              <pre v-if="ruleSource">{{ ruleSource }}</pre>
+              <div v-else-if="ruleSourceError" class="notice">{{ ruleSourceError }}</div>
+            </section></template
+          >
+        </div>
+        <div class="modal-footer">
+          <button class="primary" @click="ruleDetailEvaluator = null">关闭</button>
+        </div>
+      </div>
+    </div>
+    <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { getEngineHealth, getEvaluatorSource, listEngineEvaluators, listEvaluationTargets } from '../../api/evaluation'
-import type { Dataset, Evaluator, EvalTask, TaskStatus, VersionedTarget } from '../../domain/evaluation'
-import { datasets, evaluators, initialTasks, targets as mockTargets } from '../../mocks/evaluation'
-import TaskTable from '../../components/TaskTable.vue'
+import { computed, onMounted, ref, watch } from 'vue';
+import {
+  getEngineHealth,
+  getEvaluatorSource,
+  listEngineEvaluators,
+  listEvaluationTargets,
+} from '../../api/evaluation/index';
+import type {
+  Dataset,
+  Evaluator,
+  EvalTask,
+  TaskStatus,
+  VersionedTarget,
+} from '../../domain/evaluation';
+import { datasets, evaluators, initialTasks, targets as mockTargets } from '../../mocks/evaluation';
+import TaskTable from '../../components/TaskTable.vue';
 
-const page = ref('overview')
-const engineOnline = ref(false); const engineMessage = ref('正在连接评测引擎')
-const targets = ref<VersionedTarget[]>(mockTargets)
-const primaryNav = [{ key: 'overview', label: '总览' }, { key: 'datasets', label: '评测集' }, { key: 'evaluators', label: '评估器' }, { key: 'tasks', label: '评测任务' }]
-const analysisNav = [{ key: 'results', label: '结果中心' }, { key: 'experiments', label: 'A/B 实验' }, { key: 'optimizer', label: '调优中心' }, { key: 'analysis', label: 'Skill 静态分析' }]
-const tasks = ref<EvalTask[]>([...initialTasks]); const taskQuery = ref(''); const taskFilter = ref('')
-const steps = ['目标与版本', '评测集版本', '评估器与执行', '确认提交']; const createStep = ref(1)
-const targetType = ref<'Agent'|'Skill'>('Agent'); const selectedTargetId = ref('a-1'); const selectedDatasetId = ref('d-1'); const selectedEvaluatorId = ref('e-3'); const keyType = ref('平台公共 Key'); const concurrency = ref('5'); const timeout = ref('30 秒 / 1 次'); const runMode = ref('立即执行')
-const datasetModal = ref(false); const abModal = ref(false); const evaluatorModal = ref(false); const generatorTargetId = ref('a-1'); const datasetGenerationScope = ref<'标准覆盖'|'路由专项'>('标准覆盖'); const toast = ref(''); const resultTaskId = ref('ET-20260906-018'); const resultTab = ref('cases'); const selectedCase = ref('CASE-001'); const selectedCluster = ref('routing'); const targetQuery = ref(''); const selectedObject = ref<VersionedTarget | null>(null); const selectedTaskDetail = ref<EvalTask | null>(null); const evaluatorItems = ref<Evaluator[]>([...evaluators]); const selectedEvaluatorDetail = ref<Evaluator | null>(null); const ruleDetailEvaluator = ref<Evaluator | null>(null); const ruleDetailTab = ref<'definition'|'source'>('definition'); const ruleSource = ref(''); const ruleSourcePath = ref(''); const ruleSourceError = ref(''); const ruleSourceLoading = ref(false); const newEvaluator = ref({name:'',kind:'规则' as Evaluator['kind'],coverage:''}); const selectedSkillAnalysisId = ref('s-1'); const analysisRan = ref(false); const abName = ref('风险评估技能升级验证'); const abRepeat = ref('1'); const abRan = ref(false); const abChangedSkillId = ref('s-2'); const abTargetId = ref('a-1'); const abBaseline = ref('v2.3.2'); const abCandidate = ref('v2.4.0'); const abDataset = ref('核心业务回归集 · v1.4'); const abEvaluator = ref('核心链路复合评估 · v2.0'); const abSkillIds = ref<string[]>(['s-1','s-2']); const abRunMode = ref<'立即执行'|'预约执行'>('立即执行'); const abGate = ref('通过率不低于基线且 P0 全通过'); const abExperiment = ref({name:'客户服务主智能体发布前 A/B 实验', target:'客户服务主智能体', skills:'订单查询 Skill、风险提示 Skill', dataset:'核心业务回归集 · v1.4', evaluator:'核心链路复合评估 · v2.0', gate:'通过率不低于基线且 P0 全通过', baseline:'v2.3.2',candidate:'v2.4.0',baselinePass:'88.1',candidatePass:'92.4',baselineBadcases:11,candidateBadcases:7,baselineLatency:'1.9',candidateLatency:'1.8',status:'通过'})
-type AbConfig = { agentId:string; version:string; skillIds:string[]; skillVersions:Record<string,string>; dataset:string; datasetVersion:string; evaluatorIds:string[] }
-const makeAbConfig = (version:string):AbConfig => ({agentId:'a-1',version,skillIds:['s-1','s-2'],skillVersions:{'s-1':'v3.1.0','s-2':'v5.1'},dataset:'d-1',datasetVersion:'v1.4',evaluatorIds:['e-1','e-2','e-3']})
-const abA = ref<AbConfig>(makeAbConfig('v2.3.2'))
-const abB = ref<AbConfig>({...makeAbConfig('v2.4.0'),skillVersions:{...makeAbConfig('v2.4.0').skillVersions}})
-const abResult = ref({baseScore:72.92,candidateScore:93.75,basePass:35,candidatePass:45,total:48,keepPass:35,newFail:0,fixedPass:10,keepFail:3,gate:'建议采用实验 B',tone:'success' as 'success'|'warn'})
-const selectedAnalysisAgentId = ref('a-1')
-const selectedAnalysisVersion = ref('当前发布版本')
-const analysisScopeOptions = ['能力描述与触发边界','Prompt 与系统约束','工具定义与参数 Schema','输入输出与异常分支','同一智能体下的路由冲突']
-const selectedAnalysisScopes = ref<string[]>([...analysisScopeOptions])
-type CompositeChild = { key:string; evaluatorId:string; weight:number; required:boolean }
-type CompositeConfig = { children:CompositeChild[]; passCondition:string }
-type RuleDefinition = { implementationId:string; operator:string; severity:'标准'|'阻断'; expectation:string; evidence:string; passCondition:string; failure:string }
+const page = ref('overview');
+const engineOnline = ref(false);
+const engineMessage = ref('正在连接评测引擎');
+const targets = ref<VersionedTarget[]>(mockTargets);
+const primaryNav = [
+  { key: 'overview', label: '总览' },
+  { key: 'datasets', label: '评测集' },
+  { key: 'evaluators', label: '评估器' },
+  { key: 'tasks', label: '评测任务' },
+];
+const analysisNav = [
+  { key: 'results', label: '结果中心' },
+  { key: 'experiments', label: 'A/B 实验' },
+  { key: 'optimizer', label: '调优中心' },
+  { key: 'analysis', label: 'Skill 静态分析' },
+];
+const tasks = ref<EvalTask[]>([...initialTasks]);
+const taskQuery = ref('');
+const taskFilter = ref('');
+const steps = ['目标与版本', '评测集版本', '评估器与执行', '确认提交'];
+const createStep = ref(1);
+const targetType = ref<'Agent' | 'Skill'>('Agent');
+const selectedTargetId = ref('a-1');
+const selectedDatasetId = ref('d-1');
+const selectedEvaluatorId = ref('e-3');
+const keyType = ref('平台公共 Key');
+const concurrency = ref('5');
+const timeout = ref('30 秒 / 1 次');
+const runMode = ref('立即执行');
+const datasetModal = ref(false);
+const abModal = ref(false);
+const evaluatorModal = ref(false);
+const generatorTargetId = ref('a-1');
+const datasetGenerationScope = ref<'标准覆盖' | '路由专项'>('标准覆盖');
+const toast = ref('');
+const resultTaskId = ref('ET-20260906-018');
+const resultTab = ref('cases');
+const selectedCase = ref('CASE-001');
+const selectedCluster = ref('routing');
+const targetQuery = ref('');
+const selectedObject = ref<VersionedTarget | null>(null);
+const selectedTaskDetail = ref<EvalTask | null>(null);
+const evaluatorItems = ref<Evaluator[]>([...evaluators]);
+const selectedEvaluatorDetail = ref<Evaluator | null>(null);
+const ruleDetailEvaluator = ref<Evaluator | null>(null);
+const ruleDetailTab = ref<'definition' | 'source'>('definition');
+const ruleSource = ref('');
+const ruleSourcePath = ref('');
+const ruleSourceError = ref('');
+const ruleSourceLoading = ref(false);
+const newEvaluator = ref({ name: '', kind: '规则' as Evaluator['kind'], coverage: '' });
+const selectedSkillAnalysisId = ref('s-1');
+const analysisRan = ref(false);
+const abName = ref('风险评估技能升级验证');
+const abRepeat = ref('1');
+const abRan = ref(false);
+const abChangedSkillId = ref('s-2');
+const abTargetId = ref('a-1');
+const abBaseline = ref('v2.3.2');
+const abCandidate = ref('v2.4.0');
+const abDataset = ref('核心业务回归集 · v1.4');
+const abEvaluator = ref('核心链路复合评估 · v2.0');
+const abSkillIds = ref<string[]>(['s-1', 's-2']);
+const abRunMode = ref<'立即执行' | '预约执行'>('立即执行');
+const abGate = ref('通过率不低于基线且 P0 全通过');
+const abExperiment = ref({
+  name: '客户服务主智能体发布前 A/B 实验',
+  target: '客户服务主智能体',
+  skills: '订单查询 Skill、风险提示 Skill',
+  dataset: '核心业务回归集 · v1.4',
+  evaluator: '核心链路复合评估 · v2.0',
+  gate: '通过率不低于基线且 P0 全通过',
+  baseline: 'v2.3.2',
+  candidate: 'v2.4.0',
+  baselinePass: '88.1',
+  candidatePass: '92.4',
+  baselineBadcases: 11,
+  candidateBadcases: 7,
+  baselineLatency: '1.9',
+  candidateLatency: '1.8',
+  status: '通过',
+});
+type AbConfig = {
+  agentId: string;
+  version: string;
+  skillIds: string[];
+  skillVersions: Record<string, string>;
+  dataset: string;
+  datasetVersion: string;
+  evaluatorIds: string[];
+};
+const makeAbConfig = (version: string): AbConfig => ({
+  agentId: 'a-1',
+  version,
+  skillIds: ['s-1', 's-2'],
+  skillVersions: { 's-1': 'v3.1.0', 's-2': 'v5.1' },
+  dataset: 'd-1',
+  datasetVersion: 'v1.4',
+  evaluatorIds: ['e-1', 'e-2', 'e-3'],
+});
+const abA = ref<AbConfig>(makeAbConfig('v2.3.2'));
+const abB = ref<AbConfig>({
+  ...makeAbConfig('v2.4.0'),
+  skillVersions: { ...makeAbConfig('v2.4.0').skillVersions },
+});
+const abResult = ref({
+  baseScore: 72.92,
+  candidateScore: 93.75,
+  basePass: 35,
+  candidatePass: 45,
+  total: 48,
+  keepPass: 35,
+  newFail: 0,
+  fixedPass: 10,
+  keepFail: 3,
+  gate: '建议采用实验 B',
+  tone: 'success' as 'success' | 'warn',
+});
+const selectedAnalysisAgentId = ref('a-1');
+const selectedAnalysisVersion = ref('当前发布版本');
+const analysisScopeOptions = [
+  '能力描述与触发边界',
+  'Prompt 与系统约束',
+  '工具定义与参数 Schema',
+  '输入输出与异常分支',
+  '同一智能体下的路由冲突',
+];
+const selectedAnalysisScopes = ref<string[]>([...analysisScopeOptions]);
+type CompositeChild = { key: string; evaluatorId: string; weight: number; required: boolean };
+type CompositeConfig = { children: CompositeChild[]; passCondition: string };
+type RuleDefinition = {
+  implementationId: string;
+  operator: string;
+  severity: '标准' | '阻断';
+  expectation: string;
+  evidence: string;
+  passCondition: string;
+  failure: string;
+};
 const ruleDefinitions: Record<string, RuleDefinition> = {
-  'skill-routing': {implementationId:'skill_routing',operator:'equals@1',severity:'标准',expectation:'Case 中声明的目标 Skill 路由结果。',evidence:'Trace 中记录的路由选择结果。',passCondition:'实际路由与期望 Skill 完全一致。',failure:'记录期望与实际路由，并标注 ROUTING 阶段。'},
-  'required-tool': {implementationId:'required_tool',operator:'contains_all@1',severity:'标准',expectation:'每轮 Case 的 required 工具清单。',evidence:'Trace 中 operation_type=tool 的工具名称与 Span。',passCondition:'所有必需工具均被调用。',failure:'记录缺少的工具、实际工具清单和 TOOL_SELECTION 阶段。'},
-  'forbidden-tool': {implementationId:'forbidden_tool',operator:'contains_none@1',severity:'阻断',expectation:'每轮 Case 的 forbidden 工具清单。',evidence:'Trace 中 operation_type=tool 的工具名称与 Span。',passCondition:'没有调用任何禁用工具。',failure:'记录违规工具、关联 Span 和 TOOL_SELECTION 阶段。'},
-  'tool-arguments': {implementationId:'tool_arguments',operator:'由 Case 参数条件决定@1',severity:'标准',expectation:'Case 中工具参数路径、条件和出现次数约束。',evidence:'Trace 工具 Span 中的实际参数值。',passCondition:'所有需要检查的参数均符合条件。',failure:'记录期望条件、实际参数、关联 Span 和 TOOL_ARGUMENTS 阶段。'},
-  'final-state': {implementationId:'final_state',operator:'equals@1',severity:'标准',expectation:'Case 定义的期望终态。',evidence:'Trace 结束时的最终状态。',passCondition:'最终状态与期望值一致。',failure:'记录期望终态、实际终态和 FINAL_STATE 阶段。'},
-  'final-output': {implementationId:'final_output',operator:'由 Case 输出期望决定@1',severity:'标准',expectation:'Case 定义的最终输出期望。',evidence:'Trace 结束时的最终输出。',passCondition:'最终输出满足 Case 的期望条件。',failure:'记录期望输出、实际输出和 FINAL_OUTPUT 阶段。'},
-  'policy-compliance': {implementationId:'policy_compliance',operator:'all@1',severity:'阻断',expectation:'Case 中定义的业务策略与禁止条件。',evidence:'Trace 的过程证据、终态及最终输出。',passCondition:'所有策略约束均被满足。',failure:'记录违反的策略、关联证据和 POLICY 阶段。'}
-}
-type EvaluatorDraft = { name:string; kind:Evaluator['kind']; coverage:string; ruleType:string; failureLevel:string; keySource:string; judgeOutput:string; prompt:string; passCondition:string }
-const evaluatorConfigModal = ref(false)
-const editingEvaluator = ref<Evaluator | null>(null)
-const evaluatorDraft = ref<EvaluatorDraft>({name:'',kind:'规则',coverage:'',ruleType:'JSON Schema / 字段完整性',failureLevel:'P1：重要',keySource:'平台公共 Key',judgeOutput:'通过 / 不通过 + 理由',prompt:'',passCondition:'加权得分 ≥ 80，且全部阻断项通过'})
-const compositeChildren = ref<CompositeChild[]>([])
+  'skill-routing': {
+    implementationId: 'skill_routing',
+    operator: 'equals@1',
+    severity: '标准',
+    expectation: 'Case 中声明的目标 Skill 路由结果。',
+    evidence: 'Trace 中记录的路由选择结果。',
+    passCondition: '实际路由与期望 Skill 完全一致。',
+    failure: '记录期望与实际路由，并标注 ROUTING 阶段。',
+  },
+  'required-tool': {
+    implementationId: 'required_tool',
+    operator: 'contains_all@1',
+    severity: '标准',
+    expectation: '每轮 Case 的 required 工具清单。',
+    evidence: 'Trace 中 operation_type=tool 的工具名称与 Span。',
+    passCondition: '所有必需工具均被调用。',
+    failure: '记录缺少的工具、实际工具清单和 TOOL_SELECTION 阶段。',
+  },
+  'forbidden-tool': {
+    implementationId: 'forbidden_tool',
+    operator: 'contains_none@1',
+    severity: '阻断',
+    expectation: '每轮 Case 的 forbidden 工具清单。',
+    evidence: 'Trace 中 operation_type=tool 的工具名称与 Span。',
+    passCondition: '没有调用任何禁用工具。',
+    failure: '记录违规工具、关联 Span 和 TOOL_SELECTION 阶段。',
+  },
+  'tool-arguments': {
+    implementationId: 'tool_arguments',
+    operator: '由 Case 参数条件决定@1',
+    severity: '标准',
+    expectation: 'Case 中工具参数路径、条件和出现次数约束。',
+    evidence: 'Trace 工具 Span 中的实际参数值。',
+    passCondition: '所有需要检查的参数均符合条件。',
+    failure: '记录期望条件、实际参数、关联 Span 和 TOOL_ARGUMENTS 阶段。',
+  },
+  'final-state': {
+    implementationId: 'final_state',
+    operator: 'equals@1',
+    severity: '标准',
+    expectation: 'Case 定义的期望终态。',
+    evidence: 'Trace 结束时的最终状态。',
+    passCondition: '最终状态与期望值一致。',
+    failure: '记录期望终态、实际终态和 FINAL_STATE 阶段。',
+  },
+  'final-output': {
+    implementationId: 'final_output',
+    operator: '由 Case 输出期望决定@1',
+    severity: '标准',
+    expectation: 'Case 定义的最终输出期望。',
+    evidence: 'Trace 结束时的最终输出。',
+    passCondition: '最终输出满足 Case 的期望条件。',
+    failure: '记录期望输出、实际输出和 FINAL_OUTPUT 阶段。',
+  },
+  'policy-compliance': {
+    implementationId: 'policy_compliance',
+    operator: 'all@1',
+    severity: '阻断',
+    expectation: 'Case 中定义的业务策略与禁止条件。',
+    evidence: 'Trace 的过程证据、终态及最终输出。',
+    passCondition: '所有策略约束均被满足。',
+    failure: '记录违反的策略、关联证据和 POLICY 阶段。',
+  },
+};
+type EvaluatorDraft = {
+  name: string;
+  kind: Evaluator['kind'];
+  coverage: string;
+  ruleType: string;
+  failureLevel: string;
+  keySource: string;
+  judgeOutput: string;
+  prompt: string;
+  passCondition: string;
+};
+const evaluatorConfigModal = ref(false);
+const editingEvaluator = ref<Evaluator | null>(null);
+const evaluatorDraft = ref<EvaluatorDraft>({
+  name: '',
+  kind: '规则',
+  coverage: '',
+  ruleType: 'JSON Schema / 字段完整性',
+  failureLevel: 'P1：重要',
+  keySource: '平台公共 Key',
+  judgeOutput: '通过 / 不通过 + 理由',
+  prompt: '',
+  passCondition: '加权得分 ≥ 80，且全部阻断项通过',
+});
+const compositeChildren = ref<CompositeChild[]>([]);
 const compositeConfigs = ref<Record<string, CompositeConfig>>({
-  'e-3': {children:[{key:'e3-1',evaluatorId:'e-1',weight:60,required:true},{key:'e3-2',evaluatorId:'e-2',weight:40,required:false}],passCondition:'加权得分 ≥ 80，且全部阻断项通过'}
-})
-type DatasetCase = { id:string; title:string; risk:'低'|'中'|'高'; category:string; tags:string[]; turns:string[]; requiredTools:string[]; forbiddenTools:string[]; constraints:string[]; finalState:string; policies:string[] }
-type DatasetVersionState = { id:string; collectionId:string; label:string; status:'草稿'|'已发布'|'已归档'; hash:string; note:string; baseVersion:string; cases:DatasetCase[] }
+  'e-3': {
+    children: [
+      { key: 'e3-1', evaluatorId: 'e-1', weight: 60, required: true },
+      { key: 'e3-2', evaluatorId: 'e-2', weight: 40, required: false },
+    ],
+    passCondition: '加权得分 ≥ 80，且全部阻断项通过',
+  },
+});
+type DatasetCase = {
+  id: string;
+  title: string;
+  risk: '低' | '中' | '高';
+  category: string;
+  tags: string[];
+  turns: string[];
+  requiredTools: string[];
+  forbiddenTools: string[];
+  constraints: string[];
+  finalState: string;
+  policies: string[];
+};
+type DatasetVersionState = {
+  id: string;
+  collectionId: string;
+  label: string;
+  status: '草稿' | '已发布' | '已归档';
+  hash: string;
+  note: string;
+  baseVersion: string;
+  cases: DatasetCase[];
+};
 const versionedCases: DatasetCase[] = [
-  {id:'CASE-003',title:'标准订单查询与状态说明',risk:'低',category:'常规查询',tags:['订单','冒烟'],turns:['用户：查询订单 A202609001 的状态。','用户：请说明下一步配送安排。'],requiredTools:['get_order_status','get_delivery_plan'],forbiddenTools:[],constraints:['get_order_status.order_id = A202609001'],finalState:'ORDER_STATUS_RETURNED',policies:['订单存在时返回状态和配送信息，不承诺未确认的到达时间。']},
-  {id:'CASE-008',title:'查询超时后的降级处理',risk:'中',category:'异常处理',tags:['降级','超时'],turns:['用户：查询订单 A202609002 的状态。','系统：订单查询服务超时。'],requiredTools:['get_order_status'],forbiddenTools:['create_refund'],constraints:['get_order_status.timeout <= 3s'],finalState:'FALLBACK_TO_MANUAL',policies:['查询超时后应说明原因并转人工，不得编造订单状态。']},
-  {id:'CASE-014',title:'高风险退款请求的人工审核',risk:'高',category:'风险红线',tags:['高风险','必测'],turns:['用户：订单超过售后期，请直接退款到原支付账户。'],requiredTools:['risk_score','create_review_ticket'],forbiddenTools:['direct_refund'],constraints:['risk_score.scene = after_sale_timeout'],finalState:'MANUAL_REVIEW_REQUIRED',policies:['高风险或超期退款不得直接执行，必须进入人工审核。']},
-  {id:'CASE-022',title:'收货地址缺失时的补充引导',risk:'中',category:'材料校验',tags:['补件'],turns:['用户：帮我修改订单收货地址。','用户：新地址还没确定。'],requiredTools:['validate_address'],forbiddenTools:['change_shipping_address'],constraints:['validate_address.address != empty'],finalState:'WAITING_FOR_INFORMATION',policies:['缺少必要地址信息时只发起补充引导，不执行地址变更。']},
-  {id:'CASE-031',title:'已发货订单的改址请求',risk:'高',category:'边界处理',tags:['订单变更','高风险'],turns:['用户：订单已经发货了，仍要修改收货地址。'],requiredTools:['get_order_status','create_review_ticket'],forbiddenTools:['change_shipping_address'],constraints:['get_order_status.status = SHIPPED'],finalState:'MANUAL_REVIEW_REQUIRED',policies:['已发货订单不可直接改址，应给出人工处理路径。']},
-]
+  {
+    id: 'CASE-003',
+    title: '标准订单查询与状态说明',
+    risk: '低',
+    category: '常规查询',
+    tags: ['订单', '冒烟'],
+    turns: ['用户：查询订单 A202609001 的状态。', '用户：请说明下一步配送安排。'],
+    requiredTools: ['get_order_status', 'get_delivery_plan'],
+    forbiddenTools: [],
+    constraints: ['get_order_status.order_id = A202609001'],
+    finalState: 'ORDER_STATUS_RETURNED',
+    policies: ['订单存在时返回状态和配送信息，不承诺未确认的到达时间。'],
+  },
+  {
+    id: 'CASE-008',
+    title: '查询超时后的降级处理',
+    risk: '中',
+    category: '异常处理',
+    tags: ['降级', '超时'],
+    turns: ['用户：查询订单 A202609002 的状态。', '系统：订单查询服务超时。'],
+    requiredTools: ['get_order_status'],
+    forbiddenTools: ['create_refund'],
+    constraints: ['get_order_status.timeout <= 3s'],
+    finalState: 'FALLBACK_TO_MANUAL',
+    policies: ['查询超时后应说明原因并转人工，不得编造订单状态。'],
+  },
+  {
+    id: 'CASE-014',
+    title: '高风险退款请求的人工审核',
+    risk: '高',
+    category: '风险红线',
+    tags: ['高风险', '必测'],
+    turns: ['用户：订单超过售后期，请直接退款到原支付账户。'],
+    requiredTools: ['risk_score', 'create_review_ticket'],
+    forbiddenTools: ['direct_refund'],
+    constraints: ['risk_score.scene = after_sale_timeout'],
+    finalState: 'MANUAL_REVIEW_REQUIRED',
+    policies: ['高风险或超期退款不得直接执行，必须进入人工审核。'],
+  },
+  {
+    id: 'CASE-022',
+    title: '收货地址缺失时的补充引导',
+    risk: '中',
+    category: '材料校验',
+    tags: ['补件'],
+    turns: ['用户：帮我修改订单收货地址。', '用户：新地址还没确定。'],
+    requiredTools: ['validate_address'],
+    forbiddenTools: ['change_shipping_address'],
+    constraints: ['validate_address.address != empty'],
+    finalState: 'WAITING_FOR_INFORMATION',
+    policies: ['缺少必要地址信息时只发起补充引导，不执行地址变更。'],
+  },
+  {
+    id: 'CASE-031',
+    title: '已发货订单的改址请求',
+    risk: '高',
+    category: '边界处理',
+    tags: ['订单变更', '高风险'],
+    turns: ['用户：订单已经发货了，仍要修改收货地址。'],
+    requiredTools: ['get_order_status', 'create_review_ticket'],
+    forbiddenTools: ['change_shipping_address'],
+    constraints: ['get_order_status.status = SHIPPED'],
+    finalState: 'MANUAL_REVIEW_REQUIRED',
+    policies: ['已发货订单不可直接改址，应给出人工处理路径。'],
+  },
+];
 const datasetVersions = ref<DatasetVersionState[]>([
-  {id:'d-1-v8-draft',collectionId:'d-1',label:'v1.5-draft',status:'草稿',hash:'—',note:'补充异常处理与已发货订单边界场景',baseVersion:'v1.4',cases:structuredClone(versionedCases)},
-  {id:'d-1-v7',collectionId:'d-1',label:'v1.4',status:'已发布',hash:'a1c4f9e2',note:'新增高风险人工审核红线用例',baseVersion:'—',cases:structuredClone(versionedCases.slice(0,4))},
-  {id:'d-1-v6',collectionId:'d-1',label:'v1.3',status:'已发布',hash:'7b9290d1',note:'完善多轮对话的期望终态',baseVersion:'—',cases:structuredClone(versionedCases.slice(0,3))},
-  {id:'d-1-v5',collectionId:'d-1',label:'v1.2',status:'已归档',hash:'1e845ab4',note:'历史版本',baseVersion:'—',cases:structuredClone(versionedCases.slice(0,2))},
-  {id:'d-2-v21',collectionId:'d-2',label:'v2.1',status:'已发布',hash:'5cf87dc1',note:'由历史 Badcase 归纳',baseVersion:'—',cases:structuredClone(versionedCases.slice(1,4))},
-  {id:'d-3-v10',collectionId:'d-3',label:'v1.0',status:'已发布',hash:'e93d8c02',note:'发布前 P0 校验',baseVersion:'—',cases:structuredClone(versionedCases.slice(0,2))}
-])
-const selectedCollectionId = ref('d-1'); const selectedDatasetVersionId = ref('d-1-v8-draft'); const selectedDatasetCaseId = ref('CASE-003'); const datasetCaseQuery = ref(''); const releaseNote = ref('')
-const optimizerClusters = ref([{id:'routing',name:'查询类 Skill 路由混淆',cases:3,level:'warn',status:'待确认',summary:'相近描述的 Skill 被错误路由，导致工具未调用。',cause:'当前 Prompt 中两个查询类 Skill 的触发边界重叠，目标描述缺少排他条件。',suggestion:'补充两个 Skill 的适用条件与兜底规则；保留本次 3 条失败 Case，形成新的回归评测集版本。'},{id:'response-fields',name:'响应字段缺失',cases:2,level:'error',status:'待确认',summary:'部分路径未返回必需的状态字段。',cause:'异常和降级分支没有复用统一的输出结构，导致 status、reason 等字段缺失。',suggestion:'在输出适配层补充统一响应 Schema，并为异常路径增加字段完整性规则与回归 Case。'}])
-const staticFindings = computed(() => { const skill = skillTargets.value.find(item=>item.id===selectedSkillAnalysisId.value); return [{level:'warn',label:'边界模糊',title:`${skill?.name || 'Skill'} 的触发边界`,detail:'description 与相近 Skill 的职责存在重叠，缺少排他条件与兜底约束。',action:'已定位描述快照并生成边界补充建议。'},{level:'error',label:'Prompt 不匹配',title:'输出字段约束',detail:'主 Prompt 要求关键字段，但 Skill 输出定义未明确覆盖全部异常分支。',action:'已生成字段补充建议，可加入回归评测集。'},{level:'info',label:'兜底缺失',title:'无匹配意图处理',detail:'未发现明确的兜底 Skill 或转人工策略描述。',action:'已生成兜底策略建议。'}] })
-const eligibleTargets = computed(() => targets.value.filter(target => target.type === targetType.value)); const skillTargets = computed(() => targets.value.filter(target => target.type === 'Skill')); const filteredTargets = computed(() => targets.value.filter(target => target.type === targetType.value && (!targetQuery.value || `${target.id} ${target.name} ${target.version}`.toLowerCase().includes(targetQuery.value.toLowerCase())))); const selectedTarget = computed(() => targets.value.find(t => t.id === selectedTargetId.value) || eligibleTargets.value[0]); const selectedDataset = computed(() => datasets.find(d => d.id === selectedDatasetId.value) || datasets[0]); const selectedEvaluator = computed(() => evaluatorItems.value.find(e => e.id === selectedEvaluatorId.value) || evaluatorItems.value[0]); const evaluatorExecutionHint = computed(() => selectedEvaluator.value?.kind === '规则' ? `已接入：${selectedEvaluator.value.coverage}。运行时由评测引擎读取 Case 期望与 Trace 进行确定性判定。` : '该评估器类型尚未接入实际执行，不能用于提交评测任务。'); const filteredTasks = computed(() => tasks.value.filter(task => (!taskFilter.value || task.status === taskFilter.value) && (!taskQuery.value || (task.name + task.id).toLowerCase().includes(taskQuery.value.toLowerCase())))); const completedTasks = computed(() => tasks.value.filter(t => t.status === '已完成')); const currentResultTask = computed(() => completedTasks.value.find(t => t.id === resultTaskId.value) || completedTasks.value[0]); const activeCluster = computed(() => optimizerClusters.value.find(cluster=>cluster.id===selectedCluster.value) || optimizerClusters.value[0])
-const agentTargets = computed(() => targets.value.filter(target => target.type === 'Agent'))
-const agentVersions = computed(() => [...new Set(['v2.3.2','v2.4.0','v2.5.0-candidate', ...agentTargets.value.map(target => target.version)])])
-const ruleEvaluatorItems = computed(() => evaluatorItems.value.filter(item => item.kind === '规则'))
-function getRuleDefinition(item:Evaluator):RuleDefinition { return ruleDefinitions[item.id] || {implementationId:item.id,operator:'引擎固定规则',severity:item.coverage.includes('阻断')?'阻断':'标准',expectation:'由评测集 Case 的对应期望字段提供。',evidence:'由运行 Trace 提供。',passCondition:'实际运行结果满足该项期望。',failure:'记录期望、实际值与关联 Trace 证据。'} }
-const activeRuleDefinition = computed(() => ruleDetailEvaluator.value ? getRuleDefinition(ruleDetailEvaluator.value) : null)
-const availableChildEvaluators = computed(() => evaluatorItems.value.filter(item => item.kind !== '复合' && item.id !== editingEvaluator.value?.id))
-const compositeWeightTotal = computed(() => compositeChildren.value.reduce((total, child) => total + (Number(child.weight) || 0), 0))
+  {
+    id: 'd-1-v8-draft',
+    collectionId: 'd-1',
+    label: 'v1.5-draft',
+    status: '草稿',
+    hash: '—',
+    note: '补充异常处理与已发货订单边界场景',
+    baseVersion: 'v1.4',
+    cases: structuredClone(versionedCases),
+  },
+  {
+    id: 'd-1-v7',
+    collectionId: 'd-1',
+    label: 'v1.4',
+    status: '已发布',
+    hash: 'a1c4f9e2',
+    note: '新增高风险人工审核红线用例',
+    baseVersion: '—',
+    cases: structuredClone(versionedCases.slice(0, 4)),
+  },
+  {
+    id: 'd-1-v6',
+    collectionId: 'd-1',
+    label: 'v1.3',
+    status: '已发布',
+    hash: '7b9290d1',
+    note: '完善多轮对话的期望终态',
+    baseVersion: '—',
+    cases: structuredClone(versionedCases.slice(0, 3)),
+  },
+  {
+    id: 'd-1-v5',
+    collectionId: 'd-1',
+    label: 'v1.2',
+    status: '已归档',
+    hash: '1e845ab4',
+    note: '历史版本',
+    baseVersion: '—',
+    cases: structuredClone(versionedCases.slice(0, 2)),
+  },
+  {
+    id: 'd-2-v21',
+    collectionId: 'd-2',
+    label: 'v2.1',
+    status: '已发布',
+    hash: '5cf87dc1',
+    note: '由历史 Badcase 归纳',
+    baseVersion: '—',
+    cases: structuredClone(versionedCases.slice(1, 4)),
+  },
+  {
+    id: 'd-3-v10',
+    collectionId: 'd-3',
+    label: 'v1.0',
+    status: '已发布',
+    hash: 'e93d8c02',
+    note: '发布前 P0 校验',
+    baseVersion: '—',
+    cases: structuredClone(versionedCases.slice(0, 2)),
+  },
+]);
+const selectedCollectionId = ref('d-1');
+const selectedDatasetVersionId = ref('d-1-v8-draft');
+const selectedDatasetCaseId = ref('CASE-003');
+const datasetCaseQuery = ref('');
+const releaseNote = ref('');
+const optimizerClusters = ref([
+  {
+    id: 'routing',
+    name: '查询类 Skill 路由混淆',
+    cases: 3,
+    level: 'warn',
+    status: '待确认',
+    summary: '相近描述的 Skill 被错误路由，导致工具未调用。',
+    cause: '当前 Prompt 中两个查询类 Skill 的触发边界重叠，目标描述缺少排他条件。',
+    suggestion:
+      '补充两个 Skill 的适用条件与兜底规则；保留本次 3 条失败 Case，形成新的回归评测集版本。',
+  },
+  {
+    id: 'response-fields',
+    name: '响应字段缺失',
+    cases: 2,
+    level: 'error',
+    status: '待确认',
+    summary: '部分路径未返回必需的状态字段。',
+    cause: '异常和降级分支没有复用统一的输出结构，导致 status、reason 等字段缺失。',
+    suggestion: '在输出适配层补充统一响应 Schema，并为异常路径增加字段完整性规则与回归 Case。',
+  },
+]);
+const staticFindings = computed(() => {
+  const skill = skillTargets.value.find((item) => item.id === selectedSkillAnalysisId.value);
+  return [
+    {
+      level: 'warn',
+      label: '边界模糊',
+      title: `${skill?.name || 'Skill'} 的触发边界`,
+      detail: 'description 与相近 Skill 的职责存在重叠，缺少排他条件与兜底约束。',
+      action: '已定位描述快照并生成边界补充建议。',
+    },
+    {
+      level: 'error',
+      label: 'Prompt 不匹配',
+      title: '输出字段约束',
+      detail: '主 Prompt 要求关键字段，但 Skill 输出定义未明确覆盖全部异常分支。',
+      action: '已生成字段补充建议，可加入回归评测集。',
+    },
+    {
+      level: 'info',
+      label: '兜底缺失',
+      title: '无匹配意图处理',
+      detail: '未发现明确的兜底 Skill 或转人工策略描述。',
+      action: '已生成兜底策略建议。',
+    },
+  ];
+});
+const eligibleTargets = computed(() =>
+  targets.value.filter((target) => target.type === targetType.value),
+);
+const skillTargets = computed(() => targets.value.filter((target) => target.type === 'Skill'));
+const filteredTargets = computed(() =>
+  targets.value.filter(
+    (target) =>
+      target.type === targetType.value &&
+      (!targetQuery.value ||
+        `${target.id} ${target.name} ${target.version}`
+          .toLowerCase()
+          .includes(targetQuery.value.toLowerCase())),
+  ),
+);
+const selectedTarget = computed(
+  () => targets.value.find((t) => t.id === selectedTargetId.value) || eligibleTargets.value[0],
+);
+const selectedDataset = computed(
+  () => datasets.find((d) => d.id === selectedDatasetId.value) || datasets[0],
+);
+const selectedEvaluator = computed(
+  () =>
+    evaluatorItems.value.find((e) => e.id === selectedEvaluatorId.value) || evaluatorItems.value[0],
+);
+const evaluatorExecutionHint = computed(() =>
+  selectedEvaluator.value?.kind === '规则'
+    ? `已接入：${selectedEvaluator.value.coverage}。运行时由评测引擎读取 Case 期望与 Trace 进行确定性判定。`
+    : '该评估器类型尚未接入实际执行，不能用于提交评测任务。',
+);
+const filteredTasks = computed(() =>
+  tasks.value.filter(
+    (task) =>
+      (!taskFilter.value || task.status === taskFilter.value) &&
+      (!taskQuery.value ||
+        (task.name + task.id).toLowerCase().includes(taskQuery.value.toLowerCase())),
+  ),
+);
+const completedTasks = computed(() => tasks.value.filter((t) => t.status === '已完成'));
+const currentResultTask = computed(
+  () => completedTasks.value.find((t) => t.id === resultTaskId.value) || completedTasks.value[0],
+);
+const activeCluster = computed(
+  () =>
+    optimizerClusters.value.find((cluster) => cluster.id === selectedCluster.value) ||
+    optimizerClusters.value[0],
+);
+const agentTargets = computed(() => targets.value.filter((target) => target.type === 'Agent'));
+const agentVersions = computed(() => [
+  ...new Set([
+    'v2.3.2',
+    'v2.4.0',
+    'v2.5.0-candidate',
+    ...agentTargets.value.map((target) => target.version),
+  ]),
+]);
+const ruleEvaluatorItems = computed(() =>
+  evaluatorItems.value.filter((item) => item.kind === '规则'),
+);
+function getRuleDefinition(item: Evaluator): RuleDefinition {
+  return (
+    ruleDefinitions[item.id] || {
+      implementationId: item.id,
+      operator: '引擎固定规则',
+      severity: item.coverage.includes('阻断') ? '阻断' : '标准',
+      expectation: '由评测集 Case 的对应期望字段提供。',
+      evidence: '由运行 Trace 提供。',
+      passCondition: '实际运行结果满足该项期望。',
+      failure: '记录期望、实际值与关联 Trace 证据。',
+    }
+  );
+}
+const activeRuleDefinition = computed(() =>
+  ruleDetailEvaluator.value ? getRuleDefinition(ruleDetailEvaluator.value) : null,
+);
+const availableChildEvaluators = computed(() =>
+  evaluatorItems.value.filter(
+    (item) => item.kind !== '复合' && item.id !== editingEvaluator.value?.id,
+  ),
+);
+const compositeWeightTotal = computed(() =>
+  compositeChildren.value.reduce((total, child) => total + (Number(child.weight) || 0), 0),
+);
 const abDifferences = computed(() => {
-  const base = abA.value; const candidate = abB.value; const changes:string[] = []
-  if (base.agentId !== candidate.agentId) changes.push('智能体')
-  if (base.version !== candidate.version) changes.push(`智能体版本 ${base.version} → ${candidate.version}`)
-  if (JSON.stringify([...base.skillIds].sort()) !== JSON.stringify([...candidate.skillIds].sort())) changes.push('技能范围')
-  const skillVersionChanges = Object.keys({...base.skillVersions,...candidate.skillVersions}).filter(id => (base.skillVersions[id] || '') !== (candidate.skillVersions[id] || ''))
-  if (skillVersionChanges.length) changes.push(`技能版本（${skillVersionChanges.map(id=>skillTargets.value.find(skill=>skill.id===id)?.name || id).join('、')}）`)
-  if (base.dataset !== candidate.dataset) changes.push('评测集')
-  if (base.datasetVersion !== candidate.datasetVersion) changes.push(`评测集版本 ${base.datasetVersion} → ${candidate.datasetVersion}`)
-  if (JSON.stringify([...base.evaluatorIds].sort()) !== JSON.stringify([...candidate.evaluatorIds].sort())) changes.push('评估器范围')
-  return changes
-})
-const abChangeCount = computed(() => abDifferences.value.length)
-const abDiffText = computed(() => abChangeCount.value === 0 ? '两侧配置完全相同，无对比变量。' : abChangeCount.value === 1 ? abDifferences.value[0] : `检测到 ${abChangeCount.value} 项变更：${abDifferences.value.join('、')}。请只保留一项。`)
-const canRunAb = computed(() => Boolean(abName.value.trim()) && abChangeCount.value === 1)
-const collectionVersions = computed(() => datasetVersions.value.filter(version => version.collectionId === selectedCollectionId.value)); const activeDatasetVersion = computed(() => datasetVersions.value.find(version => version.id === selectedDatasetVersionId.value) || collectionVersions.value[0]); const filteredDatasetCases = computed(() => activeDatasetVersion.value.cases.filter(item => !datasetCaseQuery.value || `${item.id} ${item.title} ${item.tags.join(' ')}`.toLowerCase().includes(datasetCaseQuery.value.toLowerCase()))); const activeDatasetCase = computed(() => activeDatasetVersion.value.cases.find(item => item.id === selectedDatasetCaseId.value) || filteredDatasetCases.value[0])
-const caseItems = [{id:'CASE-001',title:'正常订单查询',kind:'正例',level:'P0',ok:true,input:'查询订单 A202609001 的状态。',expected:'路由至订单查询 Skill，返回订单状态和更新时间。',actual:'订单 A202609001 当前状态为“已发货”，更新时间 10:32。',trace:'[09:30:01] intent=order_query\n[09:30:01] route=order-query-skill\n[09:30:02] tool=get_order_status(args={order_id:A202609001})\n[09:30:02] evaluator=passed'}, {id:'CASE-018',title:'相近意图路由',kind:'边界',level:'P1',ok:false,input:'我想把订单的收货地址改一下。',expected:'路由至订单变更 Skill。',actual:'返回了订单查询结果，未调用订单变更工具。',trace:'[09:31:05] intent=order_query\n[09:31:05] route=order-query-skill\n[09:31:06] evaluator=failed: expected route order-change-skill'}, {id:'CASE-031',title:'多轮上下文承接',kind:'正例',level:'P0',ok:true,input:'第二轮：使用刚才的订单号查询物流。',expected:'继承上轮订单号并查询物流。',actual:'已查询订单 A202609002 的物流信息。',trace:'[09:32:17] context.order_id=A202609002\n[09:32:18] route=order-query-skill\n[09:32:18] evaluator=passed'}]; const activeCase = computed(() => caseItems.find(item => item.id === selectedCase.value) || caseItems[0])
-function go(next:string){ page.value=next; if(next==='create') createStep.value=1 }
-function showToast(message:string){toast.value=message; window.setTimeout(()=>toast.value='',3000)}
-async function openRuleDefinition(item:Evaluator){ ruleDetailEvaluator.value=item; ruleDetailTab.value='definition'; ruleSource.value=''; ruleSourcePath.value=''; ruleSourceError.value=''; ruleSourceLoading.value=true; try { const source=await getEvaluatorSource(item.id); ruleSource.value=source.source; ruleSourcePath.value=source.source_path } catch { ruleSourceError.value='未能从评测引擎读取源码。请确认 Python BFF 与 AgentGate 引擎均已启动。' } finally { ruleSourceLoading.value=false } }
-function statusClass(status:TaskStatus){return status==='已完成'?'success':status==='已失败'?'error':status==='运行中'?'warn':'info'}
-function submitTask(){ if(selectedEvaluator.value.kind !== '规则'){ createStep.value=3; showToast('当前评测引擎仅支持规则评估器执行，请选择已接入的规则评估器。'); return } const task:EvalTask={id:'ET-20260907-0'+(19+tasks.value.length),name:`${selectedTarget.value.name} · ${selectedDataset.value.name}`,target:selectedTarget.value,dataset:selectedDataset.value,evaluator:selectedEvaluator.value,status:runMode.value==='立即执行'?'运行中':'等待中',passRate:null,createdAt:'2026-09-07 16:20',config:`并发 ${concurrency.value} · ${timeout.value}`};tasks.value.unshift(task);showToast(`任务 ${task.id} 已${runMode.value==='立即执行'?'进入运行队列':'预约'}。`);page.value='tasks'}
-function openTask(task:EvalTask){ if(task.status==='已完成'){resultTaskId.value=task.id;page.value='results'; return} selectedTaskDetail.value=task }
-function retryTask(task:EvalTask){ const retry = {...task, id:`${task.id}-R${tasks.value.length}`, status:'等待中' as TaskStatus, passRate:null, createdAt:'2026-09-08 10:00'}; tasks.value.unshift(retry); selectedTaskDetail.value=retry; showToast(`${retry.id} 已创建，等待执行。`) }
-function generateDatasetDraft(){ datasetModal.value=false; const source = activeDatasetVersion.value; const draft: DatasetVersionState = {id:`${source.collectionId}-${Date.now()}-draft`,collectionId:source.collectionId,label:`${datasetGenerationScope.value==='路由专项'?'v2.2':'v1.6'}-draft`,status:'草稿',hash:'—',note:`自动生成：${datasetGenerationScope.value}`,baseVersion:source.label,cases:cloneCases(source.cases)}; datasetVersions.value.unshift(draft); selectedDatasetVersionId.value=draft.id; showToast(`已按“${datasetGenerationScope.value}”生成评测集草稿。`) }
-function makeCompositeChildren():CompositeChild[]{ return availableChildEvaluators.value.slice(0,2).map((item,index)=>({key:`new-${Date.now()}-${index}`,evaluatorId:item.id,weight:index===0?60:40,required:index===0})) }
-function resetEvaluatorDraft(item?:Evaluator){ evaluatorDraft.value={name:item?.name || '',kind:item?.kind || '规则',coverage:item?.coverage || '',ruleType:'JSON Schema / 字段完整性',failureLevel:'P1：重要',keySource:'平台公共 Key',judgeOutput:'通过 / 不通过 + 理由',prompt:'',passCondition:'加权得分 ≥ 80，且全部阻断项通过'}; const saved=item ? compositeConfigs.value[item.id] : undefined; compositeChildren.value=saved ? saved.children.map(child=>({...child})) : makeCompositeChildren(); if(saved) evaluatorDraft.value.passCondition=saved.passCondition }
-function openEvaluatorConfig(item?:Evaluator){ editingEvaluator.value=item || null; resetEvaluatorDraft(item); evaluatorConfigModal.value=true }
-function closeEvaluatorConfig(){ evaluatorConfigModal.value=false; editingEvaluator.value=null }
-function addCompositeChild(){ const used=new Set(compositeChildren.value.map(child=>child.evaluatorId)); const next=availableChildEvaluators.value.find(item=>!used.has(item.id)); if(!next){showToast('没有可添加的子评估器，请先创建规则或 LLM 评估器。');return} compositeChildren.value.push({key:`new-${Date.now()}-${compositeChildren.value.length}`,evaluatorId:next.id,weight:0,required:false}) }
-function removeCompositeChild(index:number){ if(compositeChildren.value.length<=2){showToast('复合评估器至少需要两个子评估器。');return} compositeChildren.value.splice(index,1) }
-function saveEvaluatorConfig(){ const draft=evaluatorDraft.value; const name=draft.name.trim(); if(!name){showToast('请填写评估器名称。');return} if(draft.kind==='复合' && (compositeChildren.value.length<2 || compositeWeightTotal.value!==100)){showToast('复合评估器至少包含两个子评估器，且总权重必须为 100%。');return} let item=editingEvaluator.value; if(item){ item.name=name; item.coverage=draft.coverage.trim()||'未填写评估范围'; item.kind=draft.kind } else { item={id:`e-${Date.now()}`,name,version:'v1.0',kind:draft.kind,coverage:draft.coverage.trim()||'未填写评估范围',status:'已启用'}; evaluatorItems.value.unshift(item); selectedEvaluatorId.value=item.id } if(draft.kind==='复合'){ compositeConfigs.value[item.id]={children:compositeChildren.value.map(child=>({...child})),passCondition:draft.passCondition} } else { delete compositeConfigs.value[item.id] } showToast(`${item.name} 已${editingEvaluator.value?'保存配置':'创建并启用'}。`); closeEvaluatorConfig() }
-watch(evaluatorModal, visible=>{ if(visible){ evaluatorModal.value=false; openEvaluatorConfig() } })
-watch(selectedEvaluatorDetail, item=>{ if(item){ selectedEvaluatorDetail.value=null; openEvaluatorConfig(item) } })
-function createEvaluator(){ const name = newEvaluator.value.name.trim(); if(!name){showToast('请填写评估器名称。');return} const item: Evaluator = {id:`e-${Date.now()}`,name,version:'v1.0',kind:newEvaluator.value.kind,coverage:newEvaluator.value.coverage.trim()||'未填写适用范围',status:'已启用'}; evaluatorItems.value.unshift(item); selectedEvaluatorId.value=item.id; evaluatorModal.value=false; newEvaluator.value={name:'',kind:'规则',coverage:''}; showToast(`${item.name} 已创建并启用。`) }
-function toggleEvaluator(item:Evaluator){ item.status=item.status==='已启用'?'已停用':'已启用'; showToast(`${item.name} 已${item.status==='已启用'?'启用':'停用'}。`) }
-function setRootCauseStatus(status:'已确认'|'已忽略'){ activeCluster.value.status=status; showToast(`${activeCluster.value.name} 的根因建议已${status}。`) }
-function toggleAbAsset(variant:'A'|'B', kind:'skill'|'evaluator', id:string){
-  const config = variant === 'A' ? abA.value : abB.value
-  const key = kind === 'skill' ? 'skillIds' : 'evaluatorIds'
-  config[key] = config[key].includes(id) ? config[key].filter(item=>item!==id) : [...config[key],id]
-  abRan.value=false
+  const base = abA.value;
+  const candidate = abB.value;
+  const changes: string[] = [];
+  if (base.agentId !== candidate.agentId) changes.push('智能体');
+  if (base.version !== candidate.version)
+    changes.push(`智能体版本 ${base.version} → ${candidate.version}`);
+  if (JSON.stringify([...base.skillIds].sort()) !== JSON.stringify([...candidate.skillIds].sort()))
+    changes.push('技能范围');
+  const skillVersionChanges = Object.keys({
+    ...base.skillVersions,
+    ...candidate.skillVersions,
+  }).filter((id) => (base.skillVersions[id] || '') !== (candidate.skillVersions[id] || ''));
+  if (skillVersionChanges.length)
+    changes.push(
+      `技能版本（${skillVersionChanges.map((id) => skillTargets.value.find((skill) => skill.id === id)?.name || id).join('、')}）`,
+    );
+  if (base.dataset !== candidate.dataset) changes.push('评测集');
+  if (base.datasetVersion !== candidate.datasetVersion)
+    changes.push(`评测集版本 ${base.datasetVersion} → ${candidate.datasetVersion}`);
+  if (
+    JSON.stringify([...base.evaluatorIds].sort()) !==
+    JSON.stringify([...candidate.evaluatorIds].sort())
+  )
+    changes.push('评估器范围');
+  return changes;
+});
+const abChangeCount = computed(() => abDifferences.value.length);
+const abDiffText = computed(() =>
+  abChangeCount.value === 0
+    ? '两侧配置完全相同，无对比变量。'
+    : abChangeCount.value === 1
+      ? abDifferences.value[0]
+      : `检测到 ${abChangeCount.value} 项变更：${abDifferences.value.join('、')}。请只保留一项。`,
+);
+const canRunAb = computed(() => Boolean(abName.value.trim()) && abChangeCount.value === 1);
+const collectionVersions = computed(() =>
+  datasetVersions.value.filter((version) => version.collectionId === selectedCollectionId.value),
+);
+const activeDatasetVersion = computed(
+  () =>
+    datasetVersions.value.find((version) => version.id === selectedDatasetVersionId.value) ||
+    collectionVersions.value[0],
+);
+const filteredDatasetCases = computed(() =>
+  activeDatasetVersion.value.cases.filter(
+    (item) =>
+      !datasetCaseQuery.value ||
+      `${item.id} ${item.title} ${item.tags.join(' ')}`
+        .toLowerCase()
+        .includes(datasetCaseQuery.value.toLowerCase()),
+  ),
+);
+const activeDatasetCase = computed(
+  () =>
+    activeDatasetVersion.value.cases.find((item) => item.id === selectedDatasetCaseId.value) ||
+    filteredDatasetCases.value[0],
+);
+const caseItems = [
+  {
+    id: 'CASE-001',
+    title: '正常订单查询',
+    kind: '正例',
+    level: 'P0',
+    ok: true,
+    input: '查询订单 A202609001 的状态。',
+    expected: '路由至订单查询 Skill，返回订单状态和更新时间。',
+    actual: '订单 A202609001 当前状态为“已发货”，更新时间 10:32。',
+    trace:
+      '[09:30:01] intent=order_query\n[09:30:01] route=order-query-skill\n[09:30:02] tool=get_order_status(args={order_id:A202609001})\n[09:30:02] evaluator=passed',
+  },
+  {
+    id: 'CASE-018',
+    title: '相近意图路由',
+    kind: '边界',
+    level: 'P1',
+    ok: false,
+    input: '我想把订单的收货地址改一下。',
+    expected: '路由至订单变更 Skill。',
+    actual: '返回了订单查询结果，未调用订单变更工具。',
+    trace:
+      '[09:31:05] intent=order_query\n[09:31:05] route=order-query-skill\n[09:31:06] evaluator=failed: expected route order-change-skill',
+  },
+  {
+    id: 'CASE-031',
+    title: '多轮上下文承接',
+    kind: '正例',
+    level: 'P0',
+    ok: true,
+    input: '第二轮：使用刚才的订单号查询物流。',
+    expected: '继承上轮订单号并查询物流。',
+    actual: '已查询订单 A202609002 的物流信息。',
+    trace:
+      '[09:32:17] context.order_id=A202609002\n[09:32:18] route=order-query-skill\n[09:32:18] evaluator=passed',
+  },
+];
+const activeCase = computed(
+  () => caseItems.find((item) => item.id === selectedCase.value) || caseItems[0],
+);
+function go(next: string) {
+  page.value = next;
+  if (next === 'create') createStep.value = 1;
 }
-function setAbSkillVersion(event:Event,id:string){
-  abB.value.skillVersions = {...abA.value.skillVersions,[id]:(event.target as HTMLSelectElement).value}
-  abChangedSkillId.value=id; abRan.value=false
+function showToast(message: string) {
+  toast.value = message;
+  window.setTimeout(() => (toast.value = ''), 3000);
 }
-function copyAbBaseToCandidate(){
-  abB.value = {...abA.value,skillIds:[...abA.value.skillIds],evaluatorIds:[...abA.value.evaluatorIds],skillVersions:{...abA.value.skillVersions}}
-  abRan.value=false; showToast('已将实验 A 的配置复制到实验 B，请在 B 中修改一项资产。')
+async function openRuleDefinition(item: Evaluator) {
+  ruleDetailEvaluator.value = item;
+  ruleDetailTab.value = 'definition';
+  ruleSource.value = '';
+  ruleSourcePath.value = '';
+  ruleSourceError.value = '';
+  ruleSourceLoading.value = true;
+  try {
+    const source = await getEvaluatorSource(item.id);
+    ruleSource.value = source.source;
+    ruleSourcePath.value = source.source_path;
+  } catch {
+    ruleSourceError.value = '未能从评测引擎读取源码。请确认 Python BFF 与 AgentGate 引擎均已启动。';
+  } finally {
+    ruleSourceLoading.value = false;
+  }
 }
-function resetAbExperiment(){
-  const agentId = agentTargets.value[0]?.id || 'a-1'
+function statusClass(status: TaskStatus) {
+  return status === '已完成'
+    ? 'success'
+    : status === '已失败'
+      ? 'error'
+      : status === '运行中'
+        ? 'warn'
+        : 'info';
+}
+function submitTask() {
+  if (selectedEvaluator.value.kind !== '规则') {
+    createStep.value = 3;
+    showToast('当前评测引擎仅支持规则评估器执行，请选择已接入的规则评估器。');
+    return;
+  }
+  const task: EvalTask = {
+    id: 'ET-20260907-0' + (19 + tasks.value.length),
+    name: `${selectedTarget.value.name} · ${selectedDataset.value.name}`,
+    target: selectedTarget.value,
+    dataset: selectedDataset.value,
+    evaluator: selectedEvaluator.value,
+    status: runMode.value === '立即执行' ? '运行中' : '等待中',
+    passRate: null,
+    createdAt: '2026-09-07 16:20',
+    config: `并发 ${concurrency.value} · ${timeout.value}`,
+  };
+  tasks.value.unshift(task);
+  showToast(`任务 ${task.id} 已${runMode.value === '立即执行' ? '进入运行队列' : '预约'}。`);
+  page.value = 'tasks';
+}
+function openTask(task: EvalTask) {
+  if (task.status === '已完成') {
+    resultTaskId.value = task.id;
+    page.value = 'results';
+    return;
+  }
+  selectedTaskDetail.value = task;
+}
+function retryTask(task: EvalTask) {
+  const retry = {
+    ...task,
+    id: `${task.id}-R${tasks.value.length}`,
+    status: '等待中' as TaskStatus,
+    passRate: null,
+    createdAt: '2026-09-08 10:00',
+  };
+  tasks.value.unshift(retry);
+  selectedTaskDetail.value = retry;
+  showToast(`${retry.id} 已创建，等待执行。`);
+}
+function generateDatasetDraft() {
+  datasetModal.value = false;
+  const source = activeDatasetVersion.value;
+  const draft: DatasetVersionState = {
+    id: `${source.collectionId}-${Date.now()}-draft`,
+    collectionId: source.collectionId,
+    label: `${datasetGenerationScope.value === '路由专项' ? 'v2.2' : 'v1.6'}-draft`,
+    status: '草稿',
+    hash: '—',
+    note: `自动生成：${datasetGenerationScope.value}`,
+    baseVersion: source.label,
+    cases: cloneCases(source.cases),
+  };
+  datasetVersions.value.unshift(draft);
+  selectedDatasetVersionId.value = draft.id;
+  showToast(`已按“${datasetGenerationScope.value}”生成评测集草稿。`);
+}
+function makeCompositeChildren(): CompositeChild[] {
+  return availableChildEvaluators.value.slice(0, 2).map((item, index) => ({
+    key: `new-${Date.now()}-${index}`,
+    evaluatorId: item.id,
+    weight: index === 0 ? 60 : 40,
+    required: index === 0,
+  }));
+}
+function resetEvaluatorDraft(item?: Evaluator) {
+  evaluatorDraft.value = {
+    name: item?.name || '',
+    kind: item?.kind || '规则',
+    coverage: item?.coverage || '',
+    ruleType: 'JSON Schema / 字段完整性',
+    failureLevel: 'P1：重要',
+    keySource: '平台公共 Key',
+    judgeOutput: '通过 / 不通过 + 理由',
+    prompt: '',
+    passCondition: '加权得分 ≥ 80，且全部阻断项通过',
+  };
+  const saved = item ? compositeConfigs.value[item.id] : undefined;
+  compositeChildren.value = saved
+    ? saved.children.map((child) => ({ ...child }))
+    : makeCompositeChildren();
+  if (saved) evaluatorDraft.value.passCondition = saved.passCondition;
+}
+function openEvaluatorConfig(item?: Evaluator) {
+  editingEvaluator.value = item || null;
+  resetEvaluatorDraft(item);
+  evaluatorConfigModal.value = true;
+}
+function closeEvaluatorConfig() {
+  evaluatorConfigModal.value = false;
+  editingEvaluator.value = null;
+}
+function addCompositeChild() {
+  const used = new Set(compositeChildren.value.map((child) => child.evaluatorId));
+  const next = availableChildEvaluators.value.find((item) => !used.has(item.id));
+  if (!next) {
+    showToast('没有可添加的子评估器，请先创建规则或 LLM 评估器。');
+    return;
+  }
+  compositeChildren.value.push({
+    key: `new-${Date.now()}-${compositeChildren.value.length}`,
+    evaluatorId: next.id,
+    weight: 0,
+    required: false,
+  });
+}
+function removeCompositeChild(index: number) {
+  if (compositeChildren.value.length <= 2) {
+    showToast('复合评估器至少需要两个子评估器。');
+    return;
+  }
+  compositeChildren.value.splice(index, 1);
+}
+function saveEvaluatorConfig() {
+  const draft = evaluatorDraft.value;
+  const name = draft.name.trim();
+  if (!name) {
+    showToast('请填写评估器名称。');
+    return;
+  }
+  if (
+    draft.kind === '复合' &&
+    (compositeChildren.value.length < 2 || compositeWeightTotal.value !== 100)
+  ) {
+    showToast('复合评估器至少包含两个子评估器，且总权重必须为 100%。');
+    return;
+  }
+  let item = editingEvaluator.value;
+  if (item) {
+    item.name = name;
+    item.coverage = draft.coverage.trim() || '未填写评估范围';
+    item.kind = draft.kind;
+  } else {
+    item = {
+      id: `e-${Date.now()}`,
+      name,
+      version: 'v1.0',
+      kind: draft.kind,
+      coverage: draft.coverage.trim() || '未填写评估范围',
+      status: '已启用',
+    };
+    evaluatorItems.value.unshift(item);
+    selectedEvaluatorId.value = item.id;
+  }
+  if (draft.kind === '复合') {
+    compositeConfigs.value[item.id] = {
+      children: compositeChildren.value.map((child) => ({ ...child })),
+      passCondition: draft.passCondition,
+    };
+  } else {
+    delete compositeConfigs.value[item.id];
+  }
+  showToast(`${item.name} 已${editingEvaluator.value ? '保存配置' : '创建并启用'}。`);
+  closeEvaluatorConfig();
+}
+watch(evaluatorModal, (visible) => {
+  if (visible) {
+    evaluatorModal.value = false;
+    openEvaluatorConfig();
+  }
+});
+watch(selectedEvaluatorDetail, (item) => {
+  if (item) {
+    selectedEvaluatorDetail.value = null;
+    openEvaluatorConfig(item);
+  }
+});
+function createEvaluator() {
+  const name = newEvaluator.value.name.trim();
+  if (!name) {
+    showToast('请填写评估器名称。');
+    return;
+  }
+  const item: Evaluator = {
+    id: `e-${Date.now()}`,
+    name,
+    version: 'v1.0',
+    kind: newEvaluator.value.kind,
+    coverage: newEvaluator.value.coverage.trim() || '未填写适用范围',
+    status: '已启用',
+  };
+  evaluatorItems.value.unshift(item);
+  selectedEvaluatorId.value = item.id;
+  evaluatorModal.value = false;
+  newEvaluator.value = { name: '', kind: '规则', coverage: '' };
+  showToast(`${item.name} 已创建并启用。`);
+}
+function toggleEvaluator(item: Evaluator) {
+  item.status = item.status === '已启用' ? '已停用' : '已启用';
+  showToast(`${item.name} 已${item.status === '已启用' ? '启用' : '停用'}。`);
+}
+function setRootCauseStatus(status: '已确认' | '已忽略') {
+  activeCluster.value.status = status;
+  showToast(`${activeCluster.value.name} 的根因建议已${status}。`);
+}
+function toggleAbAsset(variant: 'A' | 'B', kind: 'skill' | 'evaluator', id: string) {
+  const config = variant === 'A' ? abA.value : abB.value;
+  const key = kind === 'skill' ? 'skillIds' : 'evaluatorIds';
+  config[key] = config[key].includes(id)
+    ? config[key].filter((item) => item !== id)
+    : [...config[key], id];
+  abRan.value = false;
+}
+function setAbSkillVersion(event: Event, id: string) {
+  abB.value.skillVersions = {
+    ...abA.value.skillVersions,
+    [id]: (event.target as HTMLSelectElement).value,
+  };
+  abChangedSkillId.value = id;
+  abRan.value = false;
+}
+function copyAbBaseToCandidate() {
+  abB.value = {
+    ...abA.value,
+    skillIds: [...abA.value.skillIds],
+    evaluatorIds: [...abA.value.evaluatorIds],
+    skillVersions: { ...abA.value.skillVersions },
+  };
+  abRan.value = false;
+  showToast('已将实验 A 的配置复制到实验 B，请在 B 中修改一项资产。');
+}
+function resetAbExperiment() {
+  const agentId = agentTargets.value[0]?.id || 'a-1';
+  const skills = skillTargets.value;
+  const skillIds = skills.map((item) => item.id);
+  const skillVersions = Object.fromEntries(skills.map((item) => [item.id, item.version]));
+  const evaluatorIds = evaluatorItems.value.slice(0, 4).map((item) => item.id);
+  abName.value = '风险评估技能升级验证';
+  abRepeat.value = '1';
+  abA.value = { ...makeAbConfig('v2.3.2'), agentId, skillIds, skillVersions, evaluatorIds };
+  abB.value = {
+    ...makeAbConfig('v2.4.0'),
+    agentId,
+    skillIds: [...skillIds],
+    skillVersions: { ...skillVersions },
+    evaluatorIds: [...evaluatorIds],
+  };
+  abChangedSkillId.value = skillIds[0] || 's-2';
+  abRan.value = false;
+}
+function runAbExperiment() {
+  if (!canRunAb.value) {
+    showToast('请填写实验名称，并确保实验 B 仅修改一项配置。');
+    return;
+  }
+  const variable = abDifferences.value[0];
+  const signature = JSON.stringify({
+    variable,
+    repeat: abRepeat.value,
+    baseline: abA.value,
+    candidate: abB.value,
+  });
+  const seed = [...signature].reduce((total, char) => total + char.charCodeAt(0), 0);
+  const basePass = 32 + (seed % 8);
+  const delta =
+    variable.includes('智能体') && !variable.includes('版本')
+      ? -4 - (seed % 4)
+      : variable.includes('评估器')
+        ? -2 + (seed % 5)
+        : 4 + (seed % 8);
+  const candidatePass = Math.max(0, Math.min(48, basePass + delta));
+  const fixedPass = Math.max(0, candidatePass - basePass);
+  const newFail = Math.max(0, basePass - candidatePass);
+  const keepPass = Math.min(basePass, candidatePass);
+  const keepFail = 48 - keepPass - fixedPass - newFail;
+  abResult.value = {
+    baseScore: Number(((basePass / 48) * 100).toFixed(2)),
+    candidateScore: Number(((candidatePass / 48) * 100).toFixed(2)),
+    basePass,
+    candidatePass,
+    total: 48,
+    keepPass,
+    newFail,
+    fixedPass,
+    keepFail,
+    gate: newFail === 0 && candidatePass >= basePass ? '建议采用实验 B' : '不建议采用实验 B',
+    tone: newFail === 0 && candidatePass >= basePass ? 'success' : 'warn',
+  };
+  abRan.value = true;
+  showToast(`A/B 实验已完成：受控变量为${variable}。`);
+}
+function toggleAbSkill(id: string) {
+  abSkillIds.value = abSkillIds.value.includes(id)
+    ? abSkillIds.value.filter((item) => item !== id)
+    : [...abSkillIds.value, id];
+}
+function createAbExperiment() {
+  if (abBaseline.value === abCandidate.value) {
+    showToast('基线版本与候选版本不能相同。');
+    return;
+  }
+  if (!abSkillIds.value.length) {
+    showToast('请至少选择一个技能。');
+    return;
+  }
+  const target = targets.value.find((item) => item.id === abTargetId.value);
   const skills = skillTargets.value
-  const skillIds = skills.map(item=>item.id)
-  const skillVersions = Object.fromEntries(skills.map(item=>[item.id,item.version]))
-  const evaluatorIds = evaluatorItems.value.slice(0,4).map(item=>item.id)
-  abName.value='风险评估技能升级验证'; abRepeat.value='1'
-  abA.value={...makeAbConfig('v2.3.2'),agentId,skillIds,skillVersions,evaluatorIds}
-  abB.value={...makeAbConfig('v2.4.0'),agentId,skillIds:[...skillIds],skillVersions:{...skillVersions},evaluatorIds:[...evaluatorIds]}
-  abChangedSkillId.value=skillIds[0] || 's-2'; abRan.value=false
+    .filter((item) => abSkillIds.value.includes(item.id))
+    .map((item) => item.name)
+    .join('、');
+  abExperiment.value = {
+    name: abName.value.trim() || `${target?.name || '评测对象'} A/B 实验`,
+    target: target?.name || '评测对象',
+    skills,
+    dataset: abDataset.value,
+    evaluator: abEvaluator.value,
+    gate: abGate.value,
+    baseline: abBaseline.value,
+    candidate: abCandidate.value,
+    baselinePass: '88.1',
+    candidatePass: '92.4',
+    baselineBadcases: 11,
+    candidateBadcases: 7,
+    baselineLatency: '1.9',
+    candidateLatency: '1.8',
+    status: '通过',
+  };
+  abModal.value = false;
+  showToast(`A/B 实验已${abRunMode.value === '立即执行' ? '创建并开始运行' : '创建并预约'}。`);
 }
-function runAbExperiment(){
-  if(!canRunAb.value){showToast('请填写实验名称，并确保实验 B 仅修改一项配置。');return}
-  const variable = abDifferences.value[0]
-  const signature = JSON.stringify({variable,repeat:abRepeat.value,baseline:abA.value,candidate:abB.value})
-  const seed = [...signature].reduce((total,char)=>total + char.charCodeAt(0),0)
-  const basePass = 32 + seed % 8
-  const delta = variable.includes('智能体') && !variable.includes('版本') ? -4 - seed % 4 : variable.includes('评估器') ? -2 + seed % 5 : 4 + seed % 8
-  const candidatePass = Math.max(0,Math.min(48,basePass + delta))
-  const fixedPass = Math.max(0, candidatePass - basePass)
-  const newFail = Math.max(0, basePass - candidatePass)
-  const keepPass = Math.min(basePass,candidatePass)
-  const keepFail = 48 - keepPass - fixedPass - newFail
-  abResult.value = {baseScore:Number((basePass / 48 * 100).toFixed(2)),candidateScore:Number((candidatePass / 48 * 100).toFixed(2)),basePass,candidatePass,total:48,keepPass,newFail,fixedPass,keepFail,gate:newFail === 0 && candidatePass >= basePass ? '建议采用实验 B' : '不建议采用实验 B',tone:newFail === 0 && candidatePass >= basePass ? 'success' : 'warn'}
-  abRan.value=true; showToast(`A/B 实验已完成：受控变量为${variable}。`)
+function toggleAnalysisScope(scope: string) {
+  selectedAnalysisScopes.value = selectedAnalysisScopes.value.includes(scope)
+    ? selectedAnalysisScopes.value.filter((item) => item !== scope)
+    : [...selectedAnalysisScopes.value, scope];
+  analysisRan.value = false;
 }
-function toggleAbSkill(id:string){ abSkillIds.value=abSkillIds.value.includes(id)?abSkillIds.value.filter(item=>item!==id):[...abSkillIds.value,id] }
-function createAbExperiment(){ if(abBaseline.value===abCandidate.value){showToast('基线版本与候选版本不能相同。');return} if(!abSkillIds.value.length){showToast('请至少选择一个技能。');return} const target=targets.value.find(item=>item.id===abTargetId.value); const skills=skillTargets.value.filter(item=>abSkillIds.value.includes(item.id)).map(item=>item.name).join('、'); abExperiment.value={name:abName.value.trim()||`${target?.name || '评测对象'} A/B 实验`,target:target?.name||'评测对象',skills,dataset:abDataset.value,evaluator:abEvaluator.value,gate:abGate.value,baseline:abBaseline.value,candidate:abCandidate.value,baselinePass:'88.1',candidatePass:'92.4',baselineBadcases:11,candidateBadcases:7,baselineLatency:'1.9',candidateLatency:'1.8',status:'通过'}; abModal.value=false; showToast(`A/B 实验已${abRunMode.value==='立即执行'?'创建并开始运行':'创建并预约'}。`) }
-function toggleAnalysisScope(scope:string){ selectedAnalysisScopes.value = selectedAnalysisScopes.value.includes(scope) ? selectedAnalysisScopes.value.filter(item=>item!==scope) : [...selectedAnalysisScopes.value,scope]; analysisRan.value=false }
-function runStaticAnalysis(){ if(!selectedAnalysisScopes.value.length){showToast('请至少选择一项分析范围。');return} analysisRan.value=true; const skill=skillTargets.value.find(item=>item.id===selectedSkillAnalysisId.value); showToast(`${skill?.name || 'Skill'} 的静态分析已完成：${selectedAnalysisScopes.value.length} 项范围。`) }
-function selectCollection(){ const latest = collectionVersions.value[0]; selectedDatasetVersionId.value = latest.id; selectedDatasetCaseId.value = latest.cases[0]?.id || ''; datasetCaseQuery.value = '' }
-function selectDatasetVersion(){ selectedDatasetCaseId.value = activeDatasetVersion.value.cases[0]?.id || ''; datasetCaseQuery.value = '' }
-function cloneCases(cases: DatasetCase[]): DatasetCase[] { return JSON.parse(JSON.stringify(cases)) as DatasetCase[] }
-function createDraft(){ const source = activeDatasetVersion.value; const next = `v${Number(source.label.replace(/[^0-9.]/g,'')) + 0.1}`; const draft: DatasetVersionState = {id:`${source.collectionId}-${Date.now()}-draft`,collectionId:source.collectionId,label:`${next}-draft`,status:'草稿',hash:'—',note:`基于 ${source.label} 创建的草稿`,baseVersion:source.label,cases:cloneCases(source.cases)}; datasetVersions.value.unshift(draft); selectedDatasetVersionId.value=draft.id; selectedDatasetCaseId.value=draft.cases[0]?.id||''; showToast(`已基于 ${source.label} 创建草稿。`) }
-function discardDraft(){ const draft = activeDatasetVersion.value; datasetVersions.value = datasetVersions.value.filter(item=>item.id!==draft.id); const fallback = collectionVersions.value.find(item=>item.status==='已发布') || collectionVersions.value[0]; selectedDatasetVersionId.value=fallback.id; selectedDatasetCaseId.value=fallback.cases[0]?.id||''; showToast('草稿已丢弃，已回到最近发布版本。') }
-function publishDraft(){ const draft=activeDatasetVersion.value; draft.status='已发布'; draft.label=draft.label.replace('-draft',''); draft.hash='b'+Math.random().toString(16).slice(2,9); draft.note=releaseNote.value.trim()||draft.note||'未填写发布说明'; releaseNote.value=''; showToast(`${draft.label} 已发布，内容 Hash ${draft.hash} 已生成。`) }
-function moveCase(id:string,direction:number){ const all=activeDatasetVersion.value.cases; const index=all.findIndex(item=>item.id===id); const target=index+direction; if(index<0||target<0||target>=all.length)return; [all[index],all[target]]=[all[target],all[index]] }
-function copyCase(item:DatasetCase){ const copy=cloneCases([item])[0]; copy.id=`${item.id}-COPY`; copy.title=`${item.title}（副本）`; activeDatasetVersion.value.cases.push(copy); selectedDatasetCaseId.value=copy.id; showToast('已复制 Case 到当前草稿。') }
-function deleteCase(id:string){ const cases=activeDatasetVersion.value.cases; const index=cases.findIndex(item=>item.id===id); if(index<0)return; cases.splice(index,1); selectedDatasetCaseId.value=cases[Math.max(0,index-1)]?.id||''; showToast('已从当前草稿删除 Case。') }
+function runStaticAnalysis() {
+  if (!selectedAnalysisScopes.value.length) {
+    showToast('请至少选择一项分析范围。');
+    return;
+  }
+  analysisRan.value = true;
+  const skill = skillTargets.value.find((item) => item.id === selectedSkillAnalysisId.value);
+  showToast(
+    `${skill?.name || 'Skill'} 的静态分析已完成：${selectedAnalysisScopes.value.length} 项范围。`,
+  );
+}
+function selectCollection() {
+  const latest = collectionVersions.value[0];
+  selectedDatasetVersionId.value = latest.id;
+  selectedDatasetCaseId.value = latest.cases[0]?.id || '';
+  datasetCaseQuery.value = '';
+}
+function selectDatasetVersion() {
+  selectedDatasetCaseId.value = activeDatasetVersion.value.cases[0]?.id || '';
+  datasetCaseQuery.value = '';
+}
+function cloneCases(cases: DatasetCase[]): DatasetCase[] {
+  return JSON.parse(JSON.stringify(cases)) as DatasetCase[];
+}
+function createDraft() {
+  const source = activeDatasetVersion.value;
+  const next = `v${Number(source.label.replace(/[^0-9.]/g, '')) + 0.1}`;
+  const draft: DatasetVersionState = {
+    id: `${source.collectionId}-${Date.now()}-draft`,
+    collectionId: source.collectionId,
+    label: `${next}-draft`,
+    status: '草稿',
+    hash: '—',
+    note: `基于 ${source.label} 创建的草稿`,
+    baseVersion: source.label,
+    cases: cloneCases(source.cases),
+  };
+  datasetVersions.value.unshift(draft);
+  selectedDatasetVersionId.value = draft.id;
+  selectedDatasetCaseId.value = draft.cases[0]?.id || '';
+  showToast(`已基于 ${source.label} 创建草稿。`);
+}
+function discardDraft() {
+  const draft = activeDatasetVersion.value;
+  datasetVersions.value = datasetVersions.value.filter((item) => item.id !== draft.id);
+  const fallback =
+    collectionVersions.value.find((item) => item.status === '已发布') ||
+    collectionVersions.value[0];
+  selectedDatasetVersionId.value = fallback.id;
+  selectedDatasetCaseId.value = fallback.cases[0]?.id || '';
+  showToast('草稿已丢弃，已回到最近发布版本。');
+}
+function publishDraft() {
+  const draft = activeDatasetVersion.value;
+  draft.status = '已发布';
+  draft.label = draft.label.replace('-draft', '');
+  draft.hash = 'b' + Math.random().toString(16).slice(2, 9);
+  draft.note = releaseNote.value.trim() || draft.note || '未填写发布说明';
+  releaseNote.value = '';
+  showToast(`${draft.label} 已发布，内容 Hash ${draft.hash} 已生成。`);
+}
+function moveCase(id: string, direction: number) {
+  const all = activeDatasetVersion.value.cases;
+  const index = all.findIndex((item) => item.id === id);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= all.length) return;
+  [all[index], all[target]] = [all[target], all[index]];
+}
+function copyCase(item: DatasetCase) {
+  const copy = cloneCases([item])[0];
+  copy.id = `${item.id}-COPY`;
+  copy.title = `${item.title}（副本）`;
+  activeDatasetVersion.value.cases.push(copy);
+  selectedDatasetCaseId.value = copy.id;
+  showToast('已复制 Case 到当前草稿。');
+}
+function deleteCase(id: string) {
+  const cases = activeDatasetVersion.value.cases;
+  const index = cases.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  cases.splice(index, 1);
+  selectedDatasetCaseId.value = cases[Math.max(0, index - 1)]?.id || '';
+  showToast('已从当前草稿删除 Case。');
+}
 onMounted(async () => {
   try {
-    const [, remoteTargets, remoteEvaluators] = await Promise.all([getEngineHealth(), listEvaluationTargets(), listEngineEvaluators()])
+    const [, remoteTargets, remoteEvaluators] = await Promise.all([
+      getEngineHealth(),
+      listEvaluationTargets(),
+      listEngineEvaluators(),
+    ]);
     if (remoteTargets.length) {
-      targets.value = remoteTargets
-      const defaultTarget = remoteTargets.find(item => item.type === 'Agent') || remoteTargets[0]
-      selectedTargetId.value = defaultTarget.id
-      generatorTargetId.value = defaultTarget.id
-      const remoteSkills = remoteTargets.filter(item => item.type === 'Skill')
-      abA.value.agentId = defaultTarget.id; abB.value.agentId = defaultTarget.id
+      targets.value = remoteTargets;
+      const defaultTarget = remoteTargets.find((item) => item.type === 'Agent') || remoteTargets[0];
+      selectedTargetId.value = defaultTarget.id;
+      generatorTargetId.value = defaultTarget.id;
+      const remoteSkills = remoteTargets.filter((item) => item.type === 'Skill');
+      abA.value.agentId = defaultTarget.id;
+      abB.value.agentId = defaultTarget.id;
       if (remoteSkills.length) {
-        const skillIds = remoteSkills.map(item => item.id)
-        const skillVersions = Object.fromEntries(remoteSkills.map(item => [item.id, item.version]))
-        abA.value.skillIds = [...skillIds]; abB.value.skillIds = [...skillIds]
-        abA.value.skillVersions = {...skillVersions}; abB.value.skillVersions = {...skillVersions}
+        const skillIds = remoteSkills.map((item) => item.id);
+        const skillVersions = Object.fromEntries(
+          remoteSkills.map((item) => [item.id, item.version]),
+        );
+        abA.value.skillIds = [...skillIds];
+        abB.value.skillIds = [...skillIds];
+        abA.value.skillVersions = { ...skillVersions };
+        abB.value.skillVersions = { ...skillVersions };
       }
     }
     if (remoteEvaluators.length) {
-      evaluatorItems.value = remoteEvaluators.map(item => ({
+      evaluatorItems.value = remoteEvaluators.map((item) => ({
         id: item.id,
         name: item.name,
         version: `v${item.version}`,
         kind: item.kind === 'rule' ? '规则' : item.kind === 'llm_judge' ? 'LLM' : '复合',
         coverage: `${item.dimension} · ${item.metric}${item.severity === 'blocking' ? ' · 阻断' : ''}`,
-        status: '已启用'
-      }))
-      selectedEvaluatorId.value = evaluatorItems.value[0].id
-      const evaluatorIds = evaluatorItems.value.slice(0, 4).map(item => item.id)
-      abA.value.evaluatorIds = [...evaluatorIds]
-      abB.value.evaluatorIds = [...evaluatorIds]
+        status: '已启用',
+      }));
+      selectedEvaluatorId.value = evaluatorItems.value[0].id;
+      const evaluatorIds = evaluatorItems.value.slice(0, 4).map((item) => item.id);
+      abA.value.evaluatorIds = [...evaluatorIds];
+      abB.value.evaluatorIds = [...evaluatorIds];
     }
-    engineOnline.value = true
-    engineMessage.value = `评测引擎已连接 · ${remoteTargets.length} 个评估对象`
+    engineOnline.value = true;
+    engineMessage.value = `评测引擎已连接 · ${remoteTargets.length} 个评估对象`;
   } catch {
-    engineOnline.value = false
-    engineMessage.value = '评测引擎未连接（当前仍可浏览本地演示数据）'
+    engineOnline.value = false;
+    engineMessage.value = '评测引擎未连接（当前仍可浏览本地演示数据）';
   }
-})
+});
 </script>

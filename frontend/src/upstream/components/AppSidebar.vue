@@ -1,24 +1,19 @@
 <script setup lang="ts">
-type Page = 'evaluate' | 'runs' | 'datasets'
+type Page = 'evaluate' | 'runs' | 'datasets';
 
 defineProps<{
-  page: Page
-  open: boolean
-}>()
+  page: Page;
+  open: boolean;
+}>();
 
 const emit = defineEmits<{
-  navigate: [page: Page]
-  close: []
-}>()
+  navigate: [page: Page];
+  close: [];
+}>();
 </script>
 
 <template>
-  <aside
-    id="app-navigation"
-    class="app-sidebar"
-    :class="{ open }"
-    aria-label="主导航"
-  >
+  <aside id="app-navigation" class="app-sidebar" :class="{ open }" aria-label="主导航">
     <div class="sidebar-brand">
       <button class="sidebar-home" aria-label="返回评估运行" @click="emit('navigate', 'evaluate')">
         <span class="brand-mark">AG</span>
@@ -33,7 +28,9 @@ const emit = defineEmits<{
         aria-label="关闭导航"
         data-testid="close-navigation"
         @click="emit('close')"
-      >×</button>
+      >
+        ×
+      </button>
     </div>
 
     <nav class="sidebar-nav">

@@ -1,6 +1,6 @@
 import {test,expect,type Page,type APIRequestContext} from '@playwright/test'
 import {mkdirSync} from 'node:fs'
-import {sameJson,equalsCondition} from '../src/revision/report-presentation'
+import {sameJson,equalsCondition} from '../src/views/evaluation/utils/report-presentation'
 
 const sourceId='ca7ebd14-832e-4b1e-9a63-56b4d376174b'
 const runId='result-ux-fixture'
