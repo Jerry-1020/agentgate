@@ -14,6 +14,12 @@ root = Path(__file__).resolve().parents[1]
 children = []
 logs = []
 
+
+def _probe(url):
+    # vite 4 的 html 中间件要求带 Accept 头，否则根路径返回 404。
+    request = urllib.request.Request(url, headers={"Accept": "text/html,application/json,*/*"})
+    urllib.request.urlopen(request, timeout=1).close()
+
 def shutdown(*_):
     for child in reversed(children):
         if child.poll() is None:
@@ -51,10 +57,10 @@ def main():
         if any(child.poll() is not None for child in children):
             raise RuntimeError("有服务启动失败，请检查 runtime 中的日志。")
         try:
-            urllib.request.urlopen("http://127.0.0.1:8097/health", timeout=1).close()
-            urllib.request.urlopen("http://127.0.0.1:5197/", timeout=1).close()
+            _probe("http://127.0.0.1:8097/health")
+            _probe("http://127.0.0.1:5197/")
             if options.with_bank_agents:
-                urllib.request.urlopen("http://127.0.0.1:8107/health", timeout=1).close()
+                _probe("http://127.0.0.1:8107/health")
             break
         except (OSError, ValueError):
             time.sleep(1)

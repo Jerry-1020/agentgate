@@ -1,0 +1,756 @@
+{
+  "checkedAt": "2026-09-20",
+  "command": "npm audit --json",
+  "scope": "frontend installed dependency tree (production + development)",
+  "counts": {
+    "info": 0,
+    "low": 2,
+    "moderate": 19,
+    "high": 13,
+    "critical": 2,
+    "total": 36
+  },
+  "packages": {
+    "@logicflow/core": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "<=0.2.7 || >=2.0.0-beta.0",
+      "via": [
+        "uuid"
+      ],
+      "fixAvailable": {
+        "name": "@logicflow/extension",
+        "version": "1.2.28",
+        "isSemVerMajor": true
+      }
+    },
+    "@logicflow/engine": {
+      "severity": "critical",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        "@nyariv/sandboxjs",
+        "uuid"
+      ],
+      "fixAvailable": false
+    },
+    "@logicflow/extension": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "<=0.1.0 || >=2.0.0-beta.0",
+      "via": [
+        "@logicflow/core"
+      ],
+      "fixAvailable": {
+        "name": "@logicflow/extension",
+        "version": "1.2.28",
+        "isSemVerMajor": true
+      }
+    },
+    "@logicflow/layout": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        "@logicflow/core"
+      ],
+      "fixAvailable": false
+    },
+    "@logicflow/vue-node-registry": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        "@logicflow/core"
+      ],
+      "fixAvailable": false
+    },
+    "@nyariv/sandboxjs": {
+      "severity": "critical",
+      "isDirect": false,
+      "range": "<=0.9.5",
+      "via": [
+        {
+          "title": "SandboxJS has a sandbox escape via Function.caller leakage of internal call op",
+          "url": "https://github.com/advisories/GHSA-g8f2-4f4f-5jqw",
+          "range": "<=0.9.5"
+        }
+      ],
+      "fixAvailable": false
+    },
+    "@vue/language-core": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "<=2.0.28",
+      "via": [
+        "vue-template-compiler"
+      ],
+      "fixAvailable": {
+        "name": "vue-tsc",
+        "version": "3.3.11",
+        "isSemVerMajor": true
+      }
+    },
+    "axios": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "<=0.32.0",
+      "via": [
+        {
+          "title": "axios Requests Vulnerable To Possible SSRF and Credential Leakage via Absolute URL",
+          "url": "https://github.com/advisories/GHSA-jr5f-v2jv-69x6",
+          "range": "<0.30.0"
+        },
+        {
+          "title": "Axios is vulnerable to DoS attack through lack of data size check",
+          "url": "https://github.com/advisories/GHSA-4hjh-wcwx-xvwj",
+          "range": ">=0.28.0 <0.30.2"
+        },
+        {
+          "title": "Axios has a NO_PROXY Hostname Normalization Bypass that Leads to SSRF",
+          "url": "https://github.com/advisories/GHSA-3p68-rc4w-qgx5",
+          "range": "<0.31.0"
+        },
+        {
+          "title": "Axios: Authentication Bypass via Prototype Pollution Gadget in `validateStatus` Merge Strategy",
+          "url": "https://github.com/advisories/GHSA-w9j2-pvgh-6h63",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: Incomplete Fix for CVE-2025-62718 — NO_PROXY Protection Bypassed via RFC 1122 Loopback Subnet (127.0.0.0/8) in Axios 1.15.0",
+          "url": "https://github.com/advisories/GHSA-pmwg-cvhr-8vh7",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: Null Byte Injection via Reverse-Encoding in AxiosURLSearchParams",
+          "url": "https://github.com/advisories/GHSA-xhjh-pmcv-23jw",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: no_proxy bypass via IP alias allows SSRF",
+          "url": "https://github.com/advisories/GHSA-m7pr-hjqh-92cm",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios' HTTP adapter-streamed uploads bypass maxBodyLength when maxRedirects: 0",
+          "url": "https://github.com/advisories/GHSA-5c9x-8gcm-mpgx",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: HTTP adapter streamed responses bypass maxContentLength",
+          "url": "https://github.com/advisories/GHSA-vf2m-468p-8v99",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: Prototype Pollution Gadgets - Response Tampering, Data Exfiltration, and Request Hijacking",
+          "url": "https://github.com/advisories/GHSA-pf86-5x62-jrwf",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: Header Injection via Prototype Pollution",
+          "url": "https://github.com/advisories/GHSA-6chq-wfr3-2hj9",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: XSRF Token Cross-Origin Leakage via Prototype Pollution Gadget in `withXSRFToken` Boolean Coercion",
+          "url": "https://github.com/advisories/GHSA-xx6v-rp6x-q39c",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios is Vulnerable to Denial of Service via __proto__ Key in mergeConfig",
+          "url": "https://github.com/advisories/GHSA-43fc-jf86-j433",
+          "range": "<=0.30.2"
+        },
+        {
+          "title": "Axios has Unrestricted Cloud Metadata Exfiltration via Header Injection Chain",
+          "url": "https://github.com/advisories/GHSA-fvcv-3m26-pcqx",
+          "range": "<0.31.0"
+        },
+        {
+          "title": "Axios: unbounded recursion in toFormData causes DoS via deeply nested request data",
+          "url": "https://github.com/advisories/GHSA-62hf-57xw-28j9",
+          "range": "<=0.31.0"
+        },
+        {
+          "title": "Axios: Regular Expression Denial of Service (ReDoS) via Cookie Name Injection",
+          "url": "https://github.com/advisories/GHSA-hfxv-24rg-xrqf",
+          "range": "<=0.31.1"
+        },
+        {
+          "title": "Axios: Proxy-Authorization Credential Leak to Origin Server Across HTTP-to-HTTPS Redirect in Axios Node.js HTTP Adapter",
+          "url": "https://github.com/advisories/GHSA-p92q-9vqr-4j8v",
+          "range": "<=0.31.1"
+        },
+        {
+          "title": "Axios: Proxy-Authorization header leaks to redirect target when proxy is re-evaluated to direct connection",
+          "url": "https://github.com/advisories/GHSA-j5f8-grm9-p9fc",
+          "range": "<=0.31.1"
+        },
+        {
+          "title": "axios Vulnerable to Credential Theft and Response Hijacking via Prototype Pollution Gadget in Config Merge",
+          "url": "https://github.com/advisories/GHSA-3g43-6gmg-66jw",
+          "range": ">=0.19.0 <0.31.1"
+        },
+        {
+          "title": "axios has DoS & Header Injection via Prototype Pollution Read-Side Gadgets in axios merge functions",
+          "url": "https://github.com/advisories/GHSA-898c-q2cr-xwhg",
+          "range": "<=0.31.1"
+        },
+        {
+          "title": "axios's shouldBypassProxy does not recognize IPv4-mapped IPv6 addresses, allowing NO_PROXY bypass (incomplete fix for CVE-2025-62718)",
+          "url": "https://github.com/advisories/GHSA-pjwm-pj3p-43mv",
+          "range": "<=0.31.1"
+        },
+        {
+          "title": "Axios: Prototype pollution gadgets can alter axios request construction",
+          "url": "https://github.com/advisories/GHSA-mmx7-hfxf-jppx",
+          "range": "<0.33.0"
+        },
+        {
+          "title": "Axios: Deep formToJSON Key Recursion Can Cause Denial of Service",
+          "url": "https://github.com/advisories/GHSA-pmv8-rq9r-6j72",
+          "range": ">=0.28.0 <0.33.0"
+        },
+        {
+          "title": "Axios: Nested axios option objects can consume polluted prototype values",
+          "url": "https://github.com/advisories/GHSA-7q8q-rj6j-mhjq",
+          "range": ">=0.8.0 <0.33.0"
+        },
+        {
+          "title": "Axios: Excessive recursion in formDataToJSON can cause denial of service",
+          "url": "https://github.com/advisories/GHSA-42h9-826w-cgv3",
+          "range": ">=0.28.0 <0.33.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "axios",
+        "version": "1.20.0",
+        "isSemVerMajor": true
+      }
+    },
+    "braces": {
+      "severity": "high",
+      "isDirect": false,
+      "range": "<3.0.3",
+      "via": [
+        {
+          "title": "Uncontrolled resource consumption in braces",
+          "url": "https://github.com/advisories/GHSA-grv7-fg5c-xmjg",
+          "range": "<3.0.3"
+        }
+      ],
+      "fixAvailable": {
+        "name": "lint-staged",
+        "version": "17.5.1",
+        "isSemVerMajor": true
+      }
+    },
+    "decode-uri-component": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "<=0.4.2",
+      "via": [
+        {
+          "title": "decode-uri-component: Denial of service via exponential decoding of malformed percent-encoded input",
+          "url": "https://github.com/advisories/GHSA-vcc3-ghjq-m6fr",
+          "range": "<=0.4.2"
+        }
+      ],
+      "fixAvailable": true
+    },
+    "echarts": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "<6.1.0",
+      "via": [
+        {
+          "title": "Apache ECharts has a cross-site scripting (XSS) vulnerability",
+          "url": "https://github.com/advisories/GHSA-fgmj-fm8m-jvvx",
+          "range": "<6.1.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "echarts",
+        "version": "6.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "element-plus": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "<=2.11.0",
+      "via": [
+        {
+          "title": "Element Plus Link component (el-link) implements insufficient input validation for the href attribute",
+          "url": "https://github.com/advisories/GHSA-5m5x-9j46-h678",
+          "range": "<=2.11.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "element-plus",
+        "version": "2.14.6",
+        "isSemVerMajor": false
+      }
+    },
+    "esbuild": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "<=0.24.2",
+      "via": [
+        {
+          "title": "esbuild enables any website to send any requests to the development server and read the response",
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "range": "<=0.24.2"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-mock",
+        "version": "3.0.2",
+        "isSemVerMajor": true
+      }
+    },
+    "file-type": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "13.0.0 - 21.3.0",
+      "via": [
+        {
+          "title": "file-type affected by infinite loop in ASF parser on malformed input with zero-size sub-header",
+          "url": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+          "range": ">=13.0.0 <21.3.1"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vue3-beautiful-chat",
+        "version": "3.3.1",
+        "isSemVerMajor": true
+      }
+    },
+    "image-size": {
+      "severity": "high",
+      "isDirect": false,
+      "range": "<=2.0.2",
+      "via": [
+        {
+          "title": "image-size: ICNS parser allows denial of service through an infinite loop",
+          "url": "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+          "range": "<=2.0.2"
+        },
+        {
+          "title": "image-size: JXL and HEIF parsers allow denial of service through infinite loops",
+          "url": "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq",
+          "range": "<=2.0.2"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-svg-icons",
+        "version": "0.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "imagemin": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": ">=8.0.0",
+      "via": [
+        "file-type"
+      ],
+      "fixAvailable": {
+        "name": "vue3-beautiful-chat",
+        "version": "3.3.1",
+        "isSemVerMajor": true
+      }
+    },
+    "js-cookie": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "<=3.0.5",
+      "via": [
+        {
+          "title": "JavaScript Cookie: Per-instance prototype hijack in assign() enables cookie-attribute injection",
+          "url": "https://github.com/advisories/GHSA-qjx8-664m-686j",
+          "range": "<=3.0.5"
+        }
+      ],
+      "fixAvailable": {
+        "name": "js-cookie",
+        "version": "3.0.8",
+        "isSemVerMajor": true
+      }
+    },
+    "lint-staged": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "7.0.0 - 8.2.1 || 13.3.0 - 15.4.1 || 16.2.0",
+      "via": [
+        "micromatch",
+        "yaml"
+      ],
+      "fixAvailable": {
+        "name": "lint-staged",
+        "version": "17.5.1",
+        "isSemVerMajor": true
+      }
+    },
+    "micromatch": {
+      "severity": "high",
+      "isDirect": false,
+      "range": "<=4.0.7",
+      "via": [
+        {
+          "title": "Regular Expression Denial of Service (ReDoS) in micromatch",
+          "url": "https://github.com/advisories/GHSA-952p-6rrq-rcjv",
+          "range": "<4.0.8"
+        },
+        "braces"
+      ],
+      "fixAvailable": {
+        "name": "lint-staged",
+        "version": "17.5.1",
+        "isSemVerMajor": true
+      }
+    },
+    "mockjs": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        {
+          "title": "mockjs vulnerable to Prototype Pollution via the Util.extend function",
+          "url": "https://github.com/advisories/GHSA-mh8j-9jvh-gjf6",
+          "range": "<=1.1.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-mock",
+        "version": "3.0.2",
+        "isSemVerMajor": true
+      }
+    },
+    "path-to-regexp": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "2.0.0 - 3.2.0",
+      "via": [
+        {
+          "title": "path-to-regexp outputs backtracking regular expressions",
+          "url": "https://github.com/advisories/GHSA-9wv6-86v2-598j",
+          "range": ">=2.0.0 <3.3.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "path-to-regexp",
+        "version": "3.3.0",
+        "isSemVerMajor": false
+      }
+    },
+    "postcss": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "<=8.5.22",
+      "via": [
+        {
+          "title": "Regular Expression Denial of Service in postcss",
+          "url": "https://github.com/advisories/GHSA-566m-qj78-rww5",
+          "range": "<7.0.36"
+        },
+        {
+          "title": "PostCSS line return parsing error",
+          "url": "https://github.com/advisories/GHSA-7fh5-64p2-3v2j",
+          "range": "<8.4.31"
+        },
+        {
+          "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+          "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+          "range": "<8.5.10"
+        },
+        {
+          "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+          "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+          "range": "<=8.5.11"
+        },
+        {
+          "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+          "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+          "range": "<=8.5.22"
+        },
+        {
+          "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+          "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+          "range": "<=8.5.17"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-svg-icons",
+        "version": "0.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "send": {
+      "severity": "low",
+      "isDirect": false,
+      "range": "<0.19.0",
+      "via": [
+        {
+          "title": "send vulnerable to template injection that can lead to XSS",
+          "url": "https://github.com/advisories/GHSA-m6fv-jmcg-4jfg",
+          "range": "<0.19.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "serve-static",
+        "version": "1.16.3",
+        "isSemVerMajor": false
+      }
+    },
+    "serve-static": {
+      "severity": "low",
+      "isDirect": true,
+      "range": "<=1.16.0",
+      "via": [
+        {
+          "title": "serve-static vulnerable to template injection that can lead to XSS",
+          "url": "https://github.com/advisories/GHSA-cm22-4g7w-348p",
+          "range": "<1.16.0"
+        },
+        "send"
+      ],
+      "fixAvailable": {
+        "name": "serve-static",
+        "version": "1.16.3",
+        "isSemVerMajor": false
+      }
+    },
+    "source-map-resolve": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": ">=0.5.1",
+      "via": [
+        "decode-uri-component"
+      ],
+      "fixAvailable": true
+    },
+    "svg-baker": {
+      "severity": "high",
+      "isDirect": false,
+      "range": "*",
+      "via": [
+        "image-size",
+        "micromatch",
+        "postcss"
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-svg-icons",
+        "version": "0.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "svgo": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "1.0.0 - 2.8.3",
+      "via": [
+        {
+          "title": "SVGO DoS through entity expansion in DOCTYPE (Billion Laughs)",
+          "url": "https://github.com/advisories/GHSA-xpqw-6gx7-v673",
+          "range": ">=2.1.0 <2.8.1"
+        },
+        {
+          "title": "SVGO removeScripts plugin leaves some executable scripts intact",
+          "url": "https://github.com/advisories/GHSA-2p49-hgcm-8545",
+          "range": ">=1.0.0 <2.8.3"
+        },
+        {
+          "title": "SVGO: removeScripts allows executable links through namespace and control-character bypasses",
+          "url": "https://github.com/advisories/GHSA-w27v-7q3p-w38r",
+          "range": ">=1.0.0 <2.8.4"
+        },
+        {
+          "title": "SVGO: removeScripts incompletely sanitizes executable HTML in SVG foreignObject elements",
+          "url": "https://github.com/advisories/GHSA-4vpr-x523-8j87",
+          "range": ">=1.0.0 <2.8.4"
+        }
+      ],
+      "fixAvailable": {
+        "name": "svgo",
+        "version": "2.8.4",
+        "isSemVerMajor": false
+      }
+    },
+    "uuid": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "<11.1.1",
+      "via": [
+        {
+          "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+          "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+          "range": "<11.1.1"
+        }
+      ],
+      "fixAvailable": {
+        "name": "@logicflow/extension",
+        "version": "1.2.28",
+        "isSemVerMajor": true
+      }
+    },
+    "vite": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "<=6.4.2",
+      "via": [
+        {
+          "title": "Vite's server.fs.deny bypassed with /. for files under project root",
+          "url": "https://github.com/advisories/GHSA-859w-5945-r5v3",
+          "range": "<=4.5.13"
+        },
+        {
+          "title": "Vite middleware may serve files starting with the same name with the public directory",
+          "url": "https://github.com/advisories/GHSA-g4jq-h2w9-997c",
+          "range": "<=5.4.19"
+        },
+        {
+          "title": "Vite's `server.fs` settings were not applied to HTML files",
+          "url": "https://github.com/advisories/GHSA-jqfw-vq24-v9c3",
+          "range": "<=5.4.19"
+        },
+        {
+          "title": "vite allows server.fs.deny bypass via backslash on Windows",
+          "url": "https://github.com/advisories/GHSA-93m4-6634-74q7",
+          "range": ">=4.5.3 <5.0.0"
+        },
+        {
+          "title": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+          "url": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+          "range": "<=6.4.1"
+        },
+        {
+          "title": "launch-editor vulnerable to command injection via the crafted request on Windows",
+          "url": "https://github.com/advisories/GHSA-c27g-q93r-2cwf",
+          "range": "<=5.4.8"
+        },
+        {
+          "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+          "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+          "range": "<=6.4.2"
+        },
+        {
+          "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+          "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+          "range": "<=6.4.2"
+        },
+        "esbuild"
+      ],
+      "fixAvailable": {
+        "name": "vite",
+        "version": "4.5.14",
+        "isSemVerMajor": false
+      }
+    },
+    "vite-plugin-mock": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        "esbuild",
+        "mockjs"
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-mock",
+        "version": "3.0.2",
+        "isSemVerMajor": true
+      }
+    },
+    "vite-plugin-svg-icons": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": ">=0.1.1",
+      "via": [
+        "svg-baker"
+      ],
+      "fixAvailable": {
+        "name": "vite-plugin-svg-icons",
+        "version": "0.1.0",
+        "isSemVerMajor": true
+      }
+    },
+    "vue-template-compiler": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": ">=2.0.0",
+      "via": [
+        {
+          "title": "vue-template-compiler vulnerable to client-side Cross-Site Scripting (XSS)",
+          "url": "https://github.com/advisories/GHSA-g3ch-rx76-35fx",
+          "range": ">=2.0.0 <3.0.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vue-tsc",
+        "version": "3.3.11",
+        "isSemVerMajor": true
+      }
+    },
+    "vue-tsc": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": "1.7.0-alpha.0 - 2.0.28",
+      "via": [
+        "@vue/language-core"
+      ],
+      "fixAvailable": {
+        "name": "vue-tsc",
+        "version": "3.3.11",
+        "isSemVerMajor": true
+      }
+    },
+    "vue3-beautiful-chat": {
+      "severity": "moderate",
+      "isDirect": true,
+      "range": ">=3.3.4",
+      "via": [
+        "imagemin"
+      ],
+      "fixAvailable": {
+        "name": "vue3-beautiful-chat",
+        "version": "3.3.1",
+        "isSemVerMajor": true
+      }
+    },
+    "xlsx": {
+      "severity": "high",
+      "isDirect": true,
+      "range": "*",
+      "via": [
+        {
+          "title": "Prototype Pollution in sheetJS",
+          "url": "https://github.com/advisories/GHSA-4r6h-8v6p-xvw6",
+          "range": "<0.19.3"
+        },
+        {
+          "title": "SheetJS Regular Expression Denial of Service (ReDoS)",
+          "url": "https://github.com/advisories/GHSA-5pgg-2g8v-p4x9",
+          "range": "<0.20.2"
+        }
+      ],
+      "fixAvailable": false
+    },
+    "yaml": {
+      "severity": "moderate",
+      "isDirect": false,
+      "range": "2.0.0 - 2.8.2",
+      "via": [
+        {
+          "title": "yaml is vulnerable to Stack Overflow via deeply nested YAML collections",
+          "url": "https://github.com/advisories/GHSA-48c2-rrv3-qjmp",
+          "range": ">=2.0.0 <2.8.3"
+        }
+      ],
+      "fixAvailable": {
+        "name": "lint-staged",
+        "version": "17.5.1",
+        "isSemVerMajor": true
+      }
+    }
+  }
+}
