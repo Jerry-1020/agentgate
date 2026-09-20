@@ -3,24 +3,15 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from contextlib import closing
 
 from celery import Celery
 from celery.app.task import Task
 
-from agentgate.application import RunManagement, RunScheduling
-from agentgate.application.evaluator_management import (
-    build_default_evaluator_management,
-)
-from agentgate.domain import RunStatus
-from agentgate.integrations.model_providers.environment import (
-    load_judge_model_from_environment,
-)
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
-from agentgate.integrations.targets.local_bank import LocalBankAdapter, resolve_local_bank_trace
-from agentgate.storage.sqlite import SQLiteRepository
-
+from agentgate.application import RunScheduling
+from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
+from agentgate.integrations.job_dispatchers.execution import execute_persisted_run
+from agentgate.storage.configuration import create_repository, load_database_config
 
 TASK_NAME = "agentgate.execute_evaluation_run"
 SCHEDULER_TASK_NAME = "agentgate.dispatch_due_evaluation_runs"
@@ -95,58 +86,7 @@ celery_app = create_celery_app()
 def execute_evaluation_run(run_id: str) -> str:
     """Load one persisted Run and execute it through the shared application boundary."""
 
-    if not isinstance(run_id, str) or not run_id.strip():
-        raise ValueError("run_id must not be blank")
-    repository = SQLiteRepository(
-        Path(os.getenv("AGENTGATE_DB", "agentgate.db"))
-    )
-    run = repository.get_run(run_id)
-    if run is None:
-        raise ValueError(f"unknown EvaluationRun: {run_id}")
-    if run.status is not RunStatus.PENDING:
-        return run.status.value
-    if run.manifest.target.adapter_type not in {DemoLoanTargetAdapter.adapter_type, LocalBankAdapter.adapter_type}:
-        raise ValueError(
-            "Celery worker does not support the Run Target adapter type"
-        )
-
-    configured_judge = load_judge_model_from_environment()
-    capture: InMemoryTraceCapture | None = None
-    try:
-        evaluator_management = (
-            build_default_evaluator_management(repository)
-            if configured_judge is None
-            else build_default_evaluator_management(
-                repository,
-                judge_client=configured_judge.client,
-                judge_model_id=configured_judge.model_id,
-                judge_credential_ref=configured_judge.credential_ref,
-            )
-        )
-        if run.manifest.target.adapter_type == LocalBankAdapter.adapter_type:
-            if run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1 or run.case_max_parallel not in (None, 1):
-                raise ValueError("local bank execution requires no retries and serial cases")
-            completed = RunManagement(repository, evaluator_management).execute_run(
-                run.id, LocalBankAdapter(), resolve_local_bank_trace,
-            )
-            return completed.status.value
-        capture = InMemoryTraceCapture()
-        completed = RunManagement(
-            repository,
-            evaluator_management,
-        ).execute_run(
-            run.id,
-            DemoLoanTargetAdapter(capture),
-            capture.resolve,
-        )
-    finally:
-        try:
-            if capture is not None:
-                capture.shutdown()
-        finally:
-            if configured_judge is not None:
-                configured_judge.client.close()
-    return completed.status.value
+    return execute_persisted_run(run_id)
 
 
 @celery_app.task(
@@ -157,13 +97,10 @@ def execute_evaluation_run(run_id: str) -> str:
 def dispatch_due_evaluation_runs() -> int:
     """Release due scheduled Runs and submit them to the execution queue."""
 
-    repository = SQLiteRepository(
-        Path(os.getenv("AGENTGATE_DB", "agentgate.db"))
-    )
-    dispatched = RunScheduling(repository).dispatch_due_runs(
-        CeleryJobDispatcher()
-    )
-    return len(dispatched)
+    dispatcher = create_dispatcher()
+    with closing(create_repository(load_database_config())) as repository:
+        dispatched = RunScheduling(repository).dispatch_due_runs(dispatcher)
+        return len(dispatched)
 
 
 class CeleryJobDispatcher:

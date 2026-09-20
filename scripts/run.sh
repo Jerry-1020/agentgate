@@ -2,12 +2,11 @@
 set -euo pipefail
 revision_root="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$revision_root/runtime"
-export AGENTGATE_DB="$revision_root/runtime/agentgate.db"
 export AGENTGATE_REDIS_URL="redis://127.0.0.1:6397/0"
 export PYTHONPATH="$revision_root/src"
 # Private per-user model configuration is deliberately outside the project/package.
 case "${1:-}" in
-  api|worker|scheduler)
+  api|worker|scheduler|seed|verify-traces|migrate|execute-run|dispatch-due|dispatcher-type)
     model_env_file="${AGENTGATE_MODEL_ENV_FILE:-$revision_root/.env}"
     if [[ -f "$model_env_file" ]]; then
       set -a
@@ -16,12 +15,26 @@ case "${1:-}" in
     fi
     ;;
 esac
+export AGENTGATE_DB="${AGENTGATE_DB-$revision_root/runtime/agentgate.db}"
 case "${1:-}" in
+  dispatcher-type) cd "$revision_root"; exec .venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())' ;;
+  execute-run) cd "$revision_root"; shift; exec .venv/bin/python script/bjs/run_evaluation.py "$@" ;;
+  dispatch-due) cd "$revision_root"; shift; exec .venv/bin/python scripts/dispatch-scheduled-runs.py --once "$@" ;;
+  seed) cd "$revision_root"; exec .venv/bin/python scripts/seed-bank-agents.py ;;
+  verify-traces) cd "$revision_root"; shift; exec .venv/bin/python scripts/verify-bank-traces.py "$@" ;;
+  migrate) cd "$revision_root"; exec .venv/bin/alembic -c alembic.ini upgrade head ;;
   redis) exec redis-server --bind 127.0.0.1 --port 6397 --dir "$revision_root/runtime" --save '' --appendonly no ;;
   api) cd "$revision_root"; exec .venv/bin/python -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8097 ;;
   worker) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO ;;
-  scheduler) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --queues=agentgate.scheduler --beat --schedule="$revision_root/runtime/scheduler-state" --hostname=unified-tasks-scheduler-20260915@%h --loglevel=INFO ;;
+  scheduler)
+    cd "$revision_root"
+    dispatcher_type="$(.venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())')"
+    if [[ "$dispatcher_type" == bjs ]]; then
+      exec .venv/bin/python scripts/dispatch-scheduled-runs.py
+    fi
+    exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --queues=agentgate.scheduler --beat --schedule="$revision_root/runtime/scheduler-state" --hostname=unified-tasks-scheduler-20260915@%h --loglevel=INFO
+    ;;
   web) cd "$revision_root/frontend"; exec npm run dev ;;
   bank-agents) cd "$revision_root/tested-agents"; exec .venv/bin/python run.py --model-env "${AGENTGATE_MODEL_ENV_FILE:-$revision_root/.env}" --use-agentgate-model ;;
-  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web|bank-agents}\n'; exit 2 ;;
+  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web|bank-agents|seed|verify-traces|migrate|execute-run|dispatch-due|dispatcher-type}\n'; exit 2 ;;
 esac
