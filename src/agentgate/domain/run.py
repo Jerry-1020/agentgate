@@ -157,8 +157,8 @@ class EvaluationRun(DomainModel):
     user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
     user_id: str = ""  # 用户 ID（创建者标识）
     user_name: str = ""  # 用户姓名（创建者显示名）
-    api_key: str | None = None  # 模型 API Key（明文，透传给执行引擎调用被测模型）
-    case_max_parallel: int | None = None  # 单个任务内 case 最大并行数
+    api_key: None = None  # Per-run raw credentials are not supported by the executor.
+    case_max_parallel: int | None = Field(default=None, ge=1, le=32, strict=True)
 
     @field_validator("id")
     @classmethod

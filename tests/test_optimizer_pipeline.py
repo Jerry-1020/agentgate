@@ -55,7 +55,7 @@ class RecordingModelClient:
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        reference_line = request.user_prompt.splitlines()[2]
+        reference_line = request.user_prompt.split("reference_ids:\n", 1)[1].splitlines()[0]
         references = json.loads(reference_line)
         return JudgeResponse(
             text=json.dumps(
@@ -260,7 +260,7 @@ def test_composes_llm_report_with_manifest_provenance() -> None:
     assert report.dataset_id == completed.manifest.dataset.dataset_id
     assert report.dataset_version == 1
     assert report.dataset_content_sha256 == completed.manifest.dataset.content_sha256
-    assert report.analyzer_version == "2"
+    assert report.analyzer_version == "3"
     assert report.failed_result_count == 1
     assert len(report.clusters) == 1
     assert report.confusion_matrix.eligible_count == 1

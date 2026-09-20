@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trace-sdk"
+version = "0.1.0"
+description = "Trace 全链路跟踪 SDK（零侵入采集 Agent 事件）"
+requires-python = ">=3.10"
+dependencies = [
+    "redis>=5.0",
+    "kafka-python>=2.0.2",
+    "langchain>=1.0",
+    "langchain-core>=1.0",
+    "asyncpg>=0.29",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

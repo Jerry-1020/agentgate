@@ -139,8 +139,15 @@ def create_ab_runs(
         "gate_spec": gate_spec,
         "timeout_seconds": timeout_seconds,
     }
-    baseline_run = run_management.create_run(baseline_target, **run_arguments)
-    candidate_run = run_management.create_run(candidate_target, **run_arguments)
+    baseline_run = run_management.create_run(baseline_target, persist=False, **run_arguments)
+    candidate_run = EvaluationRun(manifest=type(baseline_run.manifest).model_validate({
+        **baseline_run.manifest.model_dump(exclude={"manifest_sha256"}), "target": candidate_target,
+    }))
+    from agentgate.domain.evaluation_task import EvaluationTask
+    run_management.repository.save_task_runs(
+        EvaluationTask(id=baseline_run.id, kind="ab", run_ids=(baseline_run.id, candidate_run.id)),
+        [baseline_run, candidate_run],
+    )
 
     dispatched_baseline = _dispatch_and_reload(
         run_management,

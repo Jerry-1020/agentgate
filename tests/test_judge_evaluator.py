@@ -375,3 +375,32 @@ def test_rejects_mismatched_client_provider_identity() -> None:
 
     with pytest.raises(ValueError, match="does not match provider_id"):
         AnswerQualityJudge({"different": model})
+
+
+def test_contract_correction_is_bounded_and_audited() -> None:
+    class CorrectingModel(RecordingModel):
+        def complete(self, request):
+            self.requests.append(request)
+            return JudgeResponse(text=verdict_json(score=90) if len(self.requests) == 1
+                                 else verdict_json(verdict="fail", score=0.2),
+                                 resolved_model_id="resolved-model")
+
+    model = CorrectingModel()
+    result = execute(model)
+    assert result.outcome == Outcome.FAIL
+    assert len(model.requests) == 2
+    assert model.requests[1].timeout_seconds <= model.requests[0].timeout_seconds
+    assert result.judge_record.request_sha256 == request_fingerprint(model.requests[1])
+    assert len(result.judge_record.previous_attempts) == 1
+    assert json.loads(result.judge_record.previous_attempts[0].raw_response)["score"] == 90
+    assert result.judge_record.previous_attempts[0].request_sha256 == request_fingerprint(model.requests[0])
+
+
+def test_repeated_invalid_contract_remains_error_with_both_responses() -> None:
+    model = RecordingModel(JudgeResponse(text=verdict_json(confidence=90),
+                                        resolved_model_id="resolved-model"))
+    result = execute(model)
+    assert result.outcome == Outcome.ERROR
+    assert len(model.requests) == 2
+    assert result.score is None
+    assert len(result.judge_record.previous_attempts) == 1

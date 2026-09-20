@@ -377,12 +377,15 @@ def test_propagates_model_failures_without_rule_fallback(error: Exception) -> No
 def test_normalizes_invalid_or_invented_model_output(response: str) -> None:
     responses = valid_responses()
     responses["cluster-1"] = response
+    client = RecordingModelClient(responses)
 
     with pytest.raises(
         JudgeModelInvalidResponse,
         match="invalid structured output",
     ):
-        infer(RecordingModelClient(responses))
+        infer(client)
+    assert len(client.requests) == 2
+    assert "final contract-correction attempt" in client.requests[-1].system_prompt
 
 
 def test_cluster_failure_returns_no_partial_hypothesis_tuple() -> None:

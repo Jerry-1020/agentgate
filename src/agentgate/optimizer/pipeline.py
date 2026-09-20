@@ -25,7 +25,7 @@ from .root_cause import infer_root_causes
 from .suggestions import build_optimization_suggestions
 
 
-ANALYZER_VERSION = "2"
+ANALYZER_VERSION = "3"
 
 
 def build_optimization_report(

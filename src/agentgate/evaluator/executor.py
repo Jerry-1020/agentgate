@@ -14,6 +14,7 @@ from agentgate.domain import (
     EvaluatorErrorDetail,
     EvaluatorKind,
     EvaluatorSpec,
+    JudgeRecord,
     Outcome,
     Trace,
 )
@@ -92,6 +93,8 @@ def _error_result(
             message=message,
             retryable=category == "timeout",
         ),
+        judge_record=(getattr(exc, "judge_record", None)
+                      if isinstance(getattr(exc, "judge_record", None), JudgeRecord) else None),
     )
 
 
@@ -342,7 +345,7 @@ def execute_evaluators(
                 return resolve(dependency_id)
 
             resolver: ResultResolver = resolve_dependency
-            if spec.kind == EvaluatorKind.LLM_JUDGE:
+            if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
                 case_evaluation = case_implementation.evaluate_case(
                     spec,
