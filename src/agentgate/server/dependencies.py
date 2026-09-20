@@ -273,9 +273,10 @@ def _select_dispatcher() -> JobDispatcher:
 
     dispatcher_type = os.getenv("AGENT_TASK_DISPATCHER_TYPE", "celery").lower()
     if dispatcher_type == "bjs":
-        raise RuntimeError("BJS dispatcher is not implemented; use AGENT_TASK_DISPATCHER_TYPE=celery")
-    if dispatcher_type != "celery":
-        raise ValueError("unsupported AGENT_TASK_DISPATCHER_TYPE")
+        from agentgate.integrations.job_dispatchers.bjs_job_dispatcher import (
+            BjsJobDispatcher,
+        )
+        return BjsJobDispatcher()  # type: ignore[return-value]
     return CeleryJobDispatcher()
 
 
