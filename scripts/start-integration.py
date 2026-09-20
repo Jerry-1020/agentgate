@@ -39,13 +39,25 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--with-bank-agents', action='store_true', help='also supervise the independent tested-Agent service on 8107')
     options = parser.parse_args()
-    for port in ((5197, 8097, 6397, 8107) if options.with_bank_agents else (5197, 8097, 6397)):
+    dispatcher_type = subprocess.run(
+        ["bash", str(root / "scripts/run.sh"), "dispatcher-type"],
+        cwd=root, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    if dispatcher_type not in {"bjs", "celery"}:
+        raise ValueError("Unexpected dispatcher type from scripts/run.sh")
+    services = ("api", "scheduler", "web") if dispatcher_type == "bjs" else (
+        "redis", "api", "worker", "scheduler", "web"
+    )
+    ports = (5197, 8097) if dispatcher_type == "bjs" else (5197, 8097, 6397)
+    if options.with_bank_agents:
+        services = ("bank-agents", *services)
+        ports = (*ports, 8107)
+    for port in ports:
         with socket.socket() as probe:
             if probe.connect_ex(("127.0.0.1", port)) == 0:
                 raise RuntimeError(f"端口 {port} 已被占用。不会停止已有服务；如本副本已启动，请访问 http://127.0.0.1:5197/")
     runtime = root / "runtime"
     runtime.mkdir(exist_ok=True)
-    services = ("bank-agents", "redis", "api", "worker", "scheduler", "web") if options.with_bank_agents else ("redis", "api", "worker", "scheduler", "web")
     for name in services:
         log = (runtime / (name + ".log")).open("a")
         logs.append(log)
@@ -67,8 +79,7 @@ def main():
     else:
         raise RuntimeError("服务启动超时，请检查 runtime 日志。")
     if options.with_bank_agents:
-        subprocess.run([str(root / ".venv/bin/python"),
-                        str(root / "scripts/seed-bank-agents.py")], cwd=root, check=True)
+        subprocess.run(["bash", str(root / "scripts/run.sh"), "seed"], cwd=root, check=True)
     print("已启动：http://127.0.0.1:5197/ ；按 Ctrl+C 停止本次启动的服务。", flush=True)
     webbrowser.open("http://127.0.0.1:5197/")
     while True:

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.domain import Case, CaseTurn, EvaluationRun
 from agentgate.server.app import create_app
-from agentgate.server.dependencies import _select_dispatcher
+from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.server.user_context import UserInfo, get_user_info, set_user_info, reset_user_info
 from agentgate.storage.sqlite import SQLiteRepository
 
@@ -100,11 +100,11 @@ def test_unsupported_raw_model_key_is_not_persisted(tmp_path):
         assert app.state.dependencies.repository.list_runs(user_team_id="") == []
 
 
-@pytest.mark.parametrize("kind", ["bjs", "typo"])
-def test_nonfunctional_dispatcher_is_rejected(monkeypatch, kind):
+@pytest.mark.parametrize("kind", ["typo", "", " "])
+def test_unknown_dispatcher_is_rejected(monkeypatch, kind):
     monkeypatch.setenv("AGENT_TASK_DISPATCHER_TYPE", kind)
     with pytest.raises((RuntimeError, ValueError)):
-        _select_dispatcher()
+        create_dispatcher()
 
 
 @pytest.mark.parametrize("parallel", [0, 33, True, 1.5])

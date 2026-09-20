@@ -50,7 +50,7 @@ from agentgate.integrations.credentials.environment import (
     load_api_key_encryptor,
 )
 from agentgate.integrations.job_dispatchers import JobDispatcher
-from agentgate.integrations.job_dispatchers.celery import CeleryJobDispatcher
+from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.integrations.model_providers.environment import (
     load_judge_model_from_environment,
 )
@@ -63,14 +63,15 @@ from agentgate.integrations.observability import (
 )
 from agentgate.integrations.targets import DemoLoanTargetAdapter
 from agentgate.skill_analysis import analyze_skill_relationships
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.configuration import SQLiteConfig, create_repository, load_database_config
+from agentgate.storage.repository import AgentGateRepository
 
 
 @dataclass(slots=True)
 class ServerDependencies:
     """Explicit application and infrastructure dependencies for one FastAPI app."""
 
-    repository: SQLiteRepository
+    repository: AgentGateRepository
     datasets: DatasetManagement
     evaluators: EvaluatorManagement
     targets: TargetCatalog
@@ -93,8 +94,11 @@ class ServerDependencies:
 
         client = self._judge_client
         self._judge_client = None
-        if client is not None:
-            client.close()
+        try:
+            if client is not None:
+                client.close()
+        finally:
+            self.repository.close()
 
     def ingest_otlp_json(self, payload: dict[str, Any]) -> int:
         """Normalize and persist one external OTLP/HTTP JSON payload."""
@@ -268,17 +272,6 @@ def get_dependencies(request: Request) -> ServerDependencies:
     return dependencies
 
 
-def _select_dispatcher() -> JobDispatcher:
-    """Build the configured job dispatcher from the environment."""
-
-    dispatcher_type = os.getenv("AGENT_TASK_DISPATCHER_TYPE", "celery").lower()
-    if dispatcher_type == "bjs":
-        raise RuntimeError("BJS dispatcher is not implemented; use AGENT_TASK_DISPATCHER_TYPE=celery")
-    if dispatcher_type != "celery":
-        raise ValueError("unsupported AGENT_TASK_DISPATCHER_TYPE")
-    return CeleryJobDispatcher()
-
-
 def build_dependencies(
     database_path: str | Path | None = None,
     dispatcher: JobDispatcher | None = None,
@@ -286,20 +279,22 @@ def build_dependencies(
 ) -> ServerDependencies:
     """Build isolated dependencies for one AgentGate FastAPI application."""
 
-    path = database_path or os.getenv("AGENTGATE_DB", "agentgate.db")
-    repository = SQLiteRepository(path)
-    dataset_management = DatasetManagement(repository)
-    target_catalog = TargetCatalog(repository)
-    ensure_demo_target_descriptors(target_catalog)
-    ensure_demo_dataset(repository)
-    configured_api_key_encryptor = api_key_encryptor
-    if (
-        configured_api_key_encryptor is None
-        and API_KEY_ENCRYPTION_KEY_ENV in os.environ
-    ):
-        configured_api_key_encryptor = load_api_key_encryptor()
-    configured_judge = load_judge_model_from_environment()
+    database_config = load_database_config(database_path=database_path)
+    repository = create_repository(database_config)
+    configured_judge = None
     try:
+        dataset_management = DatasetManagement(repository)
+        target_catalog = TargetCatalog(repository)
+        if isinstance(database_config, SQLiteConfig):
+            ensure_demo_target_descriptors(target_catalog)
+            ensure_demo_dataset(repository)
+        configured_api_key_encryptor = api_key_encryptor
+        if (
+            configured_api_key_encryptor is None
+            and API_KEY_ENCRYPTION_KEY_ENV in os.environ
+        ):
+            configured_api_key_encryptor = load_api_key_encryptor()
+        configured_judge = load_judge_model_from_environment()
         evaluator_management = (
             build_default_evaluator_management(repository)
             if configured_judge is None
@@ -350,13 +345,16 @@ def build_dependencies(
                 if configured_api_key_encryptor is not None
                 else None
             ),
-            dispatcher=dispatcher or _select_dispatcher(),
+            dispatcher=dispatcher or create_dispatcher(),
             demo_state={},
             _judge_client=(
                 configured_judge.client if configured_judge is not None else None
             ),
         )
     except Exception:
-        if configured_judge is not None:
-            configured_judge.client.close()
+        try:
+            if configured_judge is not None:
+                configured_judge.client.close()
+        finally:
+            repository.close()
         raise

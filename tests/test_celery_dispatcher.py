@@ -232,7 +232,7 @@ def test_worker_executes_configured_judge_and_closes_client(
         target(), dataset_id=LOAN_DATASET.id
     )
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.celery."
+        "agentgate.integrations.job_dispatchers.execution."
         "load_judge_model_from_environment",
         lambda: configuration,
     )
@@ -258,7 +258,7 @@ def test_worker_closes_judge_client_when_composition_fails(
     client = RecordingJudgeClient()
     configuration = configured_judge(client)
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.celery."
+        "agentgate.integrations.job_dispatchers.execution."
         "load_judge_model_from_environment",
         lambda: configuration,
     )
@@ -269,7 +269,7 @@ def test_worker_closes_judge_client_when_composition_fails(
         raise ValueError("composition failed")
 
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.celery."
+        "agentgate.integrations.job_dispatchers.execution."
         "build_default_evaluator_management",
         fail_composition,
     )

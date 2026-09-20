@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from urllib.error import HTTPError
+from typing import Self
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -16,7 +17,7 @@ class Response:
         self.request = None
         self.timeout = None
 
-    def __enter__(self) -> "Response":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -101,17 +102,13 @@ def test_submit_rejects_invalid_configuration_and_run_id() -> None:
     with pytest.raises(ValueError, match="AGENTGATE_BJS_SUBMIT_URL"):
         BjsJobDispatcher("bjs.example", "ai11").submit("run-123")
     with pytest.raises(ValueError, match="AGENTGATE_BJS_JOB_ID"):
-        BjsJobDispatcher(
-            "https://bjs.example/web/eval/job/bjs/submit", " "
-        ).submit("run-123")
+        BjsJobDispatcher("https://bjs.example/web/eval/job/bjs/submit", " ").submit("run-123")
     with pytest.raises(ValueError, match="run_id must not be blank"):
-        BjsJobDispatcher(
-            "https://bjs.example/web/eval/job/bjs/submit", "ai11"
-        ).submit(" ")
+        BjsJobDispatcher("https://bjs.example/web/eval/job/bjs/submit", "ai11").submit(" ")
 
 
 def test_cancel_only_logs_because_bjs_has_no_cancel_endpoint(caplog) -> None:
-    dispatcher = BjsJobDispatcher()
+    dispatcher = BjsJobDispatcher("https://bjs.example/submit", "ai11")
 
     with caplog.at_level("INFO"):
         dispatcher.cancel("run-123")
@@ -119,3 +116,54 @@ def test_cancel_only_logs_because_bjs_has_no_cancel_endpoint(caplog) -> None:
     assert "cancellation is unsupported" in caplog.text
     with pytest.raises(ValueError, match="run_id must not be blank"):
         dispatcher.cancel(" ")
+
+
+@pytest.mark.parametrize("error", [URLError("unreachable"), TimeoutError("timeout")])
+def test_submit_reports_network_failure_without_retry(error):
+    calls = []
+
+    def opener(*args, **kwargs):
+        calls.append(args)
+        raise error
+
+    dispatcher = BjsJobDispatcher("https://bjs.example/submit", "ai11", opener=opener)
+    with pytest.raises(RuntimeError, match="connection failed|timed out"):
+        dispatcher.submit("run-123")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://bjs.example/submit?existing=1",
+        "https://bjs.example/submit#fragment",
+        "https://bjs.example:invalid/submit",
+        "https://bjs.example:0/submit",
+        "https://user:secret@bjs.example/submit",
+        "https://bjs.exa mple/submit",
+        "https://bjs.example/\nsubmit",
+    ],
+)
+def test_invalid_submit_url_fails_at_configuration_time(url):
+    with pytest.raises(ValueError, match="AGENTGATE_BJS_SUBMIT_URL") as error:
+        BjsJobDispatcher(url, "ai11")
+    assert url not in str(error.value)
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+def test_invalid_timeout_is_rejected(timeout):
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        BjsJobDispatcher("https://bjs.example/submit", "ai11", timeout_seconds=timeout)
+
+
+def test_environment_configuration_is_used(monkeypatch):
+    monkeypatch.setenv("AGENTGATE_BJS_SUBMIT_URL", "https://bjs.example/submit/")
+    monkeypatch.setenv("AGENTGATE_BJS_JOB_ID", " job+1 ")
+    calls = []
+
+    def opener(request, **kwargs):
+        calls.append(request.full_url)
+        return Response({"code": 0, "message": "success"})
+
+    BjsJobDispatcher(opener=opener).submit("run & 1")
+    assert calls == ["https://bjs.example/submit/?taskId=run+%26+1&jobId=job%2B1"]

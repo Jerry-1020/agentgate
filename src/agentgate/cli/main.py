@@ -20,7 +20,7 @@ from agentgate.demo.bootstrap import (
     ensure_demo_dataset,
     ensure_demo_target_descriptors,
 )
-from agentgate.storage.sqlite import SQLiteRepository
+from agentgate.storage.configuration import SQLiteConfig, create_repository, load_database_config
 
 from . import dataset_commands, result_commands, run_commands
 
@@ -43,15 +43,17 @@ def configure(
     database: Path | None = typer.Option(
         None,
         "--database",
-        envvar="AGENTGATE_DB",
         help="SQLite 数据库路径",
     ),
 ) -> None:
     """配置 AgentGate 命令所使用的共享应用服务。"""
 
-    repository = SQLiteRepository(database or Path("agentgate.db"))
-    ensure_demo_dataset(repository)
-    ensure_demo_target_descriptors(TargetCatalog(repository))
+    database_config = load_database_config(database_path=database)
+    repository = create_repository(database_config)
+    context.call_on_close(repository.close)
+    if isinstance(database_config, SQLiteConfig):
+        ensure_demo_dataset(repository)
+        ensure_demo_target_descriptors(TargetCatalog(repository))
     evaluator_management = build_default_evaluator_management(repository)
     context.obj = CliDependencies(
         datasets=DatasetManagement(repository),
