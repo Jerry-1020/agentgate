@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,24 +19,25 @@ from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.dependencies import build_dependencies
 from agentgate.server.errors import _safe_message
 from agentgate.server.logging_config import setup_logging
-from agentgate.server.user_context import UserInfo, set_user_info, reset_user_info
 from agentgate.server.routes import (
+    agent_platform,
     bank_targets,
     catalogs,
     comparisons,
     credentials,
     datasets,
-    evaluators,
     evaluation_tasks,
+    evaluators,
     lineage,
     optimizer,
     results,
     runs,
     skill_analysis,
-    system,
     stability,
+    system,
     telemetry,
 )
+from agentgate.server.user_context import UserInfo, reset_user_info, set_user_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -167,7 +169,17 @@ def create_app(
     application.add_middleware(UserContextMiddleware)
     application.add_middleware(ResponseEnvelopeMiddleware)
 
+    from agentgate.application.agent_platform_evaluation import submit_platform_evaluation
+
+    application.state.submit_agent_platform_evaluation = partial(
+        submit_platform_evaluation,
+        repository=dependencies.repository,
+        evaluators=dependencies.evaluators,
+        credentials=dependencies.api_keys,
+        dispatcher=dependencies.dispatcher,
+    )
     application.state.dependencies = dependencies
+    application.include_router(agent_platform.router)
     application.include_router(system.router)
     application.include_router(bank_targets.router)
     application.include_router(stability.router)
