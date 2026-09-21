@@ -15,7 +15,7 @@ def target_snapshot(adapter_type, adapter_version="1"):
     values.update(
         adapter_type=adapter_type,
         adapter_version=adapter_version,
-        invocation_config={"customer_task_id": "test-task", "arrange_type": "base"},
+        invocation_config={"arrange_type": "base"},
     )
     return TargetSnapshot(**values)
 

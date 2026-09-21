@@ -22,6 +22,7 @@ class RecordingTransport:
 
     def __init__(self):
         self.created = 0
+        self.create_requests = []
         self.deleted = 0
         self.delete_requests = []
         self.sessions = []
@@ -31,6 +32,7 @@ class RecordingTransport:
     def request_json(self, method, url, *, payload=None, **kwargs):
         if "createAgent" in url:
             self.created += 1
+            self.create_requests.append({"method": method, "url": url, "payload": payload})
             return {"code": "0000", "data": {"agentName": "test-pod"}}
         if "deleteAgent" in url or "delete_agent" in url:
             self.deleted += 1
@@ -93,7 +95,11 @@ def persisted_target(request, tmp_path, monkeypatch):
         )
         for index in range(2)
     )
-    run = pending_run(cases=cases, target=target_snapshot(adapter_type))
+    original = pending_run(cases=cases, target=target_snapshot(adapter_type))
+    run = EvaluationRun(
+        id="12345678-1234-1234-1234-abcdef987654",
+        manifest=original.manifest,
+    )
     with closing(SQLiteRepository(tmp_path / "execution.db")) as repository:
         repository.save_run(run)
         yield SimpleNamespace(repository=repository, run=run, transport=transport)
@@ -110,6 +116,16 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
     assert all(trace.final_output["output"] == "answer" for trace in traces)
     assert all(len(trace.turn_outcomes) == 2 for trace in traces)
     assert context.transport.created == context.transport.deleted == 1
+    assert context.transport.create_requests == [
+        {
+            "method": "POST",
+            "url": "http://bank.invalid/web/agent_endpoint/createAgent?taskId=ef987654",
+            "payload": {
+                "agentId": "loan-agent",
+                "agentVersion": "loan-agent-v2-fixed",
+            },
+        }
+    ]
     if context.run.manifest.target.adapter_type == "inbank_chatabc":
         assert context.transport.delete_requests == [
             {
@@ -153,6 +169,17 @@ def test_cancelled_delivery_does_not_create_pod(persisted_target):
     context.repository.save_run(transition_run(context.run, RunStatus.CANCELLED))
     assert execution.execute_persisted_run(context.run.id) == "cancelled"
     assert context.transport.created == context.transport.deleted == 0
+
+
+def test_run_id_must_provide_an_eight_character_customer_task_id(persisted_target):
+    context = persisted_target
+    run = EvaluationRun(id="short", manifest=context.run.manifest)
+    context.repository.save_run(run)
+
+    with pytest.raises(TargetExecutionError, match="at least 8 characters"):
+        execution.execute_persisted_run(run.id)
+
+    assert context.transport.created == 0
 
 
 @pytest.mark.parametrize("override", [{"max_retries": 1}, {"max_parallel_cases": 2}])

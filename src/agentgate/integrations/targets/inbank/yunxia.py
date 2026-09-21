@@ -402,13 +402,7 @@ class InbankYunxiaTargetAdapter:
             return
         self._run_id = request.run_id
         self._run_customer_suffix = uuid4().hex
-        customer_task_id = request.target.invocation_config.get(
-            "customer_task_id"
-        )
-        if not isinstance(customer_task_id, str) or not customer_task_id.strip():
-            raise TargetExecutionError(
-                "invalid_request", "target customer_task_id must be nonblank"
-            )
+        customer_task_id = _task_id_from_run_id(request.run_id)
         version = request.target.invocation_config.get(
             "agent_version", request.target.ref.external_version_id
         )
@@ -780,6 +774,14 @@ def load_yunxia_settings(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
         ),
     )
+
+
+def _task_id_from_run_id(run_id: str) -> str:
+    if len(run_id) < 8:
+        raise TargetExecutionError(
+            "invalid_request", "run_id must contain at least 8 characters"
+        )
+    return run_id[-8:]
 
 
 def _parse_yunxia_sse(
