@@ -1,0 +1,10 @@
+{
+  "teams": [{"teamId":"team-local","teamName":"本地验收团队"},{"teamId":"team-empty","teamName":"空团队（边界测试）"}],
+  "agents": [
+    {"id":"agent-base","name":"基础编排 · 本地模拟","teamId":"team-local","agentType":"base","arrangeType":"base"},
+    {"id":"agent-workflow","name":"工作流 · 本地模拟","teamId":"team-local","agentType":"workflow","arrangeType":"workflow"},
+    {"id":"agent-claw","name":"云虾 · 本地模拟","teamId":"team-local","agentType":"abcclaw","arrangeType":"abcclaw2"}
+  ],
+  "versions": [{"agentVersion":"1.0","status":"published"},{"agentVersion":"2.0","status":"test"}],
+  "branches": [{"branchId":"branch-main","branchName":"主分支","children":[{"branchId":"branch-review","branchName":"审核分支","children":[]}]}]
+}

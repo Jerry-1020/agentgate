@@ -18,6 +18,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         '/api': { target: proxyTarget, changeOrigin: true },
+        ...(env.AGENT_PLATFORM_PROXY_TARGET
+          ? {
+              '/web': { target: env.AGENT_PLATFORM_PROXY_TARGET, changeOrigin: true },
+            }
+          : {}),
         '/race-api': {
           target: proxyTarget,
           changeOrigin: true,
