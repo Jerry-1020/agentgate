@@ -6,7 +6,7 @@ export AGENTGATE_REDIS_URL="redis://127.0.0.1:6397/0"
 export PYTHONPATH="$revision_root/src"
 # Private per-user model configuration is deliberately outside the project/package.
 case "${1:-}" in
-  api|worker|scheduler|seed|verify-traces|migrate|execute-run|dispatch-due|dispatcher-type)
+  api|worker|scheduler|seed|verify-traces|execute-run|dispatch-due|dispatcher-type)
     model_env_file="${AGENTGATE_MODEL_ENV_FILE:-$revision_root/.env}"
     if [[ -f "$model_env_file" ]]; then
       set -a
@@ -22,7 +22,6 @@ case "${1:-}" in
   dispatch-due) cd "$revision_root"; shift; exec .venv/bin/python scripts/dispatch-scheduled-runs.py --once "$@" ;;
   seed) cd "$revision_root"; exec .venv/bin/python scripts/seed-bank-agents.py ;;
   verify-traces) cd "$revision_root"; shift; exec .venv/bin/python scripts/verify-bank-traces.py "$@" ;;
-  migrate) cd "$revision_root"; exec .venv/bin/alembic -c alembic.ini upgrade head ;;
   redis) exec redis-server --bind 127.0.0.1 --port 6397 --dir "$revision_root/runtime" --save '' --appendonly no ;;
   api) cd "$revision_root"; exec .venv/bin/python -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8097 ;;
   worker) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO ;;
@@ -36,5 +35,5 @@ case "${1:-}" in
     exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --queues=agentgate.scheduler --beat --schedule="$revision_root/runtime/scheduler-state" --hostname=unified-tasks-scheduler-20260915@%h --loglevel=INFO
     ;;
   bank-agents) cd "$revision_root/tested-agents"; exec .venv/bin/python run.py --model-env "${AGENTGATE_MODEL_ENV_FILE:-$revision_root/.env}" --use-agentgate-model ;;
-  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web|bank-agents|seed|verify-traces|migrate|execute-run|dispatch-due|dispatcher-type}\n'; exit 2 ;;
+  *) printf 'Usage: bash scripts/run.sh {redis|api|worker|scheduler|web|bank-agents|seed|verify-traces|execute-run|dispatch-due|dispatcher-type}\n'; exit 2 ;;
 esac
