@@ -37,6 +37,7 @@ LOGGER = logging.getLogger(__name__)
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 _SUCCESS_CODES = frozenset({"0", "0000"})
 _CHATABC_SUCCESS_CODE = "FAIAG0000"
+_DELETE_SUCCESS_CODES = frozenset({"0", "0000", _CHATABC_SUCCESS_CODE})
 
 ChatABCArrangeType = Literal["base", "workflow"]
 
@@ -191,6 +192,7 @@ class ChatABCSettings:
     health_base_url: str
     pod_api_base_url: str
     delete_base_url: str
+    agent_namespace: str = "chatabc"
     request_timeout_seconds: float = 60.0
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
@@ -204,6 +206,11 @@ class ChatABCSettings:
         ):
             value = _validated_base_url(getattr(self, field_name), field_name)
             object.__setattr__(self, field_name, value)
+        if (
+            not isinstance(self.agent_namespace, str)
+            or not self.agent_namespace.strip()
+        ):
+            raise ValueError("agent_namespace must be nonblank")
         for field_name in (
             "request_timeout_seconds",
             "health_wait_seconds",
@@ -337,7 +344,7 @@ class InbankChatABCTargetAdapter:
             self._statuses[handle] = CaseExecutionStatus.CANCELLED
 
     def close(self) -> None:
-        """Best-effort, idempotent cleanup of the shared Run Pod."""
+        """Best-effort, idempotent cleanup through the unified manager API."""
 
         if self._closed:
             return
@@ -349,15 +356,25 @@ class InbankChatABCTargetAdapter:
         self._pod_lifecycle["delete"] = "started"
         try:
             response = self._transport.request_json(
-                "GET",
+                "POST",
                 _url(
                     self.settings.delete_base_url,
-                    "/web/agent_endpoint/deleteAgent",
-                    {"agentName": agent_name},
+                    "/agent-api/agent-manager/chatabc/delete_agent",
                 ),
+                payload={
+                    "appId": "",
+                    "trCode": "",
+                    "trVersion": "",
+                    "timestamp": 1,
+                    "requestId": "",
+                    "data": {
+                        "agent_name": agent_name,
+                        "agent_namespace": self.settings.agent_namespace,
+                    },
+                },
                 timeout=self.settings.request_timeout_seconds,
             )
-            _require_business_success(response, "delete Agent Pod")
+            _require_delete_success(response)
             self._pod_lifecycle["delete"] = "succeeded"
             self._log_pod_lifecycle("delete", "succeeded")
         except Exception as exc:
@@ -761,6 +778,9 @@ def load_chatabc_settings(
         )
     return ChatABCSettings(
         **{field: values[name] for field, name in required.items()},
+        agent_namespace=values.get(
+            "AGENTGATE_INBANK_CHATABC_AGENT_NAMESPACE", "chatabc"
+        ),
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 60.0
         ),
@@ -799,6 +819,19 @@ def _require_business_success(
 ) -> None:
     if str(response.get("code", "")) not in _SUCCESS_CODES:
         raise TargetExecutionError("rejected", f"{operation} was rejected")
+
+
+def _require_delete_success(response: Mapping[str, Any]) -> None:
+    for field_name in ("resCode", "code"):
+        if field_name in response:
+            if str(response[field_name]) not in _DELETE_SUCCESS_CODES:
+                raise TargetExecutionError(
+                    "rejected", "delete Agent Pod was rejected"
+                )
+            return
+    raise TargetExecutionError(
+        "protocol_error", "delete Agent Pod returned no business code"
+    )
 
 
 def _url(

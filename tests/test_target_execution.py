@@ -23,6 +23,7 @@ class RecordingTransport:
     def __init__(self):
         self.created = 0
         self.deleted = 0
+        self.delete_requests = []
         self.sessions = []
         self.messages = []
         self.fail_chat = False
@@ -33,6 +34,11 @@ class RecordingTransport:
             return {"code": "0000", "data": {"agentName": "test-pod"}}
         if "deleteAgent" in url or "delete_agent" in url:
             self.deleted += 1
+            self.delete_requests.append(
+                {"method": method, "url": url, "payload": payload}
+            )
+            if "/agent-manager/chatabc/delete_agent" in url:
+                return {"resCode": "FAIAG0000"}
             return {"code": "0000"}
         if "health_check" in url:
             return {"data": {"status": "ok"}}
@@ -104,6 +110,24 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
     assert all(trace.final_output["output"] == "answer" for trace in traces)
     assert all(len(trace.turn_outcomes) == 2 for trace in traces)
     assert context.transport.created == context.transport.deleted == 1
+    if context.run.manifest.target.adapter_type == "inbank_chatabc":
+        assert context.transport.delete_requests == [
+            {
+                "method": "POST",
+                "url": "http://bank.invalid/agent-api/agent-manager/chatabc/delete_agent",
+                "payload": {
+                    "appId": "",
+                    "trCode": "",
+                    "trVersion": "",
+                    "timestamp": 1,
+                    "requestId": "",
+                    "data": {
+                        "agent_name": "test-pod",
+                        "agent_namespace": "chatabc",
+                    },
+                },
+            }
+        ]
     messages = context.transport.messages
     session_key = "session_id" if "session_id" in messages[0] else "sessionId"
     assert messages[0][session_key] == messages[1][session_key]
