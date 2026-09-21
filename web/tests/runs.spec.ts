@@ -34,34 +34,38 @@ test('shows queue and running progress then stops polling after completion', asy
     const active = requests === 1
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(active ? {
-        status_counts: { ...emptyCounts, pending: 1, running: 1 },
-        queued: [run],
-        running: [{
-          ...run,
-          run_id: 'run-running',
-          status: 'running',
-          completed_cases: 2,
-          progress: 0.5,
-          started_at: '2026-09-07T10:00:01Z',
-          duration_seconds: 3,
-          queue_position: null,
-        }],
-        recent: [],
-      } : {
-        status_counts: { ...emptyCounts, completed: 1 },
-        queued: [],
-        running: [],
-        recent: [{
-          ...run,
-          status: 'completed',
-          completed_cases: 4,
-          progress: 1,
-          started_at: '2026-09-07T10:00:01Z',
-          completed_at: '2026-09-07T10:00:05Z',
-          duration_seconds: 4,
-          queue_position: null,
-        }],
+      body: JSON.stringify({
+        code: '0',
+        message: 'success',
+        data: active ? {
+          status_counts: { ...emptyCounts, pending: 1, running: 1 },
+          queued: [run],
+          running: [{
+            ...run,
+            run_id: 'run-running',
+            status: 'running',
+            completed_cases: 2,
+            progress: 0.5,
+            started_at: '2026-09-07T10:00:01Z',
+            duration_seconds: 3,
+            queue_position: null,
+          }],
+          recent: [],
+        } : {
+          status_counts: { ...emptyCounts, completed: 1 },
+          queued: [],
+          running: [],
+          recent: [{
+            ...run,
+            status: 'completed',
+            completed_cases: 4,
+            progress: 1,
+            started_at: '2026-09-07T10:00:01Z',
+            completed_at: '2026-09-07T10:00:05Z',
+            duration_seconds: 4,
+            queue_position: null,
+          }],
+        },
       }),
     })
   })

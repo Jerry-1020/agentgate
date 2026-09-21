@@ -18,7 +18,7 @@ esac
 export AGENTGATE_DB="${AGENTGATE_DB-$revision_root/runtime/agentgate.db}"
 case "${1:-}" in
   dispatcher-type) cd "$revision_root"; exec .venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())' ;;
-  execute-run) cd "$revision_root"; shift; exec .venv/bin/python script/bjs/run_evaluation.py "$@" ;;
+  execute-run) cd "$revision_root"; shift; exec .venv/bin/python scripts/bjs/run_evaluation.py "$@" ;;
   dispatch-due) cd "$revision_root"; shift; exec .venv/bin/python scripts/dispatch-scheduled-runs.py --once "$@" ;;
   seed) cd "$revision_root"; exec .venv/bin/python scripts/seed-bank-agents.py ;;
   verify-traces) cd "$revision_root"; shift; exec .venv/bin/python scripts/verify-bank-traces.py "$@" ;;
@@ -26,7 +26,6 @@ case "${1:-}" in
   redis) exec redis-server --bind 127.0.0.1 --port 6397 --dir "$revision_root/runtime" --save '' --appendonly no ;;
   api) cd "$revision_root"; exec .venv/bin/python -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8097 ;;
   worker) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO ;;
-  scheduler) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --queues=agentgate.scheduler --beat --schedule="$revision_root/runtime/scheduler-state" --hostname=unified-tasks-scheduler-20260915@%h --loglevel=INFO ;;
   web) cd "$revision_root/frontend"; export FRONTEND_PORT=5197 API_PROXY_TARGET=http://127.0.0.1:8097; exec npm run dev ;;
   scheduler)
     cd "$revision_root"

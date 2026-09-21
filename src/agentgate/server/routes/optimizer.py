@@ -35,7 +35,6 @@ Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
 
 @router.get(
     "/runs/{run_id}/optimization",
-    response_model=OptimizationReport,
 )
 def optimization_report(
     run_id: str,

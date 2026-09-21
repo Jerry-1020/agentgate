@@ -112,10 +112,10 @@ def test_analyze_list_and_get_report(tmp_path, monkeypatch) -> None:
         detail = client.get("/api/skill-analysis/reports/report-1")
 
     assert created.status_code == 201
-    assert created.json()["id"] == "report-1"
-    assert [item["id"] for item in listed.json()] == ["report-1"]
-    assert detail.json()["report"]["id"] == "report-1"
-    assert detail.json()["reviews"] == []
+    assert created.json()["data"]["id"] == "report-1"
+    assert [item["id"] for item in listed.json()["data"]] == ["report-1"]
+    assert detail.json()["data"]["report"]["id"] == "report-1"
+    assert detail.json()["data"]["reviews"] == []
 
 
 def test_review_is_created_and_replaced(tmp_path, monkeypatch) -> None:
@@ -147,7 +147,7 @@ def test_review_is_created_and_replaced(tmp_path, monkeypatch) -> None:
 
     assert first.status_code == 200
     assert replacement.status_code == 200
-    assert detail.json()["reviews"] == [replacement.json()]
+    assert detail.json()["data"]["reviews"] == [replacement.json()["data"]]
 
 
 def test_unknown_target_returns_not_found(tmp_path, monkeypatch) -> None:
@@ -205,7 +205,7 @@ def test_unconfigured_analyzer_returns_service_unavailable(
         )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "Skill analysis is unavailable"
+    assert response.json()["message"] == "Skill analysis is unavailable"
 
 
 def test_invalid_hash_and_list_limit_return_unprocessable(

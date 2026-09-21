@@ -50,7 +50,6 @@ class RunComparisonSubmission(BaseModel):
 @router.post(
     "/run-comparisons",
     status_code=202,
-    response_model=RunComparisonSubmission,
 )
 def launch_run_comparison(
     request: RunComparisonLaunchRequest,

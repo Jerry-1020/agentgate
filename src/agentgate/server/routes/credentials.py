@@ -33,7 +33,7 @@ class CreateApiKeyRequest(BaseModel):
     api_key: SecretStr = Field(json_schema_extra={"writeOnly": True})
 
 
-@router.post("", status_code=201, response_model=ApiKeyMetadata)
+@router.post("", status_code=201)
 def create_api_key(
     request: CreateApiKeyRequest,
     dependencies: Dependencies,
@@ -50,12 +50,12 @@ def create_api_key(
         raise_unprocessable(error)
 
 
-@router.get("", response_model=list[ApiKeyMetadata])
+@router.get("")
 def list_api_keys(dependencies: Dependencies) -> list[ApiKeyMetadata]:
     return _api_key_management(dependencies).list_api_keys()
 
 
-@router.get("/{api_key_id}", response_model=ApiKeyMetadata)
+@router.get("/{api_key_id}")
 def get_api_key(
     api_key_id: str,
     dependencies: Dependencies,

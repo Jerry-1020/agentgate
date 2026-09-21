@@ -6,7 +6,7 @@ test('published single case creates a scoped run',async({page})=>{
  const response=page.waitForResponse(r=>r.url().endsWith('/api/evaluations')&&r.request().method()==='POST')
  await page.getByRole('button',{name:'提交评测',exact:true}).click()
  const r=await response;expect(r.ok()).toBeTruthy();expect(r.request().postDataJSON().case_ids).toHaveLength(1)
- await expect(page).toHaveURL(new RegExp('#tasks/'+(await r.json()).run_id+'$'))
+ await expect(page).toHaveURL(new RegExp('#tasks/'+(await r.json()).data.run_id+'$'))
 })
 test('Excel export can be imported as a draft with counts',async({page,request})=>{
  const exported=await request.get('/api/datasets/loan-risk-policy/versions/1/export/xlsx')
@@ -20,7 +20,7 @@ test('Excel export can be imported as a draft with counts',async({page,request})
  await page.getByLabel('导入文件').setInputFiles({name:'roundtrip.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await exported.body()})
  const pending=page.waitForResponse(r=>r.url().endsWith('/datasets/import/xlsx'))
  await page.getByRole('button',{name:'确认导入'}).click()
- const r=await pending;expect(r.ok()).toBeTruthy();id=(await r.json()).dataset.id
+ const r=await pending;expect(r.ok()).toBeTruthy();id=(await r.json()).data.dataset.id
  await expect(page.getByRole('heading',{name,exact:true})).toBeVisible()
  await expect(page.getByTestId('run-single-case')).toBeDisabled()
  await page.getByTestId('back-datasets').click()

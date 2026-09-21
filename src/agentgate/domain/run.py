@@ -158,7 +158,6 @@ class EvaluationRun(DomainModel):
     user_id: str = ""  # 用户 ID（创建者标识）
     user_name: str = ""  # 用户姓名（创建者显示名）
     api_key: None = None  # Per-run raw credentials are not supported by the executor.
-    case_max_parallel: int | None = Field(default=None, ge=1, le=32, strict=True)
 
     @field_validator("id")
     @classmethod

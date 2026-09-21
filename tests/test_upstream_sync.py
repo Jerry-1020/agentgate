@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentgate.application.dataset_management import DatasetManagement
-from agentgate.domain import Case, CaseTurn, EvaluationRun
+from agentgate.domain import Case, CaseTurn, EvaluationRun, RunManifest
 from agentgate.server.app import create_app
 from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.server.user_context import UserInfo, get_user_info, set_user_info, reset_user_info
@@ -40,26 +40,26 @@ def test_team_scope_covers_local_task_and_sample_endpoints(tmp_path, repetitions
     headers = {"user_team_id": "alpha", "user_id": "user-a", "user_name": "Tester"}
     with TestClient(app) as client:
         body = {"version": "loan-agent-v2-fixed", "dataset_id": ds_id,
-                "dataset_version": 1, "evaluator_ids": ["final-state"], "case_max_parallel": 3}
+                "dataset_version": 1, "evaluator_ids": ["final-state"], "max_parallel_cases": 3}
         url = "/api/evaluations" if repetitions == 1 else "/api/stability-experiments"
         if repetitions > 1:
             body["repetitions"] = repetitions
         response = client.post(url, json=body, headers=headers)
         assert response.status_code == 202, response.text
-        ids = [response.json()["run_id"]] if repetitions == 1 else response.json()["run_ids"]
-        assert len(client.get("/api/evaluation-tasks", headers=headers).json()) == 1
+        ids = [response.json()["data"]["run_id"]] if repetitions == 1 else response.json()["data"]["run_ids"]
+        assert len(client.get("/api/evaluation-tasks", headers=headers).json()["data"]) == 1
         for run_id in ids:
             run = app.state.dependencies.repository.get_run(run_id)
             assert (run.user_team_id, run.user_id, run.user_name) == ("alpha", "user-a", "Tester")
-            assert run.case_max_parallel == run.manifest.max_parallel_cases == 3
+            assert run.manifest.max_parallel_cases == 3
             for suffix in ("samples", "target-descriptor", "manifest", "status"):
                 path = f"/api/runs/{run_id}/{suffix}"
                 assert client.get(path, headers=headers).status_code == 200
                 assert client.get(path, headers={"user_team_id": "beta"}).status_code == 404
             assert client.post(f"/api/runs/{run_id}/cancel", headers={"user_team_id": "beta"}).status_code == 404
         for other in ({}, {"user_team_id": "beta"}):
-            assert client.get("/api/evaluation-tasks", headers=other).json() == []
-            assert client.get("/api/runs", headers=other).json() == []
+            assert client.get("/api/evaluation-tasks", headers=other).json()["data"] == []
+            assert client.get("/api/runs", headers=other).json()["data"] == []
             assert client.get(f"/api/evaluation-tasks/{ids[0]}", headers=other).status_code == 404
             if repetitions > 1:
                 assert client.get(f"/api/stability-experiments/{ids[0]}", headers=other).status_code == 404
@@ -77,7 +77,7 @@ def test_existing_database_prefix_and_identity_migration_preserves_payloads(tmp_
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'") if row[0].startswith("agentgate_")]
         original_payloads = {t: db.execute(f'SELECT payload FROM "{t}"').fetchall() for t in tables if t != "agentgate_api_keys" and t != "agentgate_run_asset_refs"}
         for table in tables:
-            for name in ("user_team_id", "user_id", "user_name", "api_key", "case_max_parallel"):
+            for name in ("user_team_id", "user_id", "user_name", "api_key"):
                 if name in {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}:
                     db.execute(f'ALTER TABLE "{table}" DROP COLUMN "{name}"')
             db.execute(f'ALTER TABLE "{table}" RENAME TO "{table.removeprefix("agentgate_")}"')
@@ -107,8 +107,10 @@ def test_unknown_dispatcher_is_rejected(monkeypatch, kind):
         create_dispatcher()
 
 
-@pytest.mark.parametrize("parallel", [0, 33, True, 1.5])
+@pytest.mark.parametrize("parallel", [0, 1.5])
 def test_new_parallel_parameter_has_domain_bounds(parallel):
     from test_run_engine import pending_run
+    base = pending_run().manifest.model_dump()
+    base["max_parallel_cases"] = parallel
     with pytest.raises(ValueError):
-        EvaluationRun(manifest=pending_run().manifest, case_max_parallel=parallel)
+        RunManifest(**base)

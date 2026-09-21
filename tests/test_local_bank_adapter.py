@@ -92,23 +92,23 @@ def test_launch_persists_task_before_dispatch_and_rejects_demo_payload(tmp_path,
         datasets.publish_draft(ds.id)
         response = http.post("/api/bank-evaluations", json={"mode": "base", "dataset_id": ds.id, "dataset_version": 1})
         assert response.status_code == 202, response.text
-        run = deps.repository.get_run(response.json()["run_id"])
+        run = deps.repository.get_run(response.json()["data"]["run_id"])
         assert run.manifest.max_retries == 0
         assert run.manifest.target.adapter_type == "local_bank"
         pinned = http.get('/api/runs/'+run.id+'/target-descriptor')
         assert pinned.status_code == 200
-        assert pinned.json()['content_sha256'] == run.manifest.target.descriptor_sha256
+        assert pinned.json()['data']['content_sha256'] == run.manifest.target.descriptor_sha256
         body={"mode":"base","dataset_id":ds.id,"dataset_version":1}
         assert http.post('/api/bank-evaluations',json={**body,"target_descriptor_sha256":"f"*64}).status_code==422
         repeated=http.post('/api/bank-evaluations',json={**body,"repetitions":2})
         assert repeated.status_code==202
-        ids=repeated.json()['run_ids']
+        ids=repeated.json()['data']['run_ids']
         assert len(ids)==2
         assert deps.repository.get_run(ids[0]).manifest==deps.repository.get_run(ids[1]).manifest
         assert http.post('/api/bank-evaluations',json={**body,"repetitions":2,"scheduled_for":"2099-01-01T00:00:00Z"}).status_code==422
         scheduled=http.post('/api/bank-evaluations',json={**body,"scheduled_for":"2099-01-01T00:00:00Z"})
         assert scheduled.status_code==202
-        assert deps.repository.get_run(scheduled.json()['run_id']).status=='scheduled'
+        assert deps.repository.get_run(scheduled.json()['data']['run_id']).status=='scheduled'
         assert http.get('/api/runs/unknown/target-descriptor').status_code==404
         invalid = http.post("/api/bank-evaluations", json={"mode": "base", "dataset_id": "loan-risk-policy", "dataset_version": 1})
         assert invalid.status_code == 422
@@ -124,4 +124,4 @@ def test_model_metadata_never_exposes_credentials(tmp_path,monkeypatch):
         response=http.get('/api/model-runtime')
         assert response.status_code==200
         assert all(x not in response.text for x in ('private-test-key','password','secret'))
-        assert response.json()['connections'][0]['base_url']=='https://example.test/v1'
+        assert response.json()['data']['connections'][0]['base_url']=='https://example.test/v1'

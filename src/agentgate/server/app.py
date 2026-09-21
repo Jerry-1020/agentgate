@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,10 +11,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.dependencies import build_dependencies
+from agentgate.server.errors import _safe_message
 from agentgate.server.logging_config import setup_logging
 from agentgate.server.user_context import UserInfo, set_user_info, reset_user_info
 from agentgate.server.routes import (
@@ -35,6 +38,82 @@ from agentgate.server.routes import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+SKIP_ENVELOPE_PATHS = {"/v1/traces"}
+
+
+class ResponseEnvelopeMiddleware(BaseHTTPMiddleware):
+    """Wrap all JSON responses in the unified {code, message, data} envelope."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        if request.url.path in SKIP_ENVELOPE_PATHS:
+            return response
+        if response.status_code == 204:
+            return response
+        content_type = response.headers.get("content-type", "")
+        if "application/json" not in content_type:
+            return response
+
+        body_chunks = []
+        async for chunk in response.body_iterator:
+            body_chunks.append(chunk)
+        body = b"".join(body_chunks)
+        if not body:
+            return response
+
+        try:
+            original = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                media_type="application/json",
+            )
+
+        if (
+            isinstance(original, dict)
+            and set(original.keys()) == {"code", "message", "data"}
+        ):
+            return response
+
+        if (
+            isinstance(original, dict)
+            and "detail" in original
+            and "data" not in original
+        ):
+            detail = original["detail"]
+            if isinstance(detail, str):
+                envelope = {"code": "1", "message": detail, "data": None}
+            elif isinstance(detail, list):
+                message = "; ".join(
+                    item.get("msg", str(item))
+                    if isinstance(item, dict)
+                    else str(item)
+                    for item in detail
+                )
+                envelope = {"code": "1", "message": message, "data": detail}
+            else:
+                message = (
+                    detail.get("message", str(detail))
+                    if isinstance(detail, dict)
+                    else str(detail)
+                )
+                envelope = {"code": "1", "message": message, "data": detail}
+        else:
+            envelope = {"code": "0", "message": "success", "data": original}
+
+        headers = {
+            k: v
+            for k, v in response.headers.items()
+            if k.lower() not in ("content-length", "content-type")
+        }
+        return JSONResponse(
+            content=envelope,
+            status_code=response.status_code,
+            headers=headers,
+        )
 
 
 def create_app(
@@ -76,8 +155,8 @@ def create_app(
         async def dispatch(self, request: Request, call_next):
             info = UserInfo(
                 user_team_id=request.headers.get("user_team_id", ""),
-                user_id=request.headers.get("user_id", ""),
-                user_name=request.headers.get("user_name", ""),
+                user_id=request.headers.get("user_id") or "anonymous",
+                user_name=request.headers.get("user_name") or "匿名用户",
             )
             token = set_user_info(info)
             try:
@@ -86,6 +165,7 @@ def create_app(
                 reset_user_info(token)
 
     application.add_middleware(UserContextMiddleware)
+    application.add_middleware(ResponseEnvelopeMiddleware)
 
     application.state.dependencies = dependencies
     application.include_router(system.router)
@@ -103,6 +183,19 @@ def create_app(
     application.include_router(skill_analysis.router)
     application.include_router(optimizer.router)
     application.include_router(telemetry.router)
+
+    @application.exception_handler(Exception)
+    async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+        LOGGER.exception(
+            "Unhandled error on %s %s",
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": _safe_message(exc)},
+        )
+
     return application
 
 

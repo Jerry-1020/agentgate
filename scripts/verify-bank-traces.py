@@ -33,7 +33,7 @@ def main():
                 trace = stored_trace.model_dump(mode="json")
                 response = client.get(f"http://127.0.0.1:8097/api/runs/{rid}/traces/{case['id']}")
                 response.raise_for_status()
-                public = {s["span_id"]: s for s in response.json()["spans"]}
+                public = {s["span_id"]: s for s in response.json()["data"]["spans"]}
                 for span in trace["spans"]:
                     if span["operation_type"] != "turn":
                         continue

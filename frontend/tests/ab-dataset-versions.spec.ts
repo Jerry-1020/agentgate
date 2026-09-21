@@ -19,18 +19,18 @@ test('AB waits for initial catalogs before enabling dataset selection and does n
 })
 
 test('AB lists three real published dataset versions and submits the exact selection for both sides',async({page,request})=>{
- const source=await(await request.get('/api/datasets/loan-risk-policy/versions/1')).json()
- const created=await(await request.post('/api/datasets',{data:{name:'A/B版本验收-'+Date.now()}})).json()
+ const source=(await(await request.get('/api/datasets/loan-risk-policy/versions/1')).json()).data
+ const created=(await(await request.post('/api/datasets',{data:{name:'A/B版本验收-'+Date.now()}})).json()).data
  const id=created.dataset.id,snapshots:any[]=[]
  let draft=created.draft
  try{
   for(let number=1;number<=3;number++){
-   if(number>1)draft=await(await request.post('/api/datasets/'+id+'/drafts',{data:{based_on_version:number-1}})).json()
+   if(number>1)draft=(await(await request.post('/api/datasets/'+id+'/drafts',{data:{based_on_version:number-1}})).json()).data
    const item=structuredClone(source.cases[0]);item.id='ab-version-test-'+number;item.name='版本新增样本 '+number
    item.turns[0].id='turn-'+number
-   draft=await(await request.post('/api/datasets/'+id+'/drafts/cases',{headers:{'If-Match':draft.content_sha256},data:item})).json()
+   draft=(await(await request.post('/api/datasets/'+id+'/drafts/cases',{headers:{'If-Match':draft.content_sha256},data:item})).json()).data
    const response=await request.post('/api/datasets/'+id+'/drafts/publish',{headers:{'If-Match':draft.content_sha256}})
-   expect(response.ok()).toBeTruthy();snapshots.push(await response.json())
+   expect(response.ok()).toBeTruthy();snapshots.push((await response.json()).data)
   }
   await page.goto('/#experiments')
   await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
@@ -46,7 +46,7 @@ test('AB lists three real published dataset versions and submits the exact selec
    expect(body.baseline_version).not.toBe(body.candidate_version)
    expect(body.evaluators.length).toBeGreaterThan(0)
    submitted++
-   await route.fulfill({status:422,json:{detail:'已核对 v'+expectedVersion+' 固定版本请求；测试未创建任务'}})
+   await route.fulfill({status:422,json:{code:'1',message:'已核对 v'+expectedVersion+' 固定版本请求；测试未创建任务',data:null}})
   })
   for(const number of [3,2,1]){
    expectedVersion=number
@@ -57,7 +57,7 @@ test('AB lists three real published dataset versions and submits the exact selec
   }
   expect(submitted).toBe(3)
   for(const version of snapshots){
-   expect(await(await request.get('/api/datasets/'+id+'/versions/'+version.version)).json()).toEqual(version)
+   expect((await(await request.get('/api/datasets/'+id+'/versions/'+version.version)).json()).data).toEqual(version)
   }
  }finally{
   await request.delete('/api/datasets/'+id)

@@ -39,7 +39,7 @@ def test_launch_run_comparison_creates_and_dispatches_controlled_pair(
         response = client.post("/api/run-comparisons", json=_launch_payload())
 
     assert response.status_code == 202
-    body = response.json()
+    body = response.json()["data"]
     assert set(body) == {"baseline", "candidate"}
     assert set(body["baseline"]) == {"run_id", "status"}
     assert set(body["candidate"]) == {"run_id", "status"}
@@ -98,10 +98,10 @@ def test_launch_run_comparison_selects_exact_historical_evaluator_version(
     assert response.status_code == 202
     assert second.version == "2"
     baseline = application.state.dependencies.repository.get_run(
-        response.json()["baseline"]["run_id"]
+        response.json()["data"]["baseline"]["run_id"]
     )
     candidate = application.state.dependencies.repository.get_run(
-        response.json()["candidate"]["run_id"]
+        response.json()["data"]["candidate"]["run_id"]
     )
     assert baseline is not None
     assert candidate is not None
@@ -118,7 +118,7 @@ def test_launch_run_comparison_rejects_unknown_evaluator_version(tmp_path) -> No
         response = client.post("/api/run-comparisons", json=payload)
 
     assert response.status_code == 422
-    assert response.json()["detail"] == (
+    assert response.json()["message"] == (
         "unknown Evaluator version: final-state@999"
     )
     assert application.state.dependencies.repository.list_runs(user_team_id="") == []
@@ -134,7 +134,7 @@ def test_launch_run_comparison_rejects_identical_versions(tmp_path) -> None:
         response = client.post("/api/run-comparisons", json=payload)
 
     assert response.status_code == 422
-    assert response.json()["detail"] == (
+    assert response.json()["message"] == (
         "A/B variants must use different Agent versions"
     )
     assert dispatcher.run_ids == []
@@ -151,7 +151,7 @@ def test_launch_run_comparison_rejects_unknown_demo_version(tmp_path) -> None:
         response = client.post("/api/run-comparisons", json=payload)
 
     assert response.status_code == 422
-    assert response.json()["detail"] == (
+    assert response.json()["message"] == (
         "unknown demo Target version: unknown-version"
     )
     assert dispatcher.run_ids == []
@@ -180,7 +180,7 @@ def test_launch_run_comparison_returns_partial_dispatch_states(tmp_path) -> None
         response = client.post("/api/run-comparisons", json=_launch_payload())
 
     assert response.status_code == 202
-    body = response.json()
+    body = response.json()["data"]
     assert dispatcher.run_ids == [
         body["baseline"]["run_id"],
         body["candidate"]["run_id"],
@@ -214,7 +214,7 @@ def test_compare_completed_runs(tmp_path) -> None:
         )
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["data"]
     assert body["baseline_run_id"] == baseline.id
     assert body["candidate_run_id"] == candidate.id
     assert body["baseline_target_version"] == "loan-agent-v1-risky"
@@ -236,7 +236,7 @@ def test_unknown_comparison_run_returns_not_found(tmp_path) -> None:
         )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "unknown EvaluationRun: missing-baseline"
+    assert response.json()["message"] == "unknown EvaluationRun: missing-baseline"
 
 
 def test_incomplete_comparison_run_returns_conflict(tmp_path) -> None:
@@ -257,7 +257,7 @@ def test_incomplete_comparison_run_returns_conflict(tmp_path) -> None:
 
     assert response.status_code == 409
     assert dispatcher.run_ids == [candidate.id]
-    assert response.json()["detail"] == (
+    assert response.json()["message"] == (
         "EvaluationReport requires a completed EvaluationRun"
     )
 
@@ -284,4 +284,4 @@ def test_incompatible_comparison_runs_return_conflict(tmp_path) -> None:
         )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "reports use different primary Evaluators"
+    assert response.json()["message"] == "reports use different primary Evaluators"

@@ -37,10 +37,10 @@ def test_application_factory_registers_configured_api_key_routes(tmp_path) -> No
             },
         )
         listed = api.get("/api/api-keys")
-        deleted = api.delete(f"/api/api-keys/{created.json()['id']}")
+        deleted = api.delete(f"/api/api-keys/{created.json()['data']['id']}")
 
     assert created.status_code == 201
-    assert listed.json() == [created.json()]
+    assert listed.json()["data"] == [created.json()["data"]]
     assert deleted.status_code == 204
     assert PLAINTEXT not in created.text + listed.text
 
@@ -57,5 +57,7 @@ def test_application_factory_keeps_api_key_routes_safely_unavailable(
 
     assert response.status_code == 503
     assert response.json() == {
-        "detail": "API Key management is unavailable"
+        "code": "1",
+        "message": "API Key management is unavailable",
+        "data": None,
     }

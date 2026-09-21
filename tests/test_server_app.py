@@ -105,8 +105,8 @@ def test_application_factory_registers_dependencies_and_routes(tmp_path) -> None
         evaluator_response = client.get("/api/evaluators")
 
     assert evaluator_response.status_code == 200
-    assert len(evaluator_response.json()) == 7
-    assert {item["source"] for item in evaluator_response.json()} == {"builtin"}
+    assert len(evaluator_response.json()["data"]) == 7
+    assert {item["source"] for item in evaluator_response.json()["data"]} == {"builtin"}
 
 
 def test_dependencies_compose_configured_judge_and_close_it_once(
@@ -224,7 +224,7 @@ def test_application_factory_supports_async_demo_workflow(tmp_path) -> None:
                 "evaluator_ids": ["skill-routing", "final-state"],
             },
         )
-        run_id = launched.json()["run_id"]
+        run_id = launched.json()["data"]["run_id"]
         queued = client.get(f"/api/runs/{run_id}/status")
 
         capture = InMemoryTraceCapture()
@@ -255,15 +255,15 @@ def test_application_factory_supports_async_demo_workflow(tmp_path) -> None:
         trace = client.get(f"/api/runs/{run_id}/traces/high-risk-approval")
 
     assert launched.status_code == 202
-    assert launched.json()["status"] == "pending"
+    assert launched.json()["data"]["status"] == "pending"
     assert dispatcher.run_ids == [run_id]
-    assert queued.json()["status"] == "pending"
-    assert completed.json()["status"] == "completed"
-    assert completed.json()["progress"] == 1
+    assert queued.json()["data"]["status"] == "pending"
+    assert completed.json()["data"]["status"] == "completed"
+    assert completed.json()["data"]["progress"] == 1
     assert report.status_code == 200
-    assert report.json()["release_gate"]["outcome"] == "pass"
+    assert report.json()["data"]["release_gate"]["outcome"] == "pass"
     assert trace.status_code == 200
-    assert trace.json()["final_state"]["api_key"] == "[redacted]"
+    assert trace.json()["data"]["final_state"]["api_key"] == "[redacted]"
     assert "raw-secret" not in trace.text
 
 

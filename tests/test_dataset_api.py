@@ -25,7 +25,7 @@ def test_web_dataset_workflow_persists_and_runs_selected_version(tmp_path, monke
             "name": "UI Dataset", "description": "created from browser",
         })
         assert created.status_code == 201
-        dataset_id = created.json()["dataset"]["id"]
+        dataset_id = created.json()["data"]["dataset"]["id"]
 
         case = Case(
             id="ui-high-risk",
@@ -68,7 +68,7 @@ def test_web_dataset_workflow_persists_and_runs_selected_version(tmp_path, monke
         assert saved.status_code == 201
         published = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
         assert published.status_code == 200
-        assert published.json()["version"] == 1
+        assert published.json()["data"]["version"] == 1
 
         response = client.post("/api/evaluations", json={
             "version": "loan-agent-v2-fixed",
@@ -76,10 +76,10 @@ def test_web_dataset_workflow_persists_and_runs_selected_version(tmp_path, monke
             "dataset_version": 1,
         })
         assert response.status_code == 202
-        run_id = response.json()["run_id"]
+        run_id = response.json()["data"]["run_id"]
         assert dispatcher.run_ids == [run_id]
         assert execute_evaluation_run.run(run_id) == "completed"
-        report = client.get(f"/api/runs/{run_id}").json()
+        report = client.get(f"/api/runs/{run_id}").json()["data"]
         assert report["run"]["manifest"]["dataset"]["dataset_id"] == dataset_id
         assert report["run"]["manifest"]["dataset"]["version"] == 1
         output = next(item for item in report["results"] if item["evaluator_id"] == "final-output")
@@ -90,16 +90,16 @@ def test_web_dataset_workflow_persists_and_runs_selected_version(tmp_path, monke
 
 def test_publish_returns_domain_validation_message(tmp_path):
     with TestClient(create_app(tmp_path / "validation-api.db")) as client:
-        created = client.post("/api/datasets", json={"name": "Empty"}).json()
+        created = client.post("/api/datasets", json={"name": "Empty"}).json()["data"]
         dataset_id = created["dataset"]["id"]
         response = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
         assert response.status_code == 422
-        assert "requires at least one Case" in response.json()["detail"]
+        assert "requires at least one Case" in response.json()["message"]
 
 
 def test_json_export_and_import_routes_round_trip(tmp_path):
     with TestClient(create_app(tmp_path / "exchange-source.db")) as source:
-        created = source.post("/api/datasets", json={"name": "Exchange"}).json()
+        created = source.post("/api/datasets", json={"name": "Exchange"}).json()["data"]
         dataset_id = created["dataset"]["id"]
         case = Case(
             id="exchange-case",
@@ -115,7 +115,7 @@ def test_json_export_and_import_routes_round_trip(tmp_path):
             f"/api/datasets/{dataset_id}/versions/1/export"
         )
         assert exported.status_code == 200
-        payload = exported.json()
+        payload = exported.json()["data"]
         assert payload["format"] == "agentgate.dataset"
         assert payload["format_version"] == 1
 
@@ -123,5 +123,5 @@ def test_json_export_and_import_routes_round_trip(tmp_path):
         response = target.post("/api/datasets/import", json=payload)
 
         assert response.status_code == 201
-        assert response.json()["dataset"]["id"] == dataset_id
-        assert response.json()["version"]["version"] == 1
+        assert response.json()["data"]["dataset"]["id"] == dataset_id
+        assert response.json()["data"]["version"]["version"] == 1

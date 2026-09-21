@@ -216,7 +216,6 @@ def upgrade():
         sa.Column("user_id", mysql.LONGTEXT(collation="utf8mb4_bin"), nullable=False),
         sa.Column("user_name", mysql.LONGTEXT(collation="utf8mb4_bin"), nullable=False),
         sa.Column("api_key", mysql.LONGTEXT(collation="utf8mb4_bin"), nullable=True),
-        sa.Column("case_max_parallel", sa.SmallInteger(), nullable=True),
         sa.Column("payload", mysql.LONGTEXT(collation="utf8mb4_bin"), nullable=False),
         sa.PrimaryKeyConstraint("id_key", name=op.f("pk_agentgate_runs")),
         mysql_charset="utf8mb4",

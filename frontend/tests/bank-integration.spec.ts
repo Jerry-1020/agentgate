@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 
 test('bank targets use real catalog, database datasets and capability limits',async({page,request})=>{
- const targets=await(await request.get('/api/bank-targets')).json()
+ const targets=(await(await request.get('/api/bank-targets')).json()).data
  expect(targets).toHaveLength(3)
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto('/#tasks')
@@ -27,7 +27,7 @@ test('bank targets use real catalog, database datasets and capability limits',as
 
 test('model metadata is server-backed and does not expose credentials',async({page,request})=>{
  const response=await request.get('/api/model-runtime');expect(response.ok()).toBeTruthy()
- const body=await response.json()
+ const body=(await response.json()).data
  expect(body.connections).toHaveLength(6)
  expect(JSON.stringify(body)).not.toMatch(/sk-sp-|api_key|Authorization/)
  await page.goto('/#settings')
@@ -38,7 +38,7 @@ test('model metadata is server-backed and does not expose credentials',async({pa
 
 test('failed execution retains completed samples and the original error',async({page,request})=>{
  const id='d28ecaca-4b94-4e9a-99e9-7cd199ec9c62'
- const samples=await(await request.get('/api/runs/'+id+'/samples')).json()
+ const samples=(await(await request.get('/api/runs/'+id+'/samples')).json()).data
  expect(samples.results.length).toBeGreaterThan(0)
  await page.goto('/#tasks/'+id)
  await expect(page.getByText('SDK trace output differs from request result',{exact:false})).toBeVisible()

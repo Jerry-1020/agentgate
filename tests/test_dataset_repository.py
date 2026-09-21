@@ -84,8 +84,8 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
             INSERT INTO {_T_RUNS}(
                 id,status,created_at,scheduled_for,
                 user_team_id,user_id,user_name,
-                api_key,case_max_parallel,payload
-            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                api_key,payload
+            ) VALUES(?,?,?,?,?,?,?,?,?)
             """,
             (
                 "scheduled",
@@ -93,7 +93,7 @@ def test_sqlite_initialization_upgrades_legacy_runs_table(tmp_path):
                 "2026-09-09T00:00:00+00:00",
                 "2026-09-10T00:00:00+00:00",
                 "", "", "",
-                None, None,
+                None,
                 "{}",
             ),
         )

@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 test('delete draft, archive and restore published dataset, confirm run scope',async({page,request})=>{
  const name='生命周期-'+Date.now()
- const created=await (await request.post('/api/datasets',{data:{name}})).json();const id=created.dataset.id
+ const created=(await (await request.post('/api/datasets',{data:{name}})).json()).data;const id=created.dataset.id
  try{
   await page.goto('/#datasets');await page.getByLabel('搜索评测集',{exact:true}).fill(id)
   const row=page.getByTestId('dataset-item-'+id)
@@ -10,7 +10,7 @@ test('delete draft, archive and restore published dataset, confirm run scope',as
   await expect(row).toHaveCount(0)
   expect((await request.get('/api/datasets/'+id)).status()).toBe(404)
  }finally{await request.delete('/api/datasets/'+id+'/unpublished')}
- const copy=await (await request.post('/api/datasets/loan-risk-policy/copy',{data:{name:name+'发布',source_version:1}})).json()
+ const copy=(await (await request.post('/api/datasets/loan-risk-policy/copy',{data:{name:name+'发布',source_version:1}})).json()).data
  const cid=copy.dataset.id
  try{
   expect((await request.post('/api/datasets/'+cid+'/drafts/publish',{headers:{'If-Match':copy.draft.content_sha256}})).ok()).toBeTruthy()

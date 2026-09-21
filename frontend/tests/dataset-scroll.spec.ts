@@ -3,7 +3,7 @@ import {test,expect} from '@playwright/test'
 test('dataset editor grows with all turns and the page can reach every field without clipping',async({page,request})=>{
  const response=await request.post('/api/datasets/loan-risk-policy/copy',{data:{name:'滚动验收-'+Date.now(),source_version:1}})
  expect(response.ok()).toBeTruthy()
- const created=await response.json(),id=created.dataset.id
+ const created=(await response.json()).data,id=created.dataset.id
  try{
   await page.goto('/#datasets/'+id)
   await expect(page.getByTestId('case-name')).toBeVisible()
@@ -35,7 +35,7 @@ test('dataset editor grows with all turns and the page can reach every field wit
   const response=await saving
   expect(response.ok(),await response.text()).toBeTruthy()
   await expect(page.getByText('用例已保存到草稿',{exact:true})).toBeVisible()
-  const saved=await(await request.get('/api/datasets/'+id+'/drafts/current')).json()
+  const saved=(await(await request.get('/api/datasets/'+id+'/drafts/current')).json()).data
   expect(saved.cases[0].turns).toHaveLength(3)
   expect(saved.cases[0].turns[2].input).toEqual({question:'第三轮输入可完整编辑'})
  }finally{

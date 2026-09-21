@@ -12,14 +12,14 @@ test('review 0911 cards and explicit expected output persist to published backen
  await page.getByTestId('submit-dataset').click()
  await expect(page.getByRole('heading',{name,exact:true})).toBeVisible()
  await expect(page.getByTestId('run-dataset-version')).toBeDisabled()
- id=(await(await request.get('/api/datasets')).json()).find((d:any)=>d.name===name).id
+ id=(await(await request.get('/api/datasets')).json()).data.find((d:any)=>d.name===name).id
  await page.getByRole('button',{name:'新增用例',exact:true}).click()
  await page.getByTestId('case-name').fill('期望输出持久化')
  await page.getByTestId('turn-input-0').fill('{"application_id":"TEST-0911","skill":"loan_approval","risk":"high","amount":80000}')
  await page.getByTestId('turn-output-0').fill('{"status":"pending_review"}')
  await page.getByTestId('save-case').click()
  await expect(page.getByText('用例已保存到草稿',{exact:true})).toBeVisible()
- const draft=await(await request.get('/api/datasets/'+id+'/drafts/current')).json()
+ const draft=(await(await request.get('/api/datasets/'+id+'/drafts/current')).json()).data
  const output=draft.cases[0].turns[0].expectations.find((e:any)=>e.kind==='output')
  expect(output.condition).toEqual({kind:'equals',expected:{status:'pending_review'}})
  await page.getByTestId('back-datasets').click()
@@ -63,11 +63,11 @@ test('overview has five honest metrics with interval switching',async({page})=>{
 })
 
 test('task creation refuses rules with no applicable expectations without submitting',async({page,request})=>{
- const created=await(await request.post('/api/datasets',{data:{name:'0911-no-criteria-'+Date.now()}})).json()
+ const created=(await(await request.post('/api/datasets',{data:{name:'0911-no-criteria-'+Date.now()}})).json()).data
  const id=created.dataset.id
  try{
  const added=await(await request.post('/api/datasets/'+id+'/drafts/cases',{headers:{'If-Match':created.draft.content_sha256},
- data:{id:'no-criteria',name:'无评判条件',turns:[{id:'turn',input:{query:'hello'},expectations:[]}],initial_state:{},category:'positive',difficulty:'easy',tags:[],notes:''}})).json()
+ data:{id:'no-criteria',name:'无评判条件',turns:[{id:'turn',input:{query:'hello'},expectations:[]}],initial_state:{},category:'positive',difficulty:'easy',tags:[],notes:''}})).json()).data
  expect((await request.post('/api/datasets/'+id+'/drafts/publish',{headers:{'If-Match':added.content_sha256}})).ok()).toBeTruthy()
  await page.goto('/#tasks')
  await page.getByRole('button',{name:'新建评测任务',exact:true}).click()
@@ -90,7 +90,7 @@ test('new AB invokes upstream pair launch endpoint with frozen common versions',
  const response=page.waitForResponse(r=>r.url().endsWith('/api/run-comparisons')&&r.request().method()==='POST')
  await page.getByRole('button',{name:'创建并运行两侧任务'}).click()
  const r=await response;expect(r.status()).toBe(202)
- const body=await r.json()
+ const body=(await r.json()).data
  expect(body.baseline.run_id).not.toBe(body.candidate.run_id)
  await expect(page.getByRole('heading',{name:'两侧任务已提交'})).toBeVisible()
  await expect(page.getByRole('button',{name:'查看对比结果'})).toBeEnabled({timeout:30000})

@@ -26,8 +26,8 @@ def prepare_script_tree(tmp_path, settings):
     for name in (
         "scripts/run.sh",
         "scripts/dispatch-scheduled-runs.py",
-        "script/bjs/run_eval.sh",
-        "script/bjs/run_evaluation.py",
+        "scripts/bjs/run_eval.sh",
+        "scripts/bjs/run_evaluation.py",
     ):
         destination = root / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +127,7 @@ def test_bjs_shell_wrapper_uses_same_configuration(tmp_path):
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["AGENTGATE_LOG_PATH"] = str(tmp_path / "logs")
     result = subprocess.run(
-        ["bash", str(root / "script/bjs/run_eval.sh"), run.id],
+        ["bash", str(root / "scripts/bjs/run_eval.sh"), run.id],
         cwd=tmp_path,
         env=env,
         capture_output=True,

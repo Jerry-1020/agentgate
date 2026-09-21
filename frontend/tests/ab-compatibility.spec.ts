@@ -4,7 +4,7 @@ import {selectHistoryTask} from './history-selection'
 
 const sourceId='eefeb1f1-a588-4eb0-9d76-8e644c940d37'
 async function seed(request:APIRequestContext){
- const source=await(await request.get('/api/runs/'+sourceId)).json()
+ const source=(await(await request.get('/api/runs/'+sourceId)).json()).data
  return ['a','b','c'].map((side,index)=>{
   const report=structuredClone(source)
   report.run.id='ab-ux-'+side
@@ -19,11 +19,11 @@ async function seed(request:APIRequestContext){
 }
 const comparison={metric_deltas:[],case_deltas:[],overall_score_delta:0}
 async function mount(page:Page,reports:any[]){
- await page.route('**/api/runs?*',r=>r.fulfill({json:reports.map(report=>report.run)}))
- await page.route('**/api/runs/page?*',r=>r.fulfill({json:{items:reports.map(report=>report.run),total:reports.length}}))
+ await page.route('**/api/runs?*',r=>r.fulfill({json:{code:'0',message:'success',data:reports.map(report=>report.run)}}))
+ await page.route('**/api/runs/page?*',r=>r.fulfill({json:{code:'0',message:'success',data:{items:reports.map(report=>report.run),total:reports.length}}}))
  await page.route('**/api/runs/ab-ux-*',r=>{
   const report=reports.find(report=>r.request().url().endsWith('/'+report.run.id))
-  return r.fulfill({status:report?200:404,json:report??{detail:'未找到测试报告'}})
+  return r.fulfill({status:report?200:404,json:report?{code:'0',message:'success',data:report}:{code:'1',message:'未找到测试报告',data:null}})
  })
  await page.goto('/#experiments')
  await expect(page.getByRole('button',{name:'刷新任务',exact:true})).toBeEnabled()
@@ -64,7 +64,7 @@ test('history requires only two records; selection automatically fetches results
  page.on('request',r=>{if(r.url().includes('/api/')&&r.method()!=='GET')writes.push(r.url())})
  page.on('pageerror',e=>errors.push(e.message))
  let comparisons=0
- await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:comparison})})
+ await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:{code:'0',message:'success',data:comparison}})})
  await mount(page,await seed(request))
  await expect(page.locator('.tabs > button')).toHaveText(['创建实验并运行','比较已有结果'])
  await expect(page.getByTestId('ab-side').first().getByRole('heading',{name:'实验A',exact:true})).toBeVisible()
@@ -93,7 +93,7 @@ test('history requires only two records; selection automatically fetches results
 
 test('seven versus one is only displayed side by side; compatible records automatically compare',async({page,request})=>{
  let comparisons=0
- await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:comparison})})
+ await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:{code:'0',message:'success',data:comparison}})})
  await mount(page,await seed(request))
  await selectHistoryTask(page,0,'ab-ux-a')
  await selectHistoryTask(page,1,'ab-ux-b')
@@ -110,7 +110,7 @@ test('seven versus one is only displayed side by side; compatible records automa
 
 test('server validation failure is translated; retry loads results without submitting a task',async({page,request})=>{
  let fail=true
- await page.route('**/api/run-comparisons?*',route=>route.fulfill(fail?{status:409,json:{detail:'reports use different primary Evaluators'}}:{json:comparison}))
+ await page.route('**/api/run-comparisons?*',route=>route.fulfill(fail?{status:409,json:{code:'1',message:'reports use different primary Evaluators',data:null}}:{json:{code:'0',message:'success',data:comparison}}))
  await mount(page,await seed(request))
  await selectHistoryTask(page,0,'ab-ux-a')
  await selectHistoryTask(page,1,'ab-ux-c')
@@ -126,9 +126,9 @@ test('server validation failure is translated; retry loads results without submi
 
 test('report read failure blocks comparison and retries automatically after the report is recovered',async({page,request})=>{
  let comparisons=0
- await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:comparison})})
+ await page.route('**/api/run-comparisons?*',route=>{comparisons++;return route.fulfill({json:{code:'0',message:'success',data:comparison}})})
  await mount(page,await seed(request))
- await page.route('**/api/runs/ab-ux-c',route=>route.fulfill({status:503,json:{detail:'暂不可用'}}))
+ await page.route('**/api/runs/ab-ux-c',route=>route.fulfill({status:503,json:{code:'1',message:'暂不可用',data:null}}))
  await selectHistoryTask(page,0,'ab-ux-a')
  const selector=page.getByRole('combobox',{name:'实验B已完成任务'})
  await selector.click();await selector.fill('ab-ux-c');await page.getByRole('listbox',{name:'实验B已完成任务'}).getByTestId('run-option-ab-ux-c').click()
@@ -144,7 +144,7 @@ for(const lateStatus of [200,409]){
  test('late comparison '+lateStatus+' cannot overwrite a newly selected pair',async({page,request})=>{
   let release!:()=>void
   const gate=new Promise<void>(resolve=>{release=resolve})
-  await page.route('**/api/run-comparisons?*',async route=>{await gate;await route.fulfill(lateStatus===200?{json:comparison}:{status:409,json:{detail:'reports use different primary Evaluators'}})})
+  await page.route('**/api/run-comparisons?*',async route=>{await gate;await route.fulfill(lateStatus===200?{json:{code:'0',message:'success',data:comparison}}:{status:409,json:{code:'1',message:'reports use different primary Evaluators',data:null}})})
   await mount(page,await seed(request))
   await selectHistoryTask(page,0,'ab-ux-a')
   await selectHistoryTask(page,1,'ab-ux-c')
@@ -159,7 +159,7 @@ for(const lateStatus of [200,409]){
 }
 
 test('clearing selection removes old differences and the same run cannot be selected twice',async({page,request})=>{
- await page.route('**/api/run-comparisons?*',r=>r.fulfill({json:comparison}))
+ await page.route('**/api/run-comparisons?*',r=>r.fulfill({json:{code:'0',message:'success',data:comparison}}))
  await mount(page,await seed(request))
  await selectHistoryTask(page,0,'ab-ux-a');await selectHistoryTask(page,1,'ab-ux-c')
  await expect(page.getByTestId('comparison-results')).toBeVisible()
@@ -180,10 +180,10 @@ test('history loads every page, ignores unfinished records and offers a list ret
  let fail=true;const offsets:string[]=[]
  await page.route('**/api/runs/page?*',route=>{
   if(new URL(route.request().url()).searchParams.get('status')!=='completed')return route.fallback()
-  if(fail)return route.fulfill({status:503,json:{detail:'temporarily unavailable'}})
+  if(fail)return route.fulfill({status:503,json:{code:'1',message:'temporarily unavailable',data:null}})
   const offset=new URL(route.request().url()).searchParams.get('offset')??'0';offsets.push(offset)
   const items=offset==='0'?[reports[0].run]:[reports[2].run,{...reports[1].run,status:'running'}]
-  return route.fulfill({json:{items,total:3}})
+  return route.fulfill({json:{code:'0',message:'success',data:{items,total:3}}})
  })
  await page.getByRole('button',{name:'刷新任务',exact:true}).click()
  await expect(page.getByRole('alert').filter({hasText:'已完成任务列表读取失败'})).toBeVisible()

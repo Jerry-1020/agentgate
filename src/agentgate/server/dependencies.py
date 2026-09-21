@@ -124,7 +124,6 @@ class ServerDependencies:
         max_retries: int = 0,
         scheduled_for: datetime | None = None,
         api_key: str | None = None,
-        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         """Create one POC Loan Agent Run and dispatch it when eligible."""
 
@@ -141,7 +140,6 @@ class ServerDependencies:
             scheduled_for=scheduled_for,
             persist=False,
             api_key=api_key,
-            case_max_parallel=case_max_parallel,
         )
         self.repository.save_task_runs(EvaluationTask(id=run.id, kind="single", run_ids=(run.id,)), [run])
         if run.status is RunStatus.SCHEDULED:
@@ -208,7 +206,7 @@ class ServerDependencies:
             raise ValueError("stability does not support scheduling")
         runs = [template, *(EvaluationRun(manifest=template.manifest,
             user_team_id=template.user_team_id, user_id=template.user_id,
-            user_name=template.user_name, case_max_parallel=template.case_max_parallel)
+            user_name=template.user_name)
             for _ in range(repetitions - 1))]
         task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
         self.repository.save_task_runs(task, runs)
@@ -234,7 +232,6 @@ class ServerDependencies:
         scheduled_for: datetime | None = None,
         persist: bool = True,
         api_key: str | None = None,
-        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         target = self._resolve_demo_target(version)
         return self.runs.create_run(
@@ -249,7 +246,6 @@ class ServerDependencies:
             scheduled_for=scheduled_for,
             persist=persist,
             api_key=api_key,
-            case_max_parallel=case_max_parallel,
         )
 
     def _resolve_demo_target(self, version: str) -> TargetSnapshot:

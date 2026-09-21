@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test'
 test('unified tasks, legacy reports and optimizer return path',async({page,request})=>{
- const runs=await (await request.get('/api/runs?limit=200')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  const run=runs.find((r:any)=>r.status==='completed')
  expect(run).toBeTruthy()
  await page.goto('/#tasks')
