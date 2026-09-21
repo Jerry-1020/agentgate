@@ -1,14 +1,12 @@
 """Process-local execution shared by Celery workers and BJS jobs."""
 
-from contextlib import closing
+from contextlib import ExitStack, closing
 
 from agentgate.application import RunManagement
 from agentgate.application.evaluator_management import build_default_evaluator_management
 from agentgate.domain import RunStatus
 from agentgate.integrations.model_providers.environment import load_judge_model_from_environment
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
-from agentgate.integrations.targets.local_bank import LocalBankAdapter, resolve_local_bank_trace
+from agentgate.integrations.targets.execution_factory import TargetExecutionFactory
 from agentgate.storage.configuration import create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
 
@@ -27,15 +25,17 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
         raise ValueError(f"unknown EvaluationRun: {run_id}")
     if run.status is not RunStatus.PENDING:
         return run.status.value
-    if run.manifest.target.adapter_type not in {
-        DemoLoanTargetAdapter.adapter_type,
-        LocalBankAdapter.adapter_type,
-    }:
-        raise ValueError("Worker does not support the Run Target adapter type")
+    target = run.manifest.target
+    if target.adapter_type in {"local_bank", "inbank_chatabc", "inbank_yunxia"} and (
+        run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1
+    ):
+        raise ValueError(f"{target.adapter_type} execution requires no retries and serial cases")
 
-    configured_judge = load_judge_model_from_environment()
-    capture: InMemoryTraceCapture | None = None
-    try:
+    with ExitStack() as resources:
+        adapter, trace_resolver = TargetExecutionFactory.create(target, resources)
+        configured_judge = load_judge_model_from_environment()
+        if configured_judge is not None:
+            resources.callback(configured_judge.client.close)
         evaluator_management = (
             build_default_evaluator_management(repository)
             if configured_judge is None
@@ -46,29 +46,9 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                 judge_credential_ref=configured_judge.credential_ref,
             )
         )
-        if run.manifest.target.adapter_type == LocalBankAdapter.adapter_type:
-            if (
-                run.manifest.max_retries != 0
-                or run.manifest.max_parallel_cases != 1
-            ):
-                raise ValueError("local bank execution requires no retries and serial cases")
-            completed = RunManagement(repository, evaluator_management).execute_run(
-                run.id,
-                LocalBankAdapter(),
-                resolve_local_bank_trace,
-            )
-            return completed.status.value
-        capture = InMemoryTraceCapture()
         completed = RunManagement(repository, evaluator_management).execute_run(
             run.id,
-            DemoLoanTargetAdapter(capture),
-            capture.resolve,
+            adapter,
+            trace_resolver,
         )
-    finally:
-        try:
-            if capture is not None:
-                capture.shutdown()
-        finally:
-            if configured_judge is not None:
-                configured_judge.client.close()
-    return completed.status.value
+        return completed.status.value
