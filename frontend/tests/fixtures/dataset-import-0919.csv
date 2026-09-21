@@ -1,0 +1,3 @@
+case_id,case_name,turn_order,query,expected,category
+csv-0919,CSV双轮验收,1,"测试输入，含逗号",请继续提供信息,boundary
+csv-0919,CSV双轮验收,2,补充测试信息,仅用于联调验收,boundary

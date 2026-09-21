@@ -20,7 +20,7 @@ test('stability form persists three real runs and restores summary',async({page,
  await expect(page.locator('tbody tr')).toHaveCount(3)
  const context=await browser.newContext()
  try{
-  const fresh=await context.newPage();await fresh.goto('http://127.0.0.1:5197/#stability/'+task.id)
+  const fresh=await context.newPage();await fresh.goto('http://127.0.0.1:5198/#stability/'+task.id)
   await expect(fresh.locator('tbody tr')).toHaveCount(3)
   await fresh.screenshot({path:'../runtime/stability-real-summary.png',fullPage:true})
  }finally{await context.close()}

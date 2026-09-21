@@ -1,8 +1,8 @@
 import {selectHistoryTask} from './history-selection'
 import {test,expect} from '@playwright/test'
-import {previewSources,type MergeSource} from '../src/revision/merge-preview'
-import {toApiCase} from '../src/upstream/api/datasets'
-import type {EvaluationCase} from '../src/upstream/types/dataset'
+import {previewSources,type MergeSource} from '../src/views/evaluation/utils/merge-preview'
+import {toApiCase} from '../src/api/datasets'
+import type {EvaluationCase} from '../src/views/datasets/types/index'
 
 test('editor transport preserves named output and special route conditions',()=>{
  const original:any[]=[

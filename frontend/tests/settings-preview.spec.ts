@@ -1,5 +1,5 @@
 import {test,expect,type Page} from '@playwright/test'
-import {seedSettings,visibleConnections,connectionState,validateConnection,validateCredential,settingsCapability} from '../src/revision/settings-preview'
+import {seedSettings,visibleConnections,connectionState,validateConnection,validateCredential,settingsCapability} from '../src/views/evaluation/utils/settings-preview'
 
 test('preview model scope is the intersection of model and credential authorization',()=>{
  const catalog=seedSettings(),model=catalog.connections[0]!,key=catalog.credentials[0]!

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 
-import { runsApi } from '../api/runs'
-import type { RunActivity, RunProgress, RunStatus } from '../types/run'
+import { runsApi } from '../../api/runs';
+import type { RunActivity, RunProgress, RunStatus } from '../../views/evaluation/types/run';
 
-const emit = defineEmits<{ openReport: [runId: string] }>()
+const emit = defineEmits<{ openReport: [runId: string] }>();
 
 const EMPTY_ACTIVITY: RunActivity = {
   status_counts: {
@@ -19,21 +19,21 @@ const EMPTY_ACTIVITY: RunActivity = {
   queued: [],
   running: [],
   recent: [],
-}
+};
 
-const activity = ref<RunActivity>(EMPTY_ACTIVITY)
-const activeView = ref<'queued' | 'running' | 'history'>('queued')
-const loading = ref(false)
-let pollTimer: ReturnType<typeof setTimeout> | undefined
+const activity = ref<RunActivity>(EMPTY_ACTIVITY);
+const activeView = ref<'queued' | 'running' | 'history'>('queued');
+const loading = ref(false);
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
 const rows = computed(() => {
-  if (activeView.value === 'queued') return activity.value.queued
-  if (activeView.value === 'running') return activity.value.running
-  return activity.value.recent
-})
+  if (activeView.value === 'queued') return activity.value.queued;
+  if (activeView.value === 'running') return activity.value.running;
+  return activity.value.recent;
+});
 const hasActiveRuns = computed(
   () => activity.value.queued.length > 0 || activity.value.running.length > 0,
-)
+);
 
 const statusLabels: Record<RunStatus, string> = {
   scheduled: '已预约',
@@ -42,59 +42,59 @@ const statusLabels: Record<RunStatus, string> = {
   completed: '已完成',
   failed: '失败',
   cancelled: '已取消',
-}
+};
 
 function schedulePoll() {
-  if (pollTimer !== undefined) clearTimeout(pollTimer)
-  pollTimer = undefined
-  if (!hasActiveRuns.value) return
+  if (pollTimer !== undefined) clearTimeout(pollTimer);
+  pollTimer = undefined;
+  if (!hasActiveRuns.value) return;
   pollTimer = setTimeout(() => {
     refresh().catch((error) => {
-      ElMessage.error(error instanceof Error ? error.message : '刷新运行状态失败')
-    })
-  }, 2000)
+      ElMessage.error(error instanceof Error ? error.message : '刷新运行状态失败');
+    });
+  }, 2000);
 }
 
 async function refresh() {
-  loading.value = true
+  loading.value = true;
   try {
-    activity.value = await runsApi.activity()
+    activity.value = await runsApi.activity();
   } finally {
-    loading.value = false
-    schedulePoll()
+    loading.value = false;
+    schedulePoll();
   }
 }
 
 function formatTime(value: string | null) {
-  if (!value) return '—'
+  if (!value) return '—';
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  }).format(new Date(value))
+  }).format(new Date(value));
 }
 
 function formatDuration(seconds: number | null) {
-  if (seconds === null) return '—'
-  if (seconds < 60) return `${seconds.toFixed(1)} 秒`
-  return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`
+  if (seconds === null) return '—';
+  if (seconds < 60) return `${seconds.toFixed(1)} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`;
 }
 
 function openReport(run: RunProgress) {
-  if (run.status === 'completed') emit('openReport', run.run_id)
+  if (run.status === 'completed') emit('openReport', run.run_id);
 }
 
 onMounted(() => {
   refresh().catch((error) => {
-    ElMessage.error(error instanceof Error ? error.message : '加载运行状态失败')
-  })
-})
+    ElMessage.error(error instanceof Error ? error.message : '加载运行状态失败');
+  });
+});
 
 onUnmounted(() => {
-  if (pollTimer !== undefined) clearTimeout(pollTimer)
-})
+  if (pollTimer !== undefined) clearTimeout(pollTimer);
+});
 </script>
 
 <template>
@@ -110,11 +110,26 @@ onUnmounted(() => {
       </div>
 
       <div class="run-stat-grid" aria-label="运行状态统计">
-        <article><strong>{{ activity.status_counts.pending }}</strong><span>排队中</span></article>
-        <article><strong>{{ activity.status_counts.running }}</strong><span>运行中</span></article>
-        <article><strong>{{ activity.status_counts.completed }}</strong><span>已完成</span></article>
-        <article><strong>{{ activity.status_counts.failed }}</strong><span>失败</span></article>
-        <article><strong>{{ activity.status_counts.cancelled }}</strong><span>已取消</span></article>
+        <article>
+          <strong>{{ activity.status_counts.pending }}</strong
+          ><span>排队中</span>
+        </article>
+        <article>
+          <strong>{{ activity.status_counts.running }}</strong
+          ><span>运行中</span>
+        </article>
+        <article>
+          <strong>{{ activity.status_counts.completed }}</strong
+          ><span>已完成</span>
+        </article>
+        <article>
+          <strong>{{ activity.status_counts.failed }}</strong
+          ><span>失败</span>
+        </article>
+        <article>
+          <strong>{{ activity.status_counts.cancelled }}</strong
+          ><span>已取消</span>
+        </article>
       </div>
 
       <div class="run-filter" role="tablist" aria-label="运行筛选">
@@ -124,27 +139,35 @@ onUnmounted(() => {
           role="tab"
           data-testid="runs-queued"
           @click="activeView = 'queued'"
-        >排队中 · {{ activity.queued.length }}</button>
+        >
+          排队中 · {{ activity.queued.length }}
+        </button>
         <button
           type="button"
           :class="{ active: activeView === 'running' }"
           role="tab"
           data-testid="runs-running"
           @click="activeView = 'running'"
-        >运行中 · {{ activity.running.length }}</button>
+        >
+          运行中 · {{ activity.running.length }}
+        </button>
         <button
           type="button"
           :class="{ active: activeView === 'history' }"
           role="tab"
           data-testid="runs-history"
           @click="activeView = 'history'"
-        >最近历史 · {{ activity.recent.length }}</button>
+        >
+          最近历史 · {{ activity.recent.length }}
+        </button>
       </div>
 
       <div class="run-list" :aria-busy="loading">
         <article v-for="run in rows" :key="run.run_id" class="run-row">
           <div class="run-identity">
-            <span class="run-status" :class="`status-${run.status}`">{{ statusLabels[run.status] }}</span>
+            <span class="run-status" :class="`status-${run.status}`">{{
+              statusLabels[run.status]
+            }}</span>
             <b>{{ run.target_name }} · {{ run.target_version }}</b>
             <small>{{ run.dataset_name }} v{{ run.dataset_version }}</small>
           </div>
@@ -161,9 +184,18 @@ onUnmounted(() => {
             />
           </div>
           <dl>
-            <div><dt>提交</dt><dd>{{ formatTime(run.created_at) }}</dd></div>
-            <div><dt>开始</dt><dd>{{ formatTime(run.started_at) }}</dd></div>
-            <div><dt>耗时</dt><dd>{{ formatDuration(run.duration_seconds) }}</dd></div>
+            <div>
+              <dt>提交</dt>
+              <dd>{{ formatTime(run.created_at) }}</dd>
+            </div>
+            <div>
+              <dt>开始</dt>
+              <dd>{{ formatTime(run.started_at) }}</dd>
+            </div>
+            <div>
+              <dt>耗时</dt>
+              <dd>{{ formatDuration(run.duration_seconds) }}</dd>
+            </div>
           </dl>
           <div class="run-action">
             <span v-if="run.queue_position !== null">队列第 {{ run.queue_position }} 位</span>
@@ -173,7 +205,8 @@ onUnmounted(() => {
               link
               type="primary"
               @click="openReport(run)"
-            >查看结果</el-button>
+              >查看结果</el-button
+            >
           </div>
         </article>
         <el-empty v-if="!loading && rows.length === 0" description="当前筛选下暂无运行" />

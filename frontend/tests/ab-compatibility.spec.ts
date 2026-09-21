@@ -1,5 +1,5 @@
 import {test,expect,type Page,type APIRequestContext} from '@playwright/test'
-import {comparisonIssues,reportComparisonIssues,comparisonErrorMessage} from '../src/revision/comparison-compatibility'
+import {comparisonIssues,reportComparisonIssues,comparisonErrorMessage} from '../src/views/evaluation/utils/comparison-compatibility'
 import {selectHistoryTask} from './history-selection'
 
 const sourceId='eefeb1f1-a588-4eb0-9d76-8e644c940d37'
