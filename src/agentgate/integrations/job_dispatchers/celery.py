@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from contextlib import closing
+from urllib.parse import urlsplit
 
 from celery import Celery
 from celery.app.task import Task
@@ -17,6 +19,9 @@ TASK_NAME = "agentgate.execute_evaluation_run"
 SCHEDULER_TASK_NAME = "agentgate.dispatch_due_evaluation_runs"
 SCHEDULER_QUEUE = "agentgate.scheduler"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+DEFAULT_REDIS_MODE = "single"
+DEFAULT_REDIS_CLUSTER_HASH_TAG = "{agentgate}"
+REDIS_CLUSTER_TRANSPORT = "agentgate.integrations.job_dispatchers.redis_cluster_transport:Transport"
 DEFAULT_TASK_TIME_LIMIT_SECONDS = 360
 DEFAULT_SCHEDULER_INTERVAL_SECONDS = 10
 
@@ -32,18 +37,57 @@ def _positive_int_setting(name: str, default: int) -> int:
     return value
 
 
+def _redis_broker_configuration(
+    environ: Mapping[str, str] | None = None,
+) -> tuple[str, dict[str, object]]:
+    settings = os.environ if environ is None else environ
+    broker_url = settings.get("AGENTGATE_REDIS_URL", DEFAULT_REDIS_URL).strip()
+    mode = settings.get("AGENTGATE_REDIS_MODE", DEFAULT_REDIS_MODE).strip().lower()
+
+    if mode == "single":
+        return broker_url, {}
+    if mode != "cluster":
+        raise ValueError("AGENTGATE_REDIS_MODE must be single or cluster")
+
+    parsed_url = urlsplit(broker_url)
+    if parsed_url.scheme not in {"redis", "rediss"}:
+        raise ValueError("AGENTGATE_REDIS_URL must use redis:// or rediss:// in cluster mode")
+    if parsed_url.path not in {"", "/", "/0"}:
+        raise ValueError("Redis Cluster supports only database 0")
+
+    hash_tag = settings.get(
+        "AGENTGATE_REDIS_CLUSTER_HASH_TAG",
+        DEFAULT_REDIS_CLUSTER_HASH_TAG,
+    ).strip()
+    if (
+        len(hash_tag) < 3
+        or not hash_tag.startswith("{")
+        or not hash_tag.endswith("}")
+        or "{" in hash_tag[1:-1]
+        or "}" in hash_tag[1:-1]
+    ):
+        raise ValueError("AGENTGATE_REDIS_CLUSTER_HASH_TAG must be a non-empty Redis hash tag")
+
+    return broker_url, {
+        "broker_transport": REDIS_CLUSTER_TRANSPORT,
+        "broker_transport_options": {"hash_tag": hash_tag},
+    }
+
+
 def create_celery_app() -> Celery:
     """Build the process-local Celery application from environment settings."""
 
+    broker_url, broker_configuration = _redis_broker_configuration()
     app = Celery(
         "agentgate",
-        broker=os.getenv("AGENTGATE_REDIS_URL", DEFAULT_REDIS_URL),
+        broker=broker_url,
     )
     scheduler_interval = _positive_int_setting(
         "AGENTGATE_SCHEDULER_INTERVAL_SECONDS",
         DEFAULT_SCHEDULER_INTERVAL_SECONDS,
     )
     app.conf.update(
+        **broker_configuration,
         accept_content=["json"],
         result_backend=None,
         result_serializer="json",
@@ -56,9 +100,7 @@ def create_celery_app() -> Celery:
             "AGENTGATE_TASK_TIME_LIMIT_SECONDS",
             DEFAULT_TASK_TIME_LIMIT_SECONDS,
         ),
-        worker_concurrency=_positive_int_setting(
-            "AGENTGATE_WORKER_CONCURRENCY", 1
-        ),
+        worker_concurrency=_positive_int_setting("AGENTGATE_WORKER_CONCURRENCY", 1),
         worker_prefetch_multiplier=1,
         task_routes={
             SCHEDULER_TASK_NAME: {"queue": SCHEDULER_QUEUE},

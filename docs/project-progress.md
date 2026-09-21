@@ -149,7 +149,7 @@ These changes are in the local unified-task integration worktree, not a claim of
 | [x] | Stale-Run recovery | Fail Runs abandoned by an expired worker | `src/agentgate/application/run_management.py` |
 | [x] | Progress projection | Calculate completed Cases and Run progress from Results | `src/agentgate/application/result_reader.py` |
 | [x] | Activity projection | Return queued, running, and recent terminal Runs | `src/agentgate/application/result_reader.py` |
-| [x] | Celery dispatcher | Submit `run_id` through Redis | `src/agentgate/integrations/job_dispatchers/celery.py` |
+| [x] | Celery dispatcher | Submit `run_id` through standalone Redis or Redis Cluster selected by environment configuration | `src/agentgate/integrations/job_dispatchers/celery.py`, `src/agentgate/integrations/job_dispatchers/redis_cluster_transport.py` |
 | [x] | Celery worker | Load and execute the persisted Run with the same optional Judge catalog and task-local client cleanup | `src/agentgate/integrations/job_dispatchers/celery.py` |
 | [x] | Scheduled Runs | Persist one-time future execution, atomically release due Runs, and expose query/cancellation through Run APIs | `src/agentgate/domain/run.py`, `src/agentgate/application/run_scheduling.py`, `src/agentgate/storage/sqlite.py`, `src/agentgate/integrations/job_dispatchers/celery.py`, `src/agentgate/server/routes/runs.py` |
 | [ ] | Customer scheduler integration | Accept work from an external Java scheduler through the shared Run boundary | `src/agentgate/server/routes/runs.py` or `src/agentgate/integrations/job_dispatchers/`; planned after POC |
@@ -257,7 +257,7 @@ committed and pushed; review and merge remain.
 | Status | Capability | Function | Code location |
 |---|---|---|---|
 | [x] | Current backend regression | Verify the integrated backend including LLM root-cause analysis | `tests/` - 909 passing, 1 existing warning |
-| [x] | Redis/Celery integration | Verify broker, worker, state, queue visibility, and progress end to end | `tests/test_celery_dispatcher.py`, `web/tests/`, operational smoke |
+| [x] | Redis/Celery integration | Verify standalone configuration plus real three-master Redis Cluster broker delivery, worker consumption, and same-slot broker keys | `tests/test_celery_dispatcher.py`, `tests/test_redis_cluster_transport.py`, `tests/storage/test_redis_cluster_queue.py`, `web/tests/`, operational smoke |
 | [x] | Browser verification | Verify all currently implemented desktop and mobile workflows | `web/tests/` - 8 passing |
 | [x] | Documentation | Explain setup, APIs, Redis, Celery, and demo operation | `README.md`, `web/README.md`, `docs/` |
 | [ ] | Repository cleanup | Delete obsolete placeholders and compatibility code | Entire repository |
