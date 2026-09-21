@@ -63,7 +63,6 @@ class RunManagement:
         scheduled_for: datetime | None = None,
         persist: bool = True,
         api_key: str | None = None,
-        case_max_parallel: int | None = None,
     ) -> EvaluationRun:
         """Resolve exact inputs and persist a pending or scheduled Run."""
 
@@ -104,7 +103,7 @@ class RunManagement:
                 metric_plan=metric_plan or MetricPlan(),
                 gate_spec=gate_spec or ReleaseGateSpec(),
                 timeout_seconds=timeout_seconds,
-                max_parallel_cases=case_max_parallel if case_max_parallel is not None else max_parallel_cases,
+                max_parallel_cases=max_parallel_cases,
                 max_retries=max_retries,
             ),
             status=(
@@ -118,7 +117,6 @@ class RunManagement:
             user_id=user_id,
             user_name=user_name,
             api_key=api_key,
-            case_max_parallel=case_max_parallel,
         )
         if persist:
             self.repository.save_run(run)
@@ -149,7 +147,6 @@ class RunManagement:
             user_id=source.user_id,
             user_name=source.user_name,
             api_key=source.api_key,
-            case_max_parallel=source.case_max_parallel,
         )
         if persist:
             self.repository.save_run(rerun)

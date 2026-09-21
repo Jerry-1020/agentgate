@@ -122,7 +122,6 @@ runs = _table(
     _time("scheduled_for", nullable=True),
     *_team(),
     _text("api_key", nullable=True),
-    Column("case_max_parallel", SmallInteger),
     _text("payload"),
     Index("ix_runs_status_created", "status", "created_at"),
     Index("ix_runs_due", "status", "scheduled_for", "created_at"),

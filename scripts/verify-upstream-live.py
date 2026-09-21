@@ -68,7 +68,7 @@ with httpx.Client(base_url="http://127.0.0.1:8097", timeout=240, trust_env=False
         # A new risky Demo run deliberately supplies failure evidence for root-cause analysis.
         risky = call("POST", "/api/evaluations", json={"version": "loan-agent-v1-risky",
             "dataset_id": "loan-risk-policy", "dataset_version": 1,
-            "evaluator_ids": ["final-state", "required-tool", "forbidden-tool"], "case_max_parallel": 2})
+            "evaluator_ids": ["final-state", "required-tool", "forbidden-tool"], "max_parallel_cases": 2})
         risk_id = risky["run_id"]
         report["optimization_run_id"] = risk_id
         for _ in range(60):

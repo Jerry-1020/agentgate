@@ -234,7 +234,6 @@ CREATE TABLE {_T_RUNS} (
     user_id TEXT NOT NULL DEFAULT '',
     user_name TEXT NOT NULL DEFAULT '',
     api_key TEXT,
-    case_max_parallel INTEGER,
     payload TEXT NOT NULL
 )
 """
@@ -314,9 +313,9 @@ class SQLiteRepository:
             db.execute("BEGIN IMMEDIATE")
             for run in runs:
                 references = self._run_asset_references(db, run)
-                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name,case_max_parallel) VALUES(?,?,?,?,?,?,?,?,?)",
+                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name) VALUES(?,?,?,?,?,?,?,?)",
                            (run.id, run.status, run.created_at.isoformat(), run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run),
-                            run.user_team_id, run.user_id, run.user_name, run.case_max_parallel))
+                            run.user_team_id, run.user_id, run.user_name))
                 db.executemany(f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)", references)
             db.execute("INSERT INTO evaluation_tasks VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
             db.executemany("INSERT INTO evaluation_task_runs VALUES(?,?)", [(r.id, task.id) for r in runs])
@@ -405,7 +404,7 @@ class SQLiteRepository:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
                     db.execute(f"UPDATE {table} SET {name}=COALESCE(json_extract(payload, '$.{name}'), '')")
             if table == _T_RUNS:
-                for name, kind in (("api_key", "TEXT"), ("case_max_parallel", "INTEGER")):
+                for name, kind in (("api_key", "TEXT"),):
                     if name not in columns:
                         db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
@@ -1325,9 +1324,9 @@ class SQLiteRepository:
                     INSERT INTO {_T_RUNS}(
                         id,status,created_at,scheduled_for,
                         user_team_id,user_id,user_name,
-                        api_key,case_max_parallel,
+                        api_key,
                         payload
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         run.id,
@@ -1342,7 +1341,6 @@ class SQLiteRepository:
                         run.user_id,
                         run.user_name,
                         run.api_key,
-                        run.case_max_parallel,
                         canonical_json(run),
                     ),
                 )
@@ -1373,13 +1371,13 @@ class SQLiteRepository:
                 f"""
                 UPDATE {_T_RUNS} SET status = ?, payload = ?,
                     user_team_id = ?, user_id = ?, user_name = ?,
-                    api_key = ?, case_max_parallel = ?
+                    api_key = ?
                 WHERE id = ?
                 """,
                 (
                     run.status, canonical_json(run),
                     run.user_team_id, run.user_id, run.user_name,
-                    run.api_key, run.case_max_parallel,
+                    run.api_key,
                     run.id,
                 ),
             )
