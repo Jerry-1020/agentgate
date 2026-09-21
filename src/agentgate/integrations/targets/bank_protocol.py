@@ -97,8 +97,9 @@ def parse_bank_sse(lines: Iterable[str], *, protocol: BankProtocol,
         elif name == "start":
             if not isinstance(payload, dict) or payload.get("request_id", request_id) != request_id:
                 raise TargetExecutionError("protocol_error", "customer request ID mismatch")
-        elif name not in {"progress", "chat_started", "chunk"}:
-            raise TargetExecutionError("protocol_error", "unknown SSE event")
+        else:
+            # Customer streams may add non-terminal progress and node events.
+            return
 
     for line in lines:
         size += len(line.encode("utf-8"))

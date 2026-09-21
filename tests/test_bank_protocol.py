@@ -46,6 +46,10 @@ def test_workflow_accepts_customer_auxiliary_events_and_nested_end_node():
                     "chunk_position": "last",
                 },
             }),
+            ("node_started", {
+                "node_id": "intentClassification",
+                "node_title": "意图识别",
+            }),
             ("message", {
                 "content": "",
                 "additional_kwargs": {
