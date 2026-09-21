@@ -204,29 +204,29 @@ skill_analysis_reviews = _table(
 )
 
 evaluation_tasks = _table(
-    "evaluation_tasks",
+    "agentgate_evaluation_tasks",
     *_identity(),
     _time("created_at"),
     _text("payload"),
-    Index("ix_tasks_created", "created_at"),
+    Index("ix_agentgate_evaluation_tasks_created", "created_at"),
 )
 evaluation_task_runs = _table(
-    "evaluation_task_runs",
+    "agentgate_evaluation_task_runs",
     _key("run_key", primary=True),
     _text("run_id"),
     _key("task_key"),
     _text("task_id"),
-    Index("ix_task_runs_task", "task_key"),
+    Index("ix_agentgate_evaluation_task_runs_task", "task_key"),
 )
 optimization_reports = _table(
-    "optimization_reports",
+    "agentgate_optimization_reports",
     _key("evidence_key_digest", primary=True),
     _text("evidence_key"),
     _key("run_key"),
     _text("run_id"),
     _time("created_at"),
     _text("payload"),
-    Index("ix_optimization_run", "run_key"),
+    Index("ix_agentgate_optimization_reports_run", "run_key"),
 )
 api_keys = _table(
     "agentgate_api_keys",

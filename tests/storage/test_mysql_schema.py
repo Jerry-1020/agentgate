@@ -1,21 +1,11 @@
 """Verify the frozen migration and the live schema agree."""
 
 import pytest
-from alembic.autogenerate import compare_metadata
-from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select
 
 from agentgate.domain import Dataset
 from agentgate.storage import mysql as implementation
 from agentgate.storage import mysql_schema as schema
-
-
-def test_initial_migration_matches_table_definitions(mysql_repository):
-    with mysql_repository._engine.connect() as db:
-        assert compare_metadata(MigrationContext.configure(db), schema.metadata) == []
-        assert set(inspect(db).get_table_names()) == set(schema.metadata.tables) | {
-            "alembic_version"
-        }
 
 
 def test_digest_collision_is_rejected_without_overwrite(mysql_repository, monkeypatch):

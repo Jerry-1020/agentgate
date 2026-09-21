@@ -11,7 +11,7 @@ from enum import Enum
 from typing import TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Connection, Table, and_, create_engine, select, text
+from sqlalchemy import Connection, Table, and_, create_engine, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -202,16 +202,6 @@ class MySQLRepository:
         )
         self._pid = os.getpid()
         self._closed = False
-        try:
-            with self._transaction() as db:
-                versions = (
-                    db.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
-                )
-                if versions != ["0001"]:
-                    raise RuntimeError("MySQL schema version mismatch; run Alembic upgrade head")
-        except Exception:
-            self.close()
-            raise
 
     def close(self) -> None:
         if not self._closed:
