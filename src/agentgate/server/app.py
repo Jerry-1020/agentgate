@@ -155,8 +155,8 @@ def create_app(
         async def dispatch(self, request: Request, call_next):
             info = UserInfo(
                 user_team_id=request.headers.get("user_team_id", ""),
-                user_id=request.headers.get("user_id", ""),
-                user_name=request.headers.get("user_name", ""),
+                user_id=request.headers.get("user_id") or "anonymous",
+                user_name=request.headers.get("user_name") or "匿名用户",
             )
             token = set_user_info(info)
             try:
