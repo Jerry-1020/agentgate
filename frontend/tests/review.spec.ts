@@ -53,7 +53,7 @@ test('three evaluator editors and real source display',async({page})=>{
 test('Bad Case becomes a regression draft and review persists',async({page,request})=>{
  const launch=await request.post('/api/evaluations',{data:{version:'loan-agent-v1-risky',dataset_id:'loan-risk-policy',dataset_version:1}})
  expect(launch.ok()).toBeTruthy()
- const {run_id}=await launch.json()
+ const {run_id}=(await launch.json()).data
  await page.goto('/#results/'+run_id)
  await expect(page.getByRole('button',{name:'创建回归评测集草稿'})).toBeVisible({timeout:30000})
  await page.getByRole('button',{name:'创建回归评测集草稿'}).click()
@@ -105,13 +105,13 @@ test('selectable mock evaluators and static analysis steps',async({page})=>{
 })
 
 test('static analysis click shows pending and actionable server failure',async({page})=>{
- await page.route('**/api/skill-analysis/capability',route=>route.fulfill({json:{configured:true,reason:null}}))
+ await page.route('**/api/skill-analysis/capability',route=>route.fulfill({json:{code:'0',message:'success',data:{configured:true,reason:null}}}))
  let requests=0
  let release!:()=>void
  const gate=new Promise<void>(resolve=>{release=resolve})
  await page.route('**/api/evaluations/skill-analysis',async route=>{
   requests++;await gate
-  await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Skill analysis is unavailable'})})
+  await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'1',message:'Skill analysis is unavailable',data:null})})
  })
  await page.goto('/#analysis')
  await page.getByLabel('检查对象',{exact:true}).selectOption('loan-agent-v1-risky')
@@ -149,7 +149,7 @@ test('examples, dataset sample loading and meaningful AB selection',async({page,
  await page.getByRole('button',{name:'保存复核'}).click()
  await expect(page.getByText(/演示复核，仅本页展示，不写入服务端/)).toBeVisible()
  const created=await request.post('/api/datasets',{data:{name:'交互测试样例-'+Date.now()}})
- const dataset=(await created.json()).dataset
+ const dataset=(await created.json()).data.dataset
  try{
   await page.goto('/#datasets/'+dataset.id)
   await page.getByRole('button',{name:'新增用例',exact:true}).click()
@@ -165,8 +165,8 @@ test('examples, dataset sample loading and meaningful AB selection',async({page,
  for(const version of ['loan-agent-v1-risky','loan-agent-v2-fixed']){
   const launched=await request.post('/api/evaluations',{data:{version,dataset_id:'loan-risk-policy',dataset_version:1}})
   expect(launched.ok()).toBeTruthy()
-  const {run_id}=await launched.json();runIds.push(run_id)
-  await expect.poll(async()=>{const response=await request.get('/api/runs/'+run_id+'/status');return (await response.json()).status},{timeout:30000}).toBe('completed')
+  const {run_id}=(await launched.json()).data;runIds.push(run_id)
+  await expect.poll(async()=>{const response=await request.get('/api/runs/'+run_id+'/status');return (await response.json()).data.status},{timeout:30000}).toBe('completed')
  }
  await page.getByRole('button',{name:'刷新任务',exact:true}).click()
  for(let i=0;i<2;i++)await selectHistoryTask(page,i,runIds[i])

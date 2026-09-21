@@ -70,14 +70,14 @@ def test_api_evaluation_and_persisted_trace(tmp_path, monkeypatch):
             "dataset_version": 1,
         })
         assert response.status_code == 202
-        run_id = response.json()["run_id"]
+        run_id = response.json()["data"]["run_id"]
         assert dispatcher.run_ids == [run_id]
         assert execute_evaluation_run.run(run_id) == "completed"
-        report = client.get(f"/api/runs/{run_id}").json()
+        report = client.get(f"/api/runs/{run_id}").json()["data"]
         assert report["release_gate"]["outcome"] == "fail"
         trace = client.get(f"/api/runs/{run_id}/traces/high-risk-approval")
         assert trace.status_code == 200
-        assert any(span["name"] == "approve_loan" for span in trace.json()["spans"])
+        assert any(span["name"] == "approve_loan" for span in trace.json()["data"]["spans"])
 
 
 def test_api_launch_requires_an_explicit_dataset_version(tmp_path):
@@ -92,7 +92,7 @@ def test_api_launch_requires_an_explicit_dataset_version(tmp_path):
 def test_otlp_http_uses_post_and_health_is_separate(tmp_path):
     payload = completed_otlp_payload()
     with TestClient(create_app(tmp_path / "otlp.db")) as client:
-        assert client.get("/health").json() == {"status": "ok"}
+        assert client.get("/health").json()["data"] == {"status": "ok"}
         assert client.get("/v1/traces").status_code == 405
         response = client.post("/v1/traces", json=payload)
         assert response.status_code == 202

@@ -27,13 +27,13 @@ def test_repeated_runs_share_snapshot_and_persist_summary(tmp_path):
     with TestClient(app) as client:
         response = client.post("/api/stability-experiments", json=body())
         assert response.status_code == 202, response.text
-        task = response.json()
+        task = response.json()["data"]
         assert task["run_ids"] == dispatcher.ids
         deps = app.state.dependencies
         runs = [deps.repository.get_run(id) for id in task["run_ids"]]
         assert len(runs) == 3
         assert all(r.manifest == runs[0].manifest for r in runs)
-        pending = client.get("/api/stability-experiments/" + task["id"]).json()
+        pending = client.get("/api/stability-experiments/" + task["id"]).json()["data"]
         assert pending["mean"] is None and not pending["complete"]
         for run in runs:
             capture = InMemoryTraceCapture()
@@ -41,13 +41,13 @@ def test_repeated_runs_share_snapshot_and_persist_summary(tmp_path):
                 deps.runs.execute_run(run.id, DemoLoanTargetAdapter(capture, state_store=deps.demo_state), capture.resolve)
             finally:
                 capture.shutdown()
-        summary = client.get("/api/stability-experiments/" + task["id"]).json()
+        summary = client.get("/api/stability-experiments/" + task["id"]).json()["data"]
         assert summary["complete"]
         assert summary["measured_runs"] == 3
         assert summary["sample_variance"] == 0
         assert summary["mean"] == 1
     with TestClient(create_app(path, dispatcher=Dispatcher())) as client:
-        assert client.get("/api/stability-experiments/" + task["id"]).json() == summary
+        assert client.get("/api/stability-experiments/" + task["id"]).json()["data"] == summary
 
 
 @pytest.mark.parametrize("count", [0, 1, 21, 2.5, True])
@@ -61,10 +61,10 @@ def test_invalid_repetitions_create_nothing(tmp_path, count):
 def test_dispatch_failure_retains_group_without_zero_scores(tmp_path):
     app = create_app(tmp_path / "runs.db", dispatcher=Dispatcher(fail=True))
     with TestClient(app) as client:
-        task = client.post("/api/stability-experiments", json=body(2)).json()
+        task = client.post("/api/stability-experiments", json=body(2)).json()["data"]
         response = client.get("/api/stability-experiments/" + task["id"])
         assert response.status_code == 200, response.text
-        summary = response.json()
+        summary = response.json()["data"]
         assert summary["complete"] and summary["mean"] is None
         assert summary["measured_runs"] == 0
         assert all(row["progress"]["status"] == "failed" for row in summary["runs"])
@@ -76,7 +76,7 @@ def test_group_transaction_rolls_back_new_runs_on_task_conflict(tmp_path):
     from agentgate.domain.evaluation_task import EvaluationTask
     app = create_app(tmp_path / "runs.db", dispatcher=Dispatcher())
     with TestClient(app) as client:
-        task = client.post("/api/stability-experiments", json=body(2)).json()
+        task = client.post("/api/stability-experiments", json=body(2)).json()["data"]
         repo = app.state.dependencies.repository
         template = repo.get_run(task["run_ids"][0])
         runs = [EvaluationRun(manifest=template.manifest) for _ in range(2)]

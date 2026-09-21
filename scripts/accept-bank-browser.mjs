@@ -28,8 +28,9 @@ try {
   const created=page.waitForResponse(r=>r.url().endsWith('/api/bank-evaluations')&&r.request().method()==='POST');
   await form.getByRole('button',{name:'开始评测',exact:true}).click();
   const response=await created;
-  const body=await response.json();
-  if(response.status()!==202) throw new Error(JSON.stringify(body));
+  const raw=await response.json();
+  if(response.status()!==202) throw new Error(raw.message||JSON.stringify(raw));
+  const body=raw.data;
   const entry={mode,run_id:body.run_id,launch:response.request().postDataJSON(),http_status:response.status(),created:body,statuses:[]};
   summary.runs.push(entry);await save();
   console.log('BROWSER_CREATED',mode,entry.run_id);
@@ -40,14 +41,14 @@ try {
   let complete=true;
   for(let i=0;i<summary.runs.length;i++) {
    const r=summary.runs[i];if(r.finished)continue;
-   const progress=await (await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id+'/status')).json();
+    const progress=await (await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id+'/status')).json().then(j=>j.data);
    if(r.statuses.at(-1)?.status!==progress.status||r.statuses.at(-1)?.completed_cases!==progress.completed_cases) {
     r.statuses.push({...progress,observed_at:new Date().toISOString()});console.log('PROGRESS',r.mode,progress.status,progress.completed_cases);
    }
    if(['completed','failed','cancelled'].includes(progress.status)) {
     r.finished=true;r.status=progress.status;
-    r.samples=await (await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id+'/samples')).json();
-    if(progress.status==='completed')r.report=await(await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id)).json();
+     r.samples=await (await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id+'/samples')).json().then(j=>j.data);
+     if(progress.status==='completed')r.report=await(await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id)).json().then(j=>j.data);
     await pages[i].reload();
     await expect(pages[i].getByRole('heading',{name:'任务结果总览',exact:true})).toBeVisible();
     await expect(pages[i].getByRole('heading',{name:'样本（8）',exact:true})).toBeVisible();
@@ -76,7 +77,7 @@ try {
    await expect(page.getByRole('heading',{name:'样本（8）',exact:true})).toBeVisible();
    const response=await context.request.get('http://127.0.0.1:5197/api/runs/'+r.run_id+'/traces/'+c.id);
    expect(response.ok()).toBeTruthy();
-   const trace=await response.json();
+    const trace=await response.json().then(j=>j.data);
    await expect(page.getByTestId('actual-output')).toHaveCount(c.turns.length);
    for(let n=0;n<c.turns.length;n++) {
     const turn=trace.turn_outcomes[c.turns[n].id];

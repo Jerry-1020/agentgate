@@ -1,10 +1,10 @@
 import {staticChinese} from '../src/revision/static-chinese'
 import {test,expect} from '@playwright/test'
 test('static analysis renders partial report findings and errors',async({page,request})=>{
- const list=await (await request.get('/api/skill-analysis/reports?target_descriptor_sha256=5a5e3c9cc8c3f6faa7108dd82e771f1e7c86b127dc8b936033f3a2111e3539bd')).json()
+ const list=(await (await request.get('/api/skill-analysis/reports?target_descriptor_sha256=5a5e3c9cc8c3f6faa7108dd82e771f1e7c86b127dc8b936033f3a2111e3539bd')).json()).data
  const report=list[0]
  expect(report.findings.length).toBeGreaterThan(0)
- await page.route('**/api/skill-analysis/reports',route=>route.fulfill({json:report}))
+ await page.route('**/api/skill-analysis/reports',route=>route.fulfill({json:{code:'0',message:'success',data:report}}))
  await page.goto('/#analysis')
  await page.getByRole('combobox',{name:'分析对象'}).selectOption({label:'旧方案'})
  await expect(page.getByRole('heading',{name:'第三步：查看问题与修改建议',exact:true})).toBeVisible()
@@ -18,11 +18,11 @@ test('static analysis renders partial report findings and errors',async({page,re
 })
 test('annotation writeback preserves source checks and adds notes after confirmation',async({page,request})=>{
  const id='9a3ff83e-96b6-4e10-9e61-7f1aa38df47b'
- const report=await (await request.get('/api/runs/'+id)).json()
+ const report=(await (await request.get('/api/runs/'+id)).json()).data
  const caseId=report.results.find((r:any)=>r.outcome==='fail').case_id
- const source=await (await request.get('/api/runs/'+id+'/cases/'+caseId)).json()
+ const source=(await (await request.get('/api/runs/'+id+'/cases/'+caseId)).json()).data
  let payload:any=null
- await page.route('**/api/runs/'+id+'/cases/'+caseId+'/writeback',route=>{payload=route.request().postDataJSON();return route.fulfill({json:{source_dataset_id:source.dataset_id}})})
+ await page.route('**/api/runs/'+id+'/cases/'+caseId+'/writeback',route=>{payload=route.request().postDataJSON();return route.fulfill({json:{code:'0',message:'success',data:{source_dataset_id:source.dataset_id}}})})
  await page.goto('/#optimizer/'+id)
  await page.getByText('查看期望与实际执行证据',{exact:true}).first().click()
  const annotation=page.getByRole('complementary',{name:'人工标注'}).first()
@@ -69,7 +69,7 @@ test('builtin browser disable persists and excludes new task and AB choices',asy
 })
 test('real report suggestions and sample popup remain available',async({page,request})=>{
  const id='9a3ff83e-96b6-4e10-9e61-7f1aa38df47b'
- const report=await (await request.get('/api/runs/'+id)).json()
+ const report=(await (await request.get('/api/runs/'+id)).json()).data
  expect(report.results.some((r:any)=>r.outcome==='fail')).toBeTruthy()
  await page.goto('/#optimizer/'+id)
  const analysis=page.getByRole('region',{name:'基于真实报告的规则分析'})

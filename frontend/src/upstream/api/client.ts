@@ -115,12 +115,12 @@ export class ApiError extends Error {
 
 export const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(url, init)
+  const raw = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }))
-    throw new ApiError(response.status, payload.detail)
+    throw new ApiError(response.status, raw?.message ?? raw?.detail ?? `HTTP ${response.status}`)
   }
   if (response.status === 204) return undefined as T
-  return response.json()
+  return raw?.data as T
 }
 
 export const api = {

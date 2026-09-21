@@ -19,7 +19,7 @@ with httpx.Client(base_url="http://127.0.0.1:8097", timeout=240, trust_env=False
     def call(method, path, **kwargs):
         response = client.request(method, path, **kwargs)
         response.raise_for_status()
-        return response.json()
+        return response.json()["data"]
 
     try:
         targets = call("GET", "/api/bank-targets")

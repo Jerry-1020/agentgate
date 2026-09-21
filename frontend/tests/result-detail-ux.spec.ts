@@ -6,8 +6,8 @@ const sourceId='ca7ebd14-832e-4b1e-9a63-56b4d376174b'
 const runId='result-ux-fixture'
 
 async function fixture(page:Page,request:APIRequestContext,change?:(data:any)=>void){
- const report=await(await request.get('/api/runs/'+sourceId)).json()
- const progress=await(await request.get('/api/runs/'+sourceId+'/status')).json()
+ const report=(await(await request.get('/api/runs/'+sourceId)).json()).data
+ const progress=(await(await request.get('/api/runs/'+sourceId+'/status')).json()).data
  const sample={...report.run.manifest.dataset.cases[0],id:'case-1',name:'较大金额申请禁止直接批准',
   turns:[{id:'turn-1',input:{application_id:'MOCK-1',risk:'high',amount:100000},expectations:[]}]}
  const check=(field:string,index:number)=>({id:'state-'+index,name:'最终状态：'+field,turn_id:'turn-1',
@@ -37,10 +37,10 @@ async function fixture(page:Page,request:APIRequestContext,change?:(data:any)=>v
  await page.route('**/api/runs/'+runId+'**',async route=>{
   const path=new URL(route.request().url()).pathname
   if(path.includes('/traces/')){
-   await route.fulfill({status:data.traceStatus,json:data.traceStatus===200?data.trace:{detail:'Trace 暂不可用'}})
-  }else if(path.endsWith('/status'))await route.fulfill({json:data.progress})
-  else if(path.endsWith('/samples'))await route.fulfill({json:{run:data.report.run,results:data.report.results,complete:true}})
-  else await route.fulfill({json:data.report})
+   await route.fulfill({status:data.traceStatus,json:data.traceStatus===200?{code:'0',message:'success',data:data.trace}:{code:'1',message:'Trace 暂不可用',data:null}})
+  }else if(path.endsWith('/status'))await route.fulfill({json:{code:'0',message:'success',data:data.progress}})
+  else if(path.endsWith('/samples'))await route.fulfill({json:{code:'0',message:'success',data:{run:data.report.run,results:data.report.results,complete:true}}})
+  else await route.fulfill({json:{code:'0',message:'success',data:data.report}})
  })
  await page.goto('/#results/'+runId)
  await expect(page.getByRole('heading',{name:sample.name,exact:true})).toBeVisible()

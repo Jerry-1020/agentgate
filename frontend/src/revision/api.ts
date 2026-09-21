@@ -42,9 +42,9 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
     const response = await fetch('/api' + path, { method, signal: controller.signal,
       headers: body === undefined ? {} : {'Content-Type':'application/json'},
       body: body === undefined ? undefined : JSON.stringify(body) })
-    const data = response.status === 204 ? undefined : await response.json().catch(() => null)
-    if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : JSON.stringify(data?.detail ?? `服务响应 HTTP ${response.status}`))
-    return data as T
+    const raw = response.status === 204 ? undefined : await response.json().catch(() => null)
+    if (!response.ok) throw new Error(raw?.message ?? (typeof raw?.detail === 'string' ? raw.detail : JSON.stringify(raw?.detail ?? `服务响应 HTTP ${response.status}`)))
+    return raw?.data as T
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new Error('请求超时，请刷新查询状态后再决定是否重试。')
     throw error

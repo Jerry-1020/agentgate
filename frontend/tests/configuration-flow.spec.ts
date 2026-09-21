@@ -2,8 +2,8 @@ import {selectHistoryTask} from './history-selection'
 import {test,expect} from '@playwright/test'
 
 test('server finding presents its evidence and suggestions together',async({page})=>{
- await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{configured:true,reason:null}}))
- await page.route('**/api/evaluations/skill-analysis',r=>r.fulfill({json:{id:'test-report',findings:[{id:'test-finding',category:'工具使用边界',skill_ids:['credit_inquiry'],reason:'查询技能的输入边界需确认',evidence:[{field:'input_schema',detail:'未定义申请编号的约束'}],suggestions:['补充申请编号必填校验']}],errors:[]}}))
+ await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{code:'0',message:'success',data:{configured:true,reason:null}}}))
+ await page.route('**/api/evaluations/skill-analysis',r=>r.fulfill({json:{code:'0',message:'success',data:{id:'test-report',findings:[{id:'test-finding',category:'工具使用边界',skill_ids:['credit_inquiry'],reason:'查询技能的输入边界需确认',evidence:[{field:'input_schema',detail:'未定义申请编号的约束'}],suggestions:['补充申请编号必填校验']}],errors:[]}}}))
  await page.goto('/#analysis')
  await page.getByLabel('检查对象',{exact:true}).selectOption('loan-agent-v1-risky')
  await page.getByRole('button',{name:'运行分析',exact:true}).click()
@@ -17,8 +17,8 @@ test('server finding presents its evidence and suggestions together',async({page
 
 test('analysis capability prevents unavailable requests and findings filter precisely',async({page})=>{
  let calls=0
- await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{configured:false,reason:'未配置服务端 Judge 模型，静态分析未启用。'}}))
- await page.route('**/api/evaluations/skill-analysis',r=>{calls++;return r.fulfill({status:503,json:{detail:'unavailable'}})})
+ await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{code:'0',message:'success',data:{configured:false,reason:'未配置服务端 Judge 模型，静态分析未启用。'}}}))
+ await page.route('**/api/evaluations/skill-analysis',r=>{calls++;return r.fulfill({status:503,json:{code:'1',message:'unavailable',data:null}})})
  await page.goto('/#analysis')
  await page.getByLabel('检查对象',{exact:true}).selectOption('loan-agent-v1-risky')
  await expect(page.getByRole('button',{name:'运行分析',exact:true})).toBeDisabled()
@@ -40,7 +40,7 @@ test('analysis capability prevents unavailable requests and findings filter prec
 })
 
 test('rerun requires preview and preserves exact manifest',async({page,request})=>{
- const list=await (await request.get('/api/runs?limit=100')).json()
+ const list=(await (await request.get('/api/runs?limit=100')).json()).data
  const source=list.find((r:any)=>r.status==='completed')
  expect(source).toBeTruthy()
  await page.goto('/#tasks/'+source.id)
@@ -51,14 +51,14 @@ test('rerun requires preview and preserves exact manifest',async({page,request})
  const pending=page.waitForResponse(r=>r.url().endsWith('/rerun')&&r.request().method()==='POST')
  await dialog.getByRole('button',{name:'确认创建新任务'}).click()
  const response=await pending;expect(response.ok()).toBeTruthy()
- const newId=(await response.json()).run_id
+ const newId=(await response.json()).data.run_id
  expect(newId).not.toBe(source.id)
- const next=await (await request.get('/api/runs/'+newId+'/samples')).json()
+ const next=(await (await request.get('/api/runs/'+newId+'/samples')).json()).data
  expect(next.run.manifest).toEqual(source.manifest)
 })
 
 test('AB uses exact descriptor snapshots and shows changed prompts',async({page,request})=>{
- const runs=await (await request.get('/api/runs?limit=200')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  const ids=['loan-agent-v1-risky','loan-agent-v2-fixed'].map(v=>runs.find((r:any)=>r.status==='completed'&&r.manifest.target.ref.external_version_id===v).id)
  await page.goto('/#experiments')
  for(let i=0;i<2;i++)await selectHistoryTask(page,i,ids[i])

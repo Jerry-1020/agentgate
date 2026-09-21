@@ -1,9 +1,9 @@
 import {test,expect,type APIRequestContext} from '@playwright/test'
 test.setTimeout(60000)
 test.use({actionTimeout:8000})
-async function json(r:any){expect(r.ok(),await r.text()).toBeTruthy();return r.json()}
+async function json(r:any){expect(r.ok(),await r.text()).toBeTruthy();return r.json().then(j=>j.data)}
 async function waitRun(request:APIRequestContext,id:string){
- await expect.poll(async()=> (await (await request.get('/api/runs/'+id+'/status')).json()).status,{timeout:60000,intervals:[500,1000,2000]}).toBe('completed')
+ await expect.poll(async()=> (await (await request.get('/api/runs/'+id+'/status')).json()).data.status,{timeout:60000,intervals:[500,1000,2000]}).toBe('completed')
  return json(await request.get('/api/runs/'+id))
 }
 test('live upstream: drafts, published versions, scoped evaluation, AB and writeback',async({page,request})=>{

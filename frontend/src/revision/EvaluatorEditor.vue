@@ -22,7 +22,7 @@ onMounted(loadModels)
 async function addChild(e:EvaluatorSummary,checked:boolean){
  if(checked){
   value.value.children.push({evaluator_id:e.id,evaluator_version:e.latest_version!,weight:0.5})
-  try{const response=await fetch('/api/evaluators/'+encodeURIComponent(e.id)+'/versions');if(!response.ok)throw Error('版本读取失败');versions.value[e.id]=(await response.json()).map((v:Definition)=>String(v.version))}catch(e){error.value=String(e)}
+  try{const response=await fetch('/api/evaluators/'+encodeURIComponent(e.id)+'/versions');if(!response.ok)throw Error('版本读取失败');versions.value[e.id]=(await response.json()).data.map((v:Definition)=>String(v.version))}catch(e){error.value=String(e)}
  }else value.value.children=value.value.children.filter(c=>c.evaluator_id!==e.id)
  update()
 }

@@ -59,19 +59,19 @@ test('merge demo reaches reviewed plan but never calls a write endpoint',async({
 test('closed extra expectations and initial state survive a normal case edit',async({page,request})=>{
  const response=await request.post('/api/datasets/loan-risk-policy/copy',{data:{name:'0914-hidden-'+Date.now(),source_version:1}})
  expect(response.ok()).toBeTruthy()
- const created=await response.json(),id=created.dataset.id
+ const created=(await response.json()).data,id=created.dataset.id
  try{
   let draft=created.draft
   const original={...draft.cases[0],initial_state:{review_ticket:'existing-context',attempts:2}}
   const changed=await request.put('/api/datasets/'+id+'/drafts/cases/'+original.id,{headers:{'If-Match':draft.content_sha256},data:original})
-  expect(changed.ok()).toBeTruthy();draft=await changed.json()
+  expect(changed.ok()).toBeTruthy();draft=(await changed.json()).data
   await page.goto('/#datasets/'+id)
   await expect(page.locator('.other-expectations').first()).not.toHaveAttribute('open')
   await expect(page.getByTestId('expected-skill-0')).not.toBeVisible()
   await page.getByTestId('case-name').fill('只修改名称')
   await page.getByTestId('save-case').click()
   await expect(page.getByText('用例已保存到草稿',{exact:true})).toBeVisible()
-  const saved=await(await request.get('/api/datasets/'+id+'/drafts/current')).json()
+  const saved=(await(await request.get('/api/datasets/'+id+'/drafts/current')).json()).data
   expect(saved.cases[0].initial_state).toEqual(original.initial_state)
   expect(saved.cases[0].turns).toEqual(original.turns)
   await page.locator('.other-expectations summary').first().click()
@@ -80,7 +80,7 @@ test('closed extra expectations and initial state survive a normal case edit',as
 })
 
 test('one scoring guide saves a real LLM draft without losing the backend rubric',async({page,request})=>{
- await page.route('**/api/configured-models',r=>r.fulfill({json:[{provider_id:'review-fixture',model_id:'review-judge',credential_ref:'env:REVIEW_TEST_KEY'}]}))
+ await page.route('**/api/configured-models',r=>r.fulfill({json:{code:'0',message:'success',data:[{provider_id:'review-fixture',model_id:'review-judge',credential_ref:'env:REVIEW_TEST_KEY'}]}}))
  let id=''
  try{
   await page.goto('/#evaluators')
@@ -93,8 +93,8 @@ test('one scoring guide saves a real LLM draft without losing the backend rubric
   await expect(dialog.getByText('原有评分标准',{exact:true})).toHaveCount(0)
   const response=page.waitForResponse(r=>r.url().endsWith('/api/evaluators')&&r.request().method()==='POST')
   await dialog.getByRole('button',{name:'保存草稿',exact:true}).click()
-  const result=await response;expect(result.ok()).toBeTruthy();id=(await result.json()).evaluator.id
-  const draft=await(await request.get('/api/evaluators/'+id+'/drafts/current')).json()
+  const result=await response;expect(result.ok()).toBeTruthy();id=(await result.json()).data.evaluator.id
+  const draft=(await(await request.get('/api/evaluators/'+id+'/drafts/current')).json()).data
   expect(draft.config.rubric).toEqual({scoring_guide:'回答应说明审批结果；未转人工复核时不得宣称已审批。'})
   expect(draft.config.instruction).toBeTruthy()
   expect(draft.config.model.model_id).toBe('review-judge')
@@ -103,9 +103,9 @@ test('one scoring guide saves a real LLM draft without losing the backend rubric
 })
 
 test('evaluator unsaved edits survive rejected navigation and cancelled creation',async({page,request})=>{
- const builtin=(await(await request.get('/api/evaluators/skill-routing')).json()).latest
+ const builtin=(await(await request.get('/api/evaluators/skill-routing')).json()).data.latest
  const {kind,dimension,metric,severity,implementation_id,implementation_version,config,children,combination}=builtin
- const created=await(await request.post('/api/evaluators',{data:{name:'0914-editor-'+Date.now(),description:'原说明',draft:{kind,dimension,metric,severity,implementation_id,implementation_version,config,children,combination}}})).json()
+ const created=(await(await request.post('/api/evaluators',{data:{name:'0914-editor-'+Date.now(),description:'原说明',draft:{kind,dimension,metric,severity,implementation_id,implementation_version,config,children,combination}}})).json()).data
  const id=created.evaluator.id
  try{
   await page.goto('/#evaluators/'+id)
@@ -117,7 +117,7 @@ test('evaluator unsaved edits survive rejected navigation and cancelled creation
   await page.getByRole('dialog').getByLabel('备注说明').fill('新建独立内容')
   await Promise.all([page.waitForEvent('dialog').then(d=>d.accept()),page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click()])
   await expect(page.locator('.evaluator-panel').getByLabel('备注说明')).toHaveValue('尚未保存')
-  expect((await(await request.get('/api/evaluators/'+id)).json()).evaluator.description).toBe('原说明')
+  expect((await(await request.get('/api/evaluators/'+id)).json()).data.evaluator.description).toBe('原说明')
  }finally{await request.delete('/api/evaluators/'+id)}
 })
 
@@ -133,15 +133,15 @@ test('ordinary task scheduling is visible, cancellable, and not offered for stab
  await dialog.getByLabel('预约时间',{exact:true}).fill(localValue)
  const response=page.waitForResponse(r=>r.url().endsWith('/api/evaluations')&&r.request().method()==='POST')
  await dialog.getByRole('button',{name:'提交评测',exact:true}).click()
- const result=await response;expect(result.ok()).toBeTruthy();const id=(await result.json()).run_id
+ const result=await response;expect(result.ok()).toBeTruthy();const id=(await result.json()).data.run_id
  try{
-  const record=(await(await request.get('/api/runs/'+id+'/samples')).json()).run
+  const record=(await(await request.get('/api/runs/'+id+'/samples')).json()).data.run
   expect(record.status).toBe('scheduled')
   expect(new Date(record.scheduled_for).getTime()).toBe(date.getTime())
   await expect(page.getByRole('heading',{name:'已预约',exact:true})).toBeVisible()
   await page.getByRole('button',{name:'取消任务',exact:true}).click()
   await page.getByRole('button',{name:'确认',exact:true}).click()
-  await expect.poll(async()=> (await(await request.get('/api/runs/'+id+'/status')).json()).status).toBe('cancelled')
+  await expect.poll(async()=> (await(await request.get('/api/runs/'+id+'/status')).json()).data.status).toBe('cancelled')
  }finally{await request.post('/api/runs/'+id+'/cancel')}
  await page.goto('/#tasks')
  await page.getByRole('button',{name:'新建评测任务',exact:true}).click()
@@ -152,18 +152,18 @@ test('ordinary task scheduling is visible, cancellable, and not offered for stab
 
 test('isolated scheduler really dispatches due tasks with a frozen manifest',async({request})=>{
  const response=await request.post('/api/evaluations',{data:{version:'loan-agent-v1-risky',dataset_id:'loan-risk-policy',dataset_version:1,evaluator_ids:['skill-routing'],scheduled_for:new Date(Date.now()+15000).toISOString()}})
- expect(response.ok()).toBeTruthy();const id=(await response.json()).run_id
- const original=(await(await request.get('/api/runs/'+id+'/samples')).json()).run
+ expect(response.ok()).toBeTruthy();const id=(await response.json()).data.run_id
+ const original=(await(await request.get('/api/runs/'+id+'/samples')).json()).data.run
  expect(original.status).toBe('scheduled')
  try{
-  await expect.poll(async()=>(await(await request.get('/api/runs/'+id+'/status')).json()).status,{timeout:40000,intervals:[1000,2000]}).toBe('completed')
-  expect((await(await request.get('/api/runs/'+id+'/samples')).json()).run.manifest).toEqual(original.manifest)
+  await expect.poll(async()=>(await(await request.get('/api/runs/'+id+'/status')).json()).data.status,{timeout:40000,intervals:[1000,2000]}).toBe('completed')
+  expect((await(await request.get('/api/runs/'+id+'/samples')).json()).data.run.manifest).toEqual(original.manifest)
  }finally{await request.post('/api/runs/'+id+'/cancel')}
 })
 
 test('static finding routes explicit selected cases to the shared task form',async({page})=>{
- await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{configured:true}}))
- await page.route('**/api/evaluations/skill-analysis',r=>r.fulfill({json:{id:'fixture-report',findings:[{id:'fixture-finding',title:'审批边界需验证',skill_ids:['loan_approval'],reason:'测试契约',evidence:[],suggestions:['验证人工复核']}],errors:[]}}))
+ await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{code:'0',message:'success',data:{configured:true}}}))
+ await page.route('**/api/evaluations/skill-analysis',r=>r.fulfill({json:{code:'0',message:'success',data:{id:'fixture-report',findings:[{id:'fixture-finding',title:'审批边界需验证',skill_ids:['loan_approval'],reason:'测试契约',evidence:[],suggestions:['验证人工复核']}],errors:[]}}}))
  await page.goto('/#analysis')
  await page.getByLabel('检查对象',{exact:true}).selectOption('loan-agent-v1-risky')
  await page.getByRole('button',{name:'运行分析',exact:true}).click()
@@ -193,7 +193,7 @@ test('results list separates verdict from execution and historical evaluator lin
 })
 
 test('AB history presents the frozen dataset and evaluators as read-only result details',async({page,request})=>{
- const runs=await(await request.get('/api/runs?limit=200')).json()
+ const runs=(await(await request.get('/api/runs?limit=200')).json()).data
  const source=runs.find((r:any)=>r.status==='completed'&&r.manifest.dataset.dataset_id==='loan-risk-policy')
  await page.goto('/#experiments')
  await selectHistoryTask(page,0,source.id)
@@ -209,8 +209,8 @@ test('AB history presents the frozen dataset and evaluators as read-only result 
 })
 
 test('new AB pair cannot compare pending or failed sides',async({page})=>{
- await page.route('**/api/run-comparisons',r=>r.fulfill({status:202,json:{baseline:{run_id:'pair-fixture-a'},candidate:{run_id:'pair-fixture-b'}}}))
- await page.route('**/api/runs/pair-fixture-*/status',r=>r.fulfill({json:{run_id:r.request().url().includes('fixture-a')?'pair-fixture-a':'pair-fixture-b',status:r.request().url().includes('fixture-a')?'completed':'failed'}}))
+ await page.route('**/api/run-comparisons',r=>r.fulfill({status:202,json:{code:'0',message:'success',data:{baseline:{run_id:'pair-fixture-a'},candidate:{run_id:'pair-fixture-b'}}}}))
+ await page.route('**/api/runs/pair-fixture-*/status',r=>r.fulfill({json:{code:'0',message:'success',data:{run_id:r.request().url().includes('fixture-a')?'pair-fixture-a':'pair-fixture-b',status:r.request().url().includes('fixture-a')?'completed':'failed'}}}))
  await page.goto('/#experiments')
  await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
  await page.getByLabel('共同评测集',{exact:true}).selectOption('loan-risk-policy')
@@ -221,10 +221,10 @@ test('new AB pair cannot compare pending or failed sides',async({page})=>{
 })
 
 test('local merge reads exact published versions without modifying either source',async({page,request})=>{
- const datasets=await(await request.get('/api/datasets')).json()
+ const datasets=(await(await request.get('/api/datasets')).json()).data
  const sources=datasets.filter((d:any)=>d.version!==null).slice(0,2)
  expect(sources).toHaveLength(2)
- const before=await Promise.all(sources.map((d:any)=>request.get('/api/datasets/'+d.id+'/versions/'+d.version).then(r=>r.json())))
+ const before=await Promise.all(sources.map((d:any)=>request.get('/api/datasets/'+d.id+'/versions/'+d.version).then(r=>r.json().then(j=>j.data))))
  const writes:string[]=[];page.on('request',r=>{if(r.url().includes('/api/')&&r.method()!=='GET')writes.push(r.url())})
  await page.goto('/#dataset-merge')
  await page.getByLabel('合并预览数据').selectOption('local')
@@ -236,7 +236,7 @@ test('local merge reads exact published versions without modifying either source
  await page.getByRole('button',{name:'检查合并',exact:true}).click()
  await expect(page.getByRole('button',{name:'下一步',exact:true})).toBeEnabled()
  expect(writes).toEqual([])
- expect(await Promise.all(sources.map((d:any)=>request.get('/api/datasets/'+d.id+'/versions/'+d.version).then(r=>r.json())))).toEqual(before)
+ expect(await Promise.all(sources.map((d:any)=>request.get('/api/datasets/'+d.id+'/versions/'+d.version).then(r=>r.json().then(j=>j.data))))).toEqual(before)
 })
 test('task submission stays disabled until exact dataset configuration has loaded',async({page})=>{
  await page.goto('/#datasets/loan-risk-policy?version=1')

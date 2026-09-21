@@ -1,12 +1,12 @@
 import {test,expect} from '@playwright/test'
 
 async function createRule(request:any,name:string){
- const list=await (await request.get('/api/evaluators')).json()
- const base=await (await request.get('/api/evaluators/'+list.find((e:any)=>e.kind==='rule').id)).json()
+ const list=(await (await request.get('/api/evaluators')).json()).data
+ const base=(await (await request.get('/api/evaluators/'+list.find((e:any)=>e.kind==='rule').id)).json()).data
  const {kind,dimension,metric,severity,implementation_id,implementation_version,config,children,combination}=base.latest
  const response=await request.post('/api/evaluators',{data:{name,description:'界面自动化验证',draft:{kind,dimension,metric,severity,implementation_id,implementation_version,config,children,combination}}})
  expect(response.ok()).toBeTruthy()
- return (await response.json()).evaluator.id
+ return (await response.json()).data.evaluator.id
 }
 
 test('unpublished evaluator draft discard and deletion are confirmed',async({page,request})=>{
@@ -32,7 +32,7 @@ test('published history is immutable and can seed a new draft',async({page,reque
  try{
   const published=await request.post('/api/evaluators/'+id+'/drafts/publish')
   expect(published.ok()).toBeTruthy()
-  const snapshot=await published.json()
+  const snapshot=(await published.json()).data
   await page.goto('/#evaluators')
   await page.getByRole('button').filter({has:page.getByText(name,{exact:true})}).click()
   await expect(page.getByRole('button',{name:'删除评估器',exact:true})).toHaveCount(0)
@@ -43,12 +43,12 @@ test('published history is immutable and can seed a new draft',async({page,reque
   await expect(page.getByRole('button',{name:'保存草稿',exact:true})).toHaveCount(0)
   await page.getByRole('button',{name:'基于此版本创建草稿'}).click()
   await expect(page.getByRole('button',{name:'丢弃草稿',exact:true})).toBeVisible()
-  const draft=await (await request.get('/api/evaluators/'+id+'/drafts/current')).json()
+  const draft=(await (await request.get('/api/evaluators/'+id+'/drafts/current')).json()).data
   expect(draft.based_on_version).toBe(snapshot.version)
   await page.getByRole('button',{name:'丢弃草稿',exact:true}).click()
   await page.getByRole('button',{name:'确认丢弃',exact:true}).click()
   await expect(page.getByRole('button',{name:'丢弃草稿',exact:true})).toHaveCount(0)
-  expect(await (await request.get('/api/evaluators/'+id+'/versions/'+snapshot.version)).json()).toEqual(snapshot)
+  expect((await (await request.get('/api/evaluators/'+id+'/versions/'+snapshot.version)).json()).data).toEqual(snapshot)
   expect((await request.delete('/api/evaluators/'+id)).status()).toBe(409)
  }finally{await request.patch('/api/evaluators/'+id,{data:{enabled:false}})}
 })

@@ -46,8 +46,8 @@ def test_team_scope_covers_local_task_and_sample_endpoints(tmp_path, repetitions
             body["repetitions"] = repetitions
         response = client.post(url, json=body, headers=headers)
         assert response.status_code == 202, response.text
-        ids = [response.json()["run_id"]] if repetitions == 1 else response.json()["run_ids"]
-        assert len(client.get("/api/evaluation-tasks", headers=headers).json()) == 1
+        ids = [response.json()["data"]["run_id"]] if repetitions == 1 else response.json()["data"]["run_ids"]
+        assert len(client.get("/api/evaluation-tasks", headers=headers).json()["data"]) == 1
         for run_id in ids:
             run = app.state.dependencies.repository.get_run(run_id)
             assert (run.user_team_id, run.user_id, run.user_name) == ("alpha", "user-a", "Tester")
@@ -58,8 +58,8 @@ def test_team_scope_covers_local_task_and_sample_endpoints(tmp_path, repetitions
                 assert client.get(path, headers={"user_team_id": "beta"}).status_code == 404
             assert client.post(f"/api/runs/{run_id}/cancel", headers={"user_team_id": "beta"}).status_code == 404
         for other in ({}, {"user_team_id": "beta"}):
-            assert client.get("/api/evaluation-tasks", headers=other).json() == []
-            assert client.get("/api/runs", headers=other).json() == []
+            assert client.get("/api/evaluation-tasks", headers=other).json()["data"] == []
+            assert client.get("/api/runs", headers=other).json()["data"] == []
             assert client.get(f"/api/evaluation-tasks/{ids[0]}", headers=other).status_code == 404
             if repetitions > 1:
                 assert client.get(f"/api/stability-experiments/{ids[0]}", headers=other).status_code == 404

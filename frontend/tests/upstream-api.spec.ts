@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 test('upstream API: XLSX import, archive restore, scheduling, rerun and lineage',async({request})=>{
  test.setTimeout(60000)
- async function body(r:any){expect(r.ok(),await r.text()).toBeTruthy();return r.json()}
+ async function body(r:any){expect(r.ok(),await r.text()).toBeTruthy();return r.json().then(j=>j.data)}
  const xlsx=await request.get('/api/datasets/loan-risk-policy/versions/1/export/xlsx')
  expect(xlsx.ok()).toBeTruthy()
  const imported=await body(await request.post('/api/datasets/import/xlsx',{multipart:{name:'联调 Excel 导入 '+Date.now(),file:{name:'cases.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await xlsx.body()}}}))

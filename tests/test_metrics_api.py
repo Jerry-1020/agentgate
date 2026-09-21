@@ -17,8 +17,8 @@ def test_config_catalogs_and_real_report_metrics(tmp_path, monkeypatch):
     dispatcher = RecordingDispatcher()
     monkeypatch.setenv("AGENTGATE_DB", str(database_path))
     with TestClient(create_app(database_path, dispatcher)) as client:
-        datasets = client.get("/api/datasets").json()
-        evaluators = client.get("/api/evaluators").json()
+        datasets = client.get("/api/datasets").json()["data"]
+        evaluators = client.get("/api/evaluators").json()["data"]
         assert len(datasets) == 1
         assert datasets[0]["id"] == "loan-risk-policy"
         assert datasets[0]["version"] == 1
@@ -36,10 +36,10 @@ def test_config_catalogs_and_real_report_metrics(tmp_path, monkeypatch):
             "evaluator_ids": ["required-tool", "forbidden-tool", "tool-arguments"],
         })
         assert response.status_code == 202
-        run_id = response.json()["run_id"]
+        run_id = response.json()["data"]["run_id"]
         assert dispatcher.run_ids == [run_id]
         assert execute_evaluation_run.run(run_id) == "completed"
-        report = client.get(f"/api/runs/{run_id}").json()
+        report = client.get(f"/api/runs/{run_id}").json()["data"]
         assert len(report["results"]) == 3
         metrics = {(item["level"], item["key"]): item for item in report["metrics"]}
         assert metrics[("dimension", "tool_use")]["key"] == "tool_use"

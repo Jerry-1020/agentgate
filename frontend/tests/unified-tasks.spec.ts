@@ -12,9 +12,9 @@ test('stability form persists three real runs and restores summary',async({page,
  const pending=page.waitForResponse(r=>r.url().endsWith('/api/stability-experiments')&&r.request().method()==='POST')
  await dialog.getByRole('button',{name:'开始评测',exact:true}).click()
  const response=await pending;expect(response.status()).toBe(202)
- const task=await response.json();expect(task.run_ids).toHaveLength(3)
- await expect.poll(async()=>(await(await request.get('/api/stability-experiments/'+task.id)).json()).complete,{timeout:45000}).toBe(true)
- const summary=await(await request.get('/api/stability-experiments/'+task.id)).json()
+ const task=(await response.json()).data;expect(task.run_ids).toHaveLength(3)
+ await expect.poll(async()=>(await(await request.get('/api/stability-experiments/'+task.id)).json()).data.complete,{timeout:45000}).toBe(true)
+ const summary=(await(await request.get('/api/stability-experiments/'+task.id)).json()).data
  expect(summary.measured_runs).toBe(3);expect(summary.sample_variance).toBe(0)
  await expect(page.getByRole('heading',{name:'稳定性测试',exact:true})).toBeVisible()
  await expect(page.locator('tbody tr')).toHaveCount(3)
@@ -29,8 +29,8 @@ test('stability form persists three real runs and restores summary',async({page,
 test('optimizer reads database-backed model report in existing three columns',async({page,request})=>{
  const id='43456de5-da67-4073-a275-9150b515d372'
  const response=await request.get('/api/runs/'+id+'/optimization');expect(response.status()).toBe(200)
- const report=await response.json();expect(report.hypotheses.length).toBeGreaterThan(0)
- const second=await(await request.get('/api/runs/'+id+'/optimization')).json()
+ const report=(await response.json()).data;expect(report.hypotheses.length).toBeGreaterThan(0)
+ const second=(await(await request.get('/api/runs/'+id+'/optimization')).json()).data
  expect(second).toEqual(report)
  await page.goto('/#tasks/'+id)
  await page.getByRole('button',{name:'调优分析',exact:true}).click()
@@ -43,7 +43,7 @@ test('optimizer reads database-backed model report in existing three columns',as
 
 test('reanalyzing static skills updates task link without deleting history',async({page,request})=>{
  test.setTimeout(300000)
- const tasks=await(await request.get('/api/evaluation-tasks')).json()
+ const tasks=(await(await request.get('/api/evaluation-tasks')).json()).data
  const task=tasks.find((t:any)=>t.kind==='single'&&t.static_report_ids.length)
  expect(task).toBeTruthy()
  const oldId=task.static_report_ids[0]
@@ -52,8 +52,8 @@ test('reanalyzing static skills updates task link without deleting history',asyn
  const pending=page.waitForResponse(r=>r.url().endsWith('/api/skill-analysis/reports')&&r.request().method()==='POST',{timeout:240000})
  await page.getByRole('button',{name:'重新分析',exact:true}).click()
  const response=await pending;expect(response.ok()).toBeTruthy()
- const report=await response.json()
- await expect.poll(async()=>(await(await request.get('/api/evaluation-tasks/'+task.id)).json()).static_report_ids).toEqual([report.id])
+ const report=(await response.json()).data
+ await expect.poll(async()=>(await(await request.get('/api/evaluation-tasks/'+task.id)).json()).data.static_report_ids).toEqual([report.id])
  expect((await request.get('/api/skill-analysis/reports/'+oldId)).ok()).toBeTruthy()
  await page.reload()
  await page.getByRole('button',{name:'Skill 静态分析',exact:true}).click()
@@ -61,15 +61,15 @@ test('reanalyzing static skills updates task link without deleting history',asyn
 })
 
 test('database integration 20260917 shows real cases, traces and model configuration',async({page,request})=>{
- const datasets=await (await request.get('/api/datasets')).json()
+ const datasets=(await (await request.get('/api/datasets')).json()).data
  const dataset=datasets.find((d:any)=>d.name==='真实接口联调 · 20260917 · 32场景')
  expect(dataset.case_count).toBe(32)
- const runs=await (await request.get('/api/runs?limit=200')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  const fixed=runs.find((r:any)=>r.id==='36dff0cc-8234-4bfd-b4fc-1a9799938ea5')
  expect(fixed.status).toBe('completed')
  const response=await request.get('/api/runs/'+fixed.id)
  expect(response.ok()).toBeTruthy()
- const report=await response.json()
+ const report=(await response.json()).data
  expect(report.results.length).toBe(192)
  expect(report.results.filter((r:any)=>r.outcome==='error')).toHaveLength(0)
  const trace=await request.get('/api/runs/'+fixed.id+'/traces/'+report.results[0].case_id)
@@ -93,7 +93,7 @@ test('database integration 20260917 shows real cases, traces and model configura
 })
 
 test('restored history and unified creation use real API responses',async({page,request})=>{
- const runs=await (await request.get('/api/runs?limit=200')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  expect(runs.length).toBeGreaterThanOrEqual(46)
  const errors:string[]=[]
  page.on('pageerror',e=>errors.push(e.message))
@@ -141,10 +141,10 @@ test('create A/B via the shared form, then retrieve real comparison',async({page
  await dialog.getByRole('button',{name:'创建 A/B 实验',exact:true}).click()
  const result=await response
  expect(result.status()).toBe(202)
- const pair=await result.json()
- await expect(dialog).not.toBeVisible()
+const pair=(await result.json()).data
+  await expect(dialog).not.toBeVisible()
  await expect.poll(async()=>{
-  const states=await Promise.all([pair.baseline.run_id,pair.candidate.run_id].map(async id=>(await (await request.get('/api/runs/'+id+'/status')).json()).status))
+  const states=await Promise.all([pair.baseline.run_id,pair.candidate.run_id].map(async id=>(await (await request.get('/api/runs/'+id+'/status')).json()).data.status))
   return states
  },{timeout:45000}).toEqual(['completed','completed'])
  await expect(page.getByRole('heading',{name:'结果对比',exact:true})).toBeVisible({timeout:15000})
@@ -168,9 +168,9 @@ test('single task calls real static analysis and opens its report',async({page,r
  await dialog.getByRole('button',{name:'开始评测',exact:true}).click()
  const response=await reportResponse
  expect(response.status()).toBe(201)
- const report=await response.json()
+ const report=(await response.json()).data
  expect(['completed','partial']).toContain(report.status)
- const saved=await (await request.get('/api/skill-analysis/reports/'+report.id)).json()
+ const saved=(await (await request.get('/api/skill-analysis/reports/'+report.id)).json()).data
  expect(saved.report.id).toBe(report.id)
  await expect(dialog).not.toBeVisible()
  await page.getByRole('button',{name:'Skill 静态分析',exact:true}).click()
@@ -193,8 +193,8 @@ test('creation exposes only backend-backed model configuration',async({page})=>{
 
 test('task tuning is inline with three functional columns and static analysis',async({page,request})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(String(e)))
- const runs=await (await request.get('/api/runs?limit=200')).json()
- const tasks=await(await request.get('/api/evaluation-tasks')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
+ const tasks=(await(await request.get('/api/evaluation-tasks')).json()).data
  const task=tasks.find((t:any)=>t.kind==='ab')
  expect(task).toBeTruthy()
  const a=runs.find((r:any)=>r.id===task.run_ids[0]),b=runs.find((r:any)=>r.id===task.run_ids[1])
@@ -292,7 +292,7 @@ test('compact execution settings and evaluator confirmation layout',async({page}
 })
 
 test('LLM and composite drafts have editors while rules do not',async({page,request})=>{
- const list=await (await request.get('/api/evaluators?include_disabled=true')).json()
+ const list=(await (await request.get('/api/evaluators?include_disabled=true')).json()).data
  expect(list.filter((e:any)=>e.kind==='rule'&&e.has_draft)).toEqual([])
  const writes:string[]=[];page.on('request',r=>{if(['POST','PUT','PATCH','DELETE'].includes(r.method()))writes.push(r.url())})
  await page.goto('/#evaluators')
@@ -339,7 +339,7 @@ test('evaluator catalog filters and readonly rule detail modal',async({page})=>{
 })
 
 test('launch from imported rule preselects it and hides version diff',async({page,request})=>{
- const list=await(await request.get('/api/evaluators?include_disabled=true')).json()
+ const list=(await(await request.get('/api/evaluators?include_disabled=true')).json()).data
  const e=list.find((x:any)=>x.kind==='rule'&&x.enabled&&/^联调导入规则/.test(x.name))
  expect(e).toBeTruthy()
  await page.goto('/#evaluators/'+e.id)
@@ -357,10 +357,10 @@ test('rule import publishes via API and does not leave an editable draft',async(
  const calls:string[]=[]
  await page.route('**/api/evaluators',async route=>{
   if(route.request().method()!=='POST')return route.continue()
-  calls.push('create');await route.fulfill({json:{evaluator:{id:'import-workflow-test'}}})
+  calls.push('create');await route.fulfill({json:{code:'0',message:'success',data:{evaluator:{id:'import-workflow-test'}}}})
  })
  await page.route('**/api/evaluators/import-workflow-test/drafts/publish',async route=>{
-  calls.push('publish');await route.fulfill({json:{}})
+  calls.push('publish');await route.fulfill({json:{code:'0',message:'success',data:{}}})
  })
  await page.goto('/#evaluators')
  await page.getByRole('button',{name:'导入评估器',exact:true}).click()

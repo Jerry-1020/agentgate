@@ -17,7 +17,7 @@ def launch(c, version="loan-agent-v1-risky"):
         "evaluator_ids": ["final-state"],
     })
     assert response.status_code == 202, response.text
-    return response.json()["run_id"]
+    return response.json()["data"]["run_id"]
 
 
 def test_single_task_survives_new_app_and_idempotent_save(tmp_path):
@@ -25,12 +25,12 @@ def test_single_task_survives_new_app_and_idempotent_save(tmp_path):
     with client(path) as c:
         run_id = launch(c)
         body = {"kind": "single", "run_ids": [run_id]}
-        first = c.get("/api/evaluation-tasks/" + run_id).json()
-        assert c.put("/api/evaluation-tasks/" + run_id, json=body).json() == first
+        first = c.get("/api/evaluation-tasks/" + run_id).json()["data"]
+        assert c.put("/api/evaluation-tasks/" + run_id, json=body).json()["data"] == first
         assert c.put("/api/evaluation-tasks/other", json=body).status_code == 409
     with client(path) as c:
-        assert c.get("/api/evaluation-tasks/" + run_id).json() == first
-        assert len(c.get("/api/evaluation-tasks").json()) == 1
+        assert c.get("/api/evaluation-tasks/" + run_id).json()["data"] == first
+        assert len(c.get("/api/evaluation-tasks").json()["data"]) == 1
 
 
 def test_unknown_and_wrong_report_rejected(tmp_path):
@@ -42,7 +42,7 @@ def test_unknown_and_wrong_report_rejected(tmp_path):
             "kind": "single", "run_ids": [run_id], "static_report_ids": ["missing"],
         })
         assert response.status_code == 404
-        assert c.get("/api/evaluation-tasks/" + run_id).json()["static_report_ids"] == []
+        assert c.get("/api/evaluation-tasks/" + run_id).json()["data"]["static_report_ids"] == []
 
 
 def test_ab_launch_and_reversed_association_conflict(tmp_path):
@@ -53,9 +53,9 @@ def test_ab_launch_and_reversed_association_conflict(tmp_path):
             "evaluators": [{"id": "final-state", "version": "1"}],
         })
         assert response.status_code == 202, response.text
-        pair = response.json()
+        pair = response.json()["data"]
         ids = [pair["baseline"]["run_id"], pair["candidate"]["run_id"]]
-        task = c.get("/api/evaluation-tasks/" + ids[0]).json()
+        task = c.get("/api/evaluation-tasks/" + ids[0]).json()["data"]
         assert task["kind"] == "ab"
         assert task["run_ids"] == ids
         assert c.put("/api/evaluation-tasks/" + ids[0], json={"kind": "ab", "run_ids": ids[::-1]}).status_code == 409
@@ -85,6 +85,6 @@ def test_static_report_replacement_preserves_history_and_rejects_wrong_target(tm
         for report in reports[:2]:
             response = c.put("/api/evaluation-tasks/"+risky, json={"kind":"single", "run_ids":[risky], "static_report_ids":[report.id]})
             assert response.status_code == 200, response.text
-        assert c.get("/api/evaluation-tasks/"+risky).json()["static_report_ids"] == [reports[1].id]
+        assert c.get("/api/evaluation-tasks/"+risky).json()["data"]["static_report_ids"] == [reports[1].id]
         assert repo.get_skill_analysis_report(reports[0].id) == reports[0]
         assert c.put("/api/evaluation-tasks/"+risky, json={"kind":"single", "run_ids":[risky], "static_report_ids":[reports[2].id]}).status_code == 409

@@ -15,6 +15,6 @@ test('dataset launches the viewed published version through the shared task form
  const r=await response
  expect(r.ok()).toBeTruthy()
  expect(r.request().postDataJSON()).toMatchObject({dataset_id:'loan-risk-policy',dataset_version:1})
- const run=await r.json()
+ const run=(await r.json()).data
  await expect(page).toHaveURL(new RegExp('#tasks/'+run.run_id+'$'))
 })

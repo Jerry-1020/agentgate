@@ -1,9 +1,9 @@
 import {test,expect} from '@playwright/test'
 test('distinct checks retain identities, evidence and hypothesis links',async({page,request})=>{
- const runs=await (await request.get('/api/runs?limit=200')).json()
+ const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  const run=runs.find((r:any)=>r.status==='completed'&&r.manifest.target.ref.external_version_id==='loan-agent-v1-risky'&&r.manifest.dataset.dataset_name)
  expect(run).toBeTruthy()
- const report=await (await request.get('/api/runs/'+run.id+'/optimization')).json()
+ const report=(await (await request.get('/api/runs/'+run.id+'/optimization')).json()).data
  await page.goto('/#optimizer/'+run.id)
  for(const c of report.clusters){
   const card=page.locator('#analysis-item-'+c.id)

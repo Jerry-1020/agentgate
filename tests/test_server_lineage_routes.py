@@ -20,8 +20,8 @@ def test_get_run_lineage(tmp_path) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["root_node_id"] == f"run:{run.id}"
-    assert {node["kind"] for node in payload["nodes"]} == {
+    assert payload["data"]["root_node_id"] == f"run:{run.id}"
+    assert {node["kind"] for node in payload["data"]["nodes"]} == {
         "run",
         "dataset",
         "case",
@@ -36,7 +36,7 @@ def test_get_run_lineage_returns_not_found_for_unknown_run(tmp_path) -> None:
         response = client.get("/api/runs/missing/lineage")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "unknown EvaluationRun: missing"
+    assert response.json()["message"] == "unknown EvaluationRun: missing"
 
 
 def test_get_run_lineage_returns_conflict_for_missing_descriptor(tmp_path) -> None:
@@ -54,7 +54,7 @@ def test_get_run_lineage_returns_conflict_for_missing_descriptor(tmp_path) -> No
         response = client.get(f"/api/runs/{run.id}/lineage")
 
     assert response.status_code == 409
-    assert response.json()["detail"].startswith("unknown TargetDescriptor")
+    assert response.json()["message"].startswith("unknown TargetDescriptor")
 
 
 def test_reverse_lineage_endpoints_return_related_runs(tmp_path) -> None:
@@ -97,7 +97,7 @@ def test_reverse_lineage_endpoints_return_related_runs(tmp_path) -> None:
             assert response.status_code == 200
             assert {
                 node["external_id"]
-                for node in response.json()["nodes"]
+                for node in response.json()["data"]["nodes"]
                 if node["kind"] == "run"
             } == expected_run_ids
 

@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test'
 
 test('static analysis defaults to the real service and keeps the demo a secondary returnable entry',async({page})=>{
  let analysisWrites=0
- await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{configured:false,reason:'未配置分析模型，无法发起新分析。'}}))
+ await page.route('**/api/skill-analysis/capability',r=>r.fulfill({json:{code:'0',message:'success',data:{configured:false,reason:'未配置分析模型，无法发起新分析。'}}}))
  page.on('request',r=>{if(r.method()!=='GET'&&/\/api\/(evaluations\/skill-analysis|skill-analysis\/reports)/.test(r.url()))analysisWrites++})
  await page.goto('/#analysis')
  const entry=page.locator('.page-head').getByRole('button',{name:'查看演示样例',exact:true})

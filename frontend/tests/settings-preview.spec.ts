@@ -43,7 +43,7 @@ test('credential authorization cannot invalidate an existing connection even if 
 })
 
 async function start(page:Page){
- await page.route('**/api/configured-models',route=>route.fulfill({json:[]}))
+ await page.route('**/api/configured-models',route=>route.fulfill({json:{code:'0',message:'success',data:[]}}))
  await page.goto('/#settings')
  await expect(page.getByRole('heading',{name:'配置',exact:true})).toBeVisible()
 }
@@ -238,11 +238,11 @@ test('cancel and route navigation protect unsaved settings form changes',async({
 })
 
 test('live catalog read failures and recovery remain separate from preview changes',async({page})=>{
- await page.route('**/api/configured-models',r=>r.fulfill({status:503,json:{detail:'not configured'}}))
+ await page.route('**/api/configured-models',r=>r.fulfill({status:503,json:{code:'1',message:'not configured',data:null}}))
  await page.goto('/#settings')
  await expect(page.getByRole('alert').filter({hasText:'无法读取模型配置'})).toBeVisible()
  await expect(page.getByTestId('connection-demo-model-quality')).toBeVisible()
- await page.route('**/api/configured-models',r=>r.fulfill({json:[{provider_id:'live-fixture',model_id:'live-judge'}]}))
+ await page.route('**/api/configured-models',r=>r.fulfill({json:{code:'0',message:'success',data:[{provider_id:'live-fixture',model_id:'live-judge'}]}}))
  await page.getByRole('button',{name:'刷新',exact:true}).click()
  await expect(page.locator('.live-models')).toContainText('live-judge')
  await expect(page.locator('.live-models')).toContainText('服务端配置 · 只读')

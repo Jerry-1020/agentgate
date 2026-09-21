@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 
 test('persisted Mock datasets remain accessible as cards',async({page,request})=>{
- const all=await(await request.get('/api/datasets')).json()
+ const all=(await(await request.get('/api/datasets')).json()).data
  const mocks=all.filter((d:any)=>d.description.startsWith('[Mock:'))
  expect(mocks.length).toBeGreaterThan(0)
  await page.goto('/#datasets')
@@ -22,7 +22,7 @@ test('saved unpublished datasets can be found, resumed, published and edited wit
   await page.getByTestId('dataset-name').fill(name)
   await page.getByTestId('submit-dataset').click()
   await expect(page.getByRole('heading',{name,exact:true})).toBeVisible()
-  id=(await (await request.get('/api/datasets')).json()).find((x:any)=>x.name===name).id
+  id=(await (await request.get('/api/datasets')).json()).data.find((x:any)=>x.name===name).id
   await page.getByTestId('publish-draft').click()
   await expect(page.locator('.validation-alert')).toContainText('评测集至少需要一个用例')
   await page.getByRole('button',{name:'新增用例',exact:true}).click()
