@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskEvaluatorPicker from './TaskEvaluatorPicker.vue';
+import AgentTargetPicker, { type AgentTargetSelection } from './AgentTargetPicker.vue';
+import { agentDirectory } from '../../../api/agent-platform';
+import { ApiError, httpRequest } from '../../../utils/request';
+import { assertLocallyEnabled } from '../utils/evaluator-preferences';
 import TargetStructure from './TargetStructure.vue';
 import {
   api,
@@ -11,7 +15,7 @@ import {
   type BankTarget,
 } from '../../../api/evaluations';
 import { recommendEvaluators } from '../utils/evaluator-guidance';
-import { saveTaskLink, type TaskLink } from '../utils/task-links';
+import { refreshTaskLinks, saveTaskLink, type TaskLink } from '../utils/task-links';
 const props = defineProps<{
   source?: {
     id: string;
@@ -26,6 +30,11 @@ const emit = defineEmits<{ close: []; created: [link: TaskLink] }>();
 const taskKind = ref<'single' | 'ab'>('single'),
   candidateVersion = ref(''),
   includeStatic = ref(false);
+const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
+const platformSelection = ref<AgentTargetSelection | null>(null);
+function receivePlatformSelection(selection: AgentTargetSelection | null) {
+  platformSelection.value = selection;
+}
 const gradingMode = ref<'overall' | 'per_turn'>('overall');
 const staticDialog = ref(false),
   staticLoading = ref(false),
@@ -36,12 +45,14 @@ const staticReport = ref<any>(null),
 let staticSequence = 0;
 function cancelAnalysis() {
   staticSequence++;
+  staticDialog.value = false;
   includeStatic.value = false;
   staticReport.value = null;
   staticReports.value = [];
   staticLoading.value = false;
 }
 async function confirmStatic() {
+  if (taskKind.value !== 'ab' || submitting.value) return;
   const ticket = ++staticSequence;
   staticLoading.value = true;
   staticError.value = '';
@@ -79,6 +90,8 @@ async function confirmStatic() {
   }
 }
 async function openStatic() {
+  if (taskKind.value !== 'ab' || submitting.value) return;
+  const ticket = ++staticSequence;
   staticDialog.value = true;
   staticError.value = '';
   staticLoading.value = true;
@@ -86,11 +99,12 @@ async function openStatic() {
     const data = await request<{
       connections: { role: string; model: string; base_url: string; configured: boolean }[];
     }>('/model-runtime');
+    if (ticket !== staticSequence) return;
     staticConnection.value = data.connections.find((c) => c.role === 'Skill 静态分析') ?? null;
   } catch {
-    staticError.value = '读取静态分析模型配置失败，请重试。';
+    if (ticket === staticSequence) staticError.value = '读取静态分析模型配置失败，请重试。';
   } finally {
-    staticLoading.value = false;
+    if (ticket === staticSequence) staticLoading.value = false;
   }
 }
 const create = ref(true),
@@ -117,9 +131,13 @@ const bankTargets = ref<BankTarget[]>([]),
   targetError = ref('');
 const gitBranchUrl = ref('');
 const bankTarget = computed(() =>
-  bankTargets.value.find((t) => t.snapshot.invocation_config.mode === selectedAgent.value),
+  taskKind.value === 'ab'
+    ? bankTargets.value.find((t) => t.snapshot.invocation_config.mode === selectedAgent.value)
+    : undefined,
 );
-const usesGitBranch = computed(() => selectedAgent.value === 'cloudshrimp');
+const usesGitBranch = computed(
+  () => taskKind.value === 'ab' && selectedAgent.value === 'cloudshrimp',
+);
 const branchOptions = computed(() =>
   bankTargets.value.filter(
     (t) => t.snapshot.invocation_config.mode === selectedAgent.value && t.git_branch_url,
@@ -155,10 +173,12 @@ const versionOptions = computed(() =>
     : versions.value,
 );
 watch(selectedAgent, (agent) => {
+  if (taskKind.value !== 'ab') return;
   selectedVersion.value =
     agent === 'demo'
       ? (versions.value[0]?.id ?? '')
       : (bankTarget.value?.descriptor.ref.external_version_id ?? '');
+  if (agent === 'demo') timeout.value = 300;
   if (agent !== 'demo') {
     concurrency.value = 1;
     timeout.value = 180;
@@ -229,38 +249,56 @@ async function openCreate(source?: {
   selectedDataset.value = '';
   create.value = true;
   try {
-    const [d, e, v, b] = await Promise.all([
-      api.datasets(),
-      api.evaluators(),
-      api.versions(),
-      request<BankTarget[]>('/bank-targets').catch((error) => {
-        targetError.value = '被测智能体目录不可用：' + String(error);
-        return [];
-      }),
-    ]);
+    const [d, e] = await Promise.all([api.datasets(), api.evaluators()]);
     if (ticket !== formSequence) return;
-    bankTargets.value = b;
     datasets.value = d.filter((x) => x.version !== null && !x.archived);
     evaluators.value = e.filter((x) => x.enabled && x.latest_version && x.kind !== 'hybrid');
-    versions.value = v;
     selectedDataset.value = source?.id || datasets.value[0]?.id || '';
-    selectedVersion.value =
-      source?.targetVersion && v.some((x) => x.id === source.targetVersion)
-        ? source.targetVersion
-        : (v[0]?.id ?? '');
     selectedEvaluators.value = source?.evaluatorId ? [source.evaluatorId] : [];
-    candidateVersion.value = v.find((x) => x.id !== selectedVersion.value)?.id ?? '';
-    if (b.length && !source?.targetVersion)
-      selectedAgent.value =
-        b.find((t) =>
-          datasets.value
-            .find((d) => d.id === source?.id)
-            ?.name.includes(' · ' + t.snapshot.invocation_config.mode + ' · '),
-        )?.snapshot.invocation_config.mode ?? 'base';
   } catch (e) {
     if (ticket === formSequence) formError.value = String(e);
   } finally {
     if (ticket === formSequence) formLoading.value = false;
+  }
+}
+const legacyLoading = ref(false);
+let legacyLoaded = false;
+let legacySequence = 0;
+async function loadLegacyTargets() {
+  if (legacyLoaded || legacyLoading.value) return;
+  const ticket = ++legacySequence;
+  legacyLoading.value = true;
+  targetError.value = '';
+  try {
+    const [v, b] = await Promise.all([
+      api.versions(),
+      request<BankTarget[]>('/bank-targets').catch(() => {
+        if (ticket === legacySequence)
+          targetError.value = '真实智能体目录暂不可用，仍可选择内置 Demo 进行 A/B 实验。';
+        return [];
+      }),
+    ]);
+    if (ticket !== legacySequence || taskKind.value !== 'ab') return;
+    versions.value = v;
+    bankTargets.value = b;
+    selectedVersion.value =
+      props.source?.targetVersion && v.some((x) => x.id === props.source?.targetVersion)
+        ? props.source.targetVersion
+        : (v[0]?.id ?? '');
+    candidateVersion.value = v.find((x) => x.id !== selectedVersion.value)?.id ?? '';
+    if (b.length && !props.source?.targetVersion)
+      selectedAgent.value =
+        b.find((t) =>
+          datasets.value
+            .find((d) => d.id === props.source?.id)
+            ?.name.includes(' · ' + t.snapshot.invocation_config.mode + ' · '),
+        )?.snapshot.invocation_config.mode ?? 'base';
+    legacyLoaded = true;
+  } catch {
+    if (ticket === legacySequence)
+      targetError.value = '被测智能体目录不可用，请切换回单任务后重试 A/B 实验。';
+  } finally {
+    if (ticket === legacySequence) legacyLoading.value = false;
   }
 }
 const recommended = ref<string[]>([]),
@@ -302,6 +340,7 @@ watch(
   { flush: 'sync' },
 );
 watch(selectedVersion, () => {
+  if (taskKind.value !== 'ab') return;
   if (
     candidateVersion.value === selectedVersion.value ||
     !versionOptions.value.some((v) => v.id === candidateVersion.value)
@@ -310,13 +349,27 @@ watch(selectedVersion, () => {
       versionOptions.value.find((v) => v.id !== selectedVersion.value)?.id ?? '';
 });
 watch(availableCases, (cases) => {
+  if (datasetLoading.value) return;
   selectedCaseIds.value = selectedCaseIds.value.filter((id) => cases.some((c) => c.id === id));
 });
 watch([executionCases, evaluators], () => {
   recommended.value = recommendEvaluators(evaluators.value, executionCases.value);
 });
 async function submit() {
-  if (submitting.value || formLoading.value || datasetLoading.value || staticLoading.value) return;
+  if (
+    submitting.value ||
+    formLoading.value ||
+    datasetLoading.value ||
+    staticLoading.value ||
+    legacyLoading.value
+  )
+    return;
+  const platform =
+    taskKind.value === 'single' ? platformPicker.value?.readSubmissionSelection() : null;
+  if (taskKind.value === 'single' && !platform) {
+    formError.value = '请登录并完整选择被测智能体及版本。';
+    return;
+  }
   formError.value = '';
   if (gradingMode.value === 'per_turn') {
     formError.value =
@@ -327,7 +380,7 @@ async function submit() {
     formError.value = '该 Git 分支尚未登记可运行版本，请选择已登记分支，或先部署并登记所填分支。';
     return;
   }
-  if (selectedAgent.value !== 'demo' && !bankTarget.value) {
+  if (taskKind.value === 'ab' && selectedAgent.value !== 'demo' && !bankTarget.value) {
     formError.value = '被测智能体不可用，请重新加载。';
     return;
   }
@@ -373,7 +426,7 @@ async function submit() {
     formError.value = '请选择已发布的评测集及版本。';
     return;
   }
-  if (!selectedVersion.value) {
+  if (taskKind.value === 'ab' && !selectedVersion.value) {
     formError.value = '请选择智能体版本。';
     return;
   }
@@ -382,21 +435,50 @@ async function submit() {
       '尚未选择评估器。请在“评估方式”中勾选至少一个评估器，或点击“采用推荐评估器”。';
     return;
   }
+  const snapshot = {
+    kind: taskKind.value,
+    datasetId: dataset.id,
+    datasetVersion: selectedDatasetVersion.value,
+    caseIds: scope.value === 'selected' ? [...selectedCaseIds.value] : undefined,
+    evaluatorIds: [...selectedEvaluators.value],
+    chosen: evaluators.value.filter((e) => selectedEvaluators.value.includes(e.id)),
+    concurrency: concurrency.value,
+    timeout: timeout.value,
+    retries: retries.value,
+    repetitions: repetitions.value,
+    scheduledFor:
+      launchMode.value === 'scheduled' ? new Date(scheduledAt.value).toISOString() : undefined,
+    baseline: selectedVersion.value,
+    candidate: candidateVersion.value,
+    staticReports: taskKind.value === 'ab' && includeStatic.value ? [...staticReports.value] : [],
+  };
   submitting.value = true;
   formError.value = '';
+  let creating = false;
+  let validationError = '';
+  const invalid = (message: string): never => {
+    validationError = message;
+    throw Error(message);
+  };
   try {
     const exact = await request<{ cases: any[] }>(
-      `/datasets/${dataset.id}/versions/${selectedDatasetVersion.value}`,
+      `/datasets/${encodeURIComponent(snapshot.datasetId)}/versions/${snapshot.datasetVersion}`,
     );
-    const caseIds = scope.value === 'selected' ? selectedCaseIds.value : undefined;
-    if (!exact.cases.length || caseIds?.length === 0) throw Error('请选择至少一条用例。');
+    const caseIds = snapshot.caseIds;
+    if (!exact.cases.length || caseIds?.length === 0) invalid('请选择至少一条用例。');
     if (caseIds) {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
-      if (exact.cases.length !== caseIds.length) throw Error('所选用例不在当前发布版本中。');
+      if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
-    const chosen = evaluators.value.filter((e) => selectedEvaluators.value.includes(e.id));
+    const chosen = snapshot.chosen;
+    if (chosen.length !== snapshot.evaluatorIds.length) invalid('所选评估器已不可用，请重新选择。');
+    try {
+      assertLocallyEnabled(snapshot.evaluatorIds);
+    } catch {
+      invalid('所选评估器已在本地停用，请重新选择。');
+    }
     if (chosen.every((e) => e.kind === 'rule') && !recommendEvaluators(chosen, exact.cases).length)
-      throw Error('所选评估器与样本期望没有适用检查。请补充期望或调整评估器。');
+      invalid('所选评估器与样本期望没有适用检查。请补充期望或调整评估器。');
     const uncovered = exact.cases.filter(
       (c) => chosen.every((e) => e.kind === 'rule') && !recommendEvaluators(chosen, [c]).length,
     );
@@ -406,91 +488,64 @@ async function submit() {
         '检查覆盖范围',
         { confirmButtonText: '继续评测', cancelButtonText: '返回修改' },
       );
-    let executionIds = [...selectedEvaluators.value],
-      executionRefs = chosen.map((e) => ({ id: e.id, version: e.latest_version! }));
-    const link: TaskLink = {
-      id: '',
-      kind: taskKind.value,
-      runIds: [],
-      staticReports: includeStatic.value ? [...staticReports.value] : [],
-    };
-    if (bankTarget.value) {
-      // bank-evaluations 契约固定单样本并发、失败不重试（业务动作不可重放），不接受并发/重试参数。
-      const created = await request<{ run_id?: string; id?: string; run_ids?: string[] }>(
-        '/bank-evaluations',
-        'POST',
-        {
-          mode: selectedAgent.value,
-          target_descriptor_sha256: bankTarget.value.descriptor.content_sha256,
-          ...(usesGitBranch.value && gitBranchUrl.value.trim()
-            ? { git_branch_url: normalizedBranch(gitBranchUrl.value) }
-            : {}),
-          dataset_id: dataset.id,
-          dataset_version: selectedDatasetVersion.value,
-          evaluator_ids: executionIds,
-          timeout_seconds: timeout.value,
-          repetitions: repetitions.value,
+    creating = true;
+    if (platform) {
+      const target = platform.target;
+      const created = await httpRequest<unknown>('/agent-platform/evaluations', {
+        method: 'POST',
+        headers: { 'X-Agent-Platform-Token': platform.token },
+        data: {
+          target: {
+            team_id: target.teamId,
+            agent_id: target.agentId,
+            type_group: target.typeGroup,
+            agent_version: target.agentVersion,
+            ...(target.typeGroup === 'abcclaw' ? { branch_id: target.branchId } : {}),
+          },
+          dataset_id: snapshot.datasetId,
+          dataset_version: snapshot.datasetVersion,
           ...(caseIds ? { case_ids: caseIds } : {}),
-          ...(launchMode.value === 'scheduled'
-            ? { scheduled_for: new Date(scheduledAt.value).toISOString() }
-            : {}),
+          evaluator_ids: snapshot.evaluatorIds,
+          max_parallel_cases: snapshot.concurrency,
+          timeout_seconds: snapshot.timeout,
+          max_retries: snapshot.retries,
+          repetitions: snapshot.repetitions,
+          ...(snapshot.scheduledFor ? { scheduled_for: snapshot.scheduledFor } : {}),
         },
-      );
-      link.id = created.id ?? created.run_id!;
-      link.runIds = created.run_ids ?? [created.run_id!];
-      link.kind = repetitions.value > 1 ? 'stability' : 'single';
-    } else if (taskKind.value === 'ab') {
-      const pair = await request<{ baseline: { run_id: string }; candidate: { run_id: string } }>(
-        '/run-comparisons',
-        'POST',
-        {
-          baseline_version: selectedVersion.value,
-          candidate_version: candidateVersion.value,
-          dataset_id: dataset.id,
-          dataset_version: selectedDatasetVersion.value,
-          evaluators: executionRefs,
-          max_parallel_cases: concurrency.value,
-          max_retries: retries.value,
-        },
-      );
-      link.id = pair.baseline.run_id;
-      link.runIds = [pair.baseline.run_id, pair.candidate.run_id];
-    } else if (repetitions.value > 1) {
-      const task = await request<{ id: string; run_ids: string[] }>(
-        '/stability-experiments',
-        'POST',
-        {
-          version: selectedVersion.value,
-          dataset_id: dataset.id,
-          dataset_version: selectedDatasetVersion.value,
-          evaluator_ids: executionIds,
-          max_parallel_cases: concurrency.value,
-          timeout_seconds: timeout.value,
-          max_retries: retries.value,
-          repetitions: repetitions.value,
-          ...(caseIds ? { case_ids: caseIds } : {}),
-        },
-      );
-      link.id = task.id;
-      link.kind = 'stability';
-      link.runIds = task.run_ids;
-    } else {
-      const run = await request<{ run_id: string }>('/evaluations', 'POST', {
-        version: selectedVersion.value,
-        dataset_id: dataset.id,
-        dataset_version: selectedDatasetVersion.value,
-        evaluator_ids: executionIds,
-        max_parallel_cases: concurrency.value,
-        timeout_seconds: timeout.value,
-        max_retries: retries.value,
-        ...(caseIds ? { case_ids: caseIds } : {}),
-        ...(launchMode.value === 'scheduled'
-          ? { scheduled_for: new Date(scheduledAt.value).toISOString() }
-          : {}),
       });
-      link.id = run.run_id;
-      link.runIds = [run.run_id];
+      const link = platformTaskLink(created, snapshot.repetitions);
+      let refreshed = true;
+      try {
+        await refreshTaskLinks();
+      } catch {
+        refreshed = false;
+      }
+      window.dispatchEvent(new Event('task-links-updated'));
+      emit('created', link);
+      if (refreshed) ElMessage.success('评测任务已提交');
+      else
+        ElMessage.warning(
+          `任务已创建（${link.id}），但列表刷新失败，请刷新任务列表；请勿重复提交。`,
+        );
+      return;
     }
+    const pair = await request<{ baseline: { run_id: string }; candidate: { run_id: string } }>(
+      '/run-comparisons',
+      'POST',
+      {
+        baseline_version: snapshot.baseline,
+        candidate_version: snapshot.candidate,
+        dataset_id: snapshot.datasetId,
+        dataset_version: snapshot.datasetVersion,
+        evaluators: snapshot.chosen.map((e) => ({ id: e.id, version: e.latest_version! })),
+      },
+    );
+    const link: TaskLink = {
+      id: pair.baseline.run_id,
+      kind: 'ab',
+      runIds: [pair.baseline.run_id, pair.candidate.run_id],
+      staticReports: snapshot.staticReports,
+    };
     try {
       await saveTaskLink(link);
     } catch {
@@ -505,16 +560,53 @@ async function submit() {
         : '评测任务已提交',
     );
   } catch (e) {
-    if (e !== 'cancel' && e !== 'close') formError.value = String(e);
+    if (e !== 'cancel' && e !== 'close') {
+      formError.value =
+        snapshot.kind === 'ab'
+          ? String(e)
+          : validationError ||
+            (!creating
+              ? '读取评测配置失败，请重试。'
+              : e instanceof ApiError && e.status >= 400 && e.status < 500
+                ? '任务提交被拒绝，请检查访问权限、目标及执行设置后重试。'
+                : '暂时无法确认任务是否创建成功，请先检查任务列表，勿重复提交。');
+    }
   } finally {
     submitting.value = false;
   }
 }
 
+function platformTaskLink(value: unknown, repetitions: number): TaskLink {
+  const task = value as { id?: unknown; kind?: unknown; run_ids?: unknown } | null;
+  const kind = repetitions > 1 ? 'stability' : 'single';
+  const validId = (id: unknown): id is string => typeof id === 'string' && id.trim().length > 0;
+  if (
+    !task ||
+    !validId(task.id) ||
+    task.kind !== kind ||
+    !Array.isArray(task.run_ids) ||
+    task.run_ids.length !== repetitions ||
+    !task.run_ids.every(validId) ||
+    new Set(task.run_ids).size !== task.run_ids.length
+  )
+    throw Error('Invalid task response');
+  return { id: task.id, kind, runIds: [...task.run_ids], staticReports: [] };
+}
+
 watch(taskKind, (kind) => {
+  platformSelection.value = null;
+  formError.value = '';
+  cancelAnalysis();
+  if (kind !== 'ab') {
+    legacySequence++;
+    legacyLoading.value = false;
+    targetError.value = '';
+  }
   if (kind === 'ab') {
-    candidateVersion.value =
-      versionOptions.value.find((v) => v.id !== selectedVersion.value)?.id ?? '';
+    void loadLegacyTargets();
+    if (!candidateVersion.value)
+      candidateVersion.value =
+        versionOptions.value.find((v) => v.id !== selectedVersion.value)?.id ?? '';
     repetitions.value = 1;
     scope.value = 'all';
     launchMode.value = 'now';
@@ -522,6 +614,13 @@ watch(taskKind, (kind) => {
     timeout.value = 300;
     retries.value = 0;
   }
+});
+onBeforeUnmount(() => {
+  formSequence++;
+  recommendationSequence++;
+  legacySequence++;
+  cancelAnalysis();
+  platformSelection.value = null;
 });
 onMounted(() => void openCreate(props.source));
 </script>
@@ -548,25 +647,41 @@ onMounted(() => void openCreate(props.source));
       <button
         type="button"
         :class="{ selected: taskKind === 'single' }"
-        :disabled="submitting"
+        :disabled="submitting || formLoading"
         @click="taskKind = 'single'"
       >
         <b>单任务</b></button
       ><button
         type="button"
         :class="{ selected: taskKind === 'ab' }"
-        :disabled="submitting"
+        :disabled="submitting || formLoading"
         @click="taskKind = 'ab'"
       >
         <b>A/B 实验</b>
       </button>
     </div>
-    <fieldset :disabled="submitting || formLoading" class="form-grid task-create-grid">
+    <fieldset
+      :disabled="submitting || formLoading || legacyLoading"
+      class="form-grid task-create-grid"
+    >
       <div class="form-section-heading full">
         <span>02</span>
         <div><h3>评测对象</h3></div>
       </div>
+      <AgentTargetPicker
+        v-if="taskKind === 'single'"
+        ref="platformPicker"
+        class="full"
+        :directory="agentDirectory"
+        :disabled="submitting || formLoading"
+        @selection-change="receivePlatformSelection"
+      />
+      <p v-if="taskKind === 'single'" class="muted full">
+        平台目录暂未提供图谱与静态分析所需信息，当前无法展示智能体图谱或进行静态分析。
+      </p>
+      <p v-if="legacyLoading" class="full" role="status">正在加载 A/B 智能体目录…</p>
       <div
+        v-if="taskKind === 'ab'"
         class="target-choice full"
         :class="{ 'is-ab': taskKind === 'ab', 'has-git-branch': usesGitBranch }"
       >
@@ -690,6 +805,7 @@ onMounted(() => void openCreate(props.source));
           ><el-select
             v-if="scope === 'selected'"
             v-model="selectedCaseIds"
+            :disabled="submitting || formLoading || datasetLoading"
             multiple
             filterable
             placeholder="选择要运行的用例"
@@ -717,7 +833,7 @@ onMounted(() => void openCreate(props.source));
         v-model="selectedEvaluators"
         :static-report="staticReport"
         :static-enabled="includeStatic"
-        :static-available="!bankTarget || !!targetDescriptor?.skills.length"
+        :static-available="taskKind === 'ab' && (!bankTarget || !!targetDescriptor?.skills.length)"
         @static="openStatic"
         @cancel-analysis="cancelAnalysis"
       />
@@ -780,6 +896,7 @@ onMounted(() => void openCreate(props.source));
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
+            :disabled="taskKind === 'ab'"
             title="最多 30 个样本并发"
             aria-label="并发样本数"
             type="number"
@@ -814,6 +931,7 @@ onMounted(() => void openCreate(props.source));
           >失败重试次数<input
             class="input"
             v-model.number="retries"
+            :disabled="taskKind === 'ab'"
             title="最多 5 次；仅重试可安全重试的执行错误"
             aria-label="失败重试次数"
             type="number"
@@ -823,17 +941,20 @@ onMounted(() => void openCreate(props.source));
         /></label>
       </div>
 
-      <p v-if="taskKind === 'ab'" class="muted full">A/B 两侧使用相同执行参数。</p>
+      <p v-if="taskKind === 'ab'" class="muted full">A/B 两侧沿用固定执行参数：并发 1，失败重试 0。</p>
     </fieldset>
     <p class="task-summary">
       本次：{{
         taskKind === 'ab' ? 'A/B 实验 · 两个版本' : repetitions > 1 ? '稳定性测试' : '单任务'
       }}
-      · {{ versionOptions.find((v) => v.id === selectedVersion)?.label ?? '待选目标' }} · v{{
-        selectedDatasetVersion ?? '—'
+      ·
+      {{
+        (taskKind === 'single'
+          ? platformSelection?.agentName
+          : versionOptions.find((v) => v.id === selectedVersion)?.label) ?? '待选目标'
       }}
-      · {{ executionCases.length }} 条用例 × {{ repetitions }} 次 ·
-      {{ selectedEvaluators.length }} 个评估器
+      · v{{ selectedDatasetVersion ?? '—' }} · {{ executionCases.length }} 条用例 ×
+      {{ repetitions }} 次 · {{ selectedEvaluators.length }} 个评估器
     </p>
     <template #footer>
       <div class="submission-feedback">
@@ -869,6 +990,8 @@ onMounted(() => void openCreate(props.source));
           class="primary"
           :disabled="
             submitting ||
+            legacyLoading ||
+            (taskKind === 'single' && !platformSelection) ||
             formLoading ||
             datasetLoading ||
             staticLoading ||

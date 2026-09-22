@@ -65,9 +65,10 @@ def test_dispatch_failure_retains_group_without_zero_scores(tmp_path):
         response = client.get("/api/stability-experiments/" + task["id"])
         assert response.status_code == 200, response.text
         summary = response.json()["data"]
-        assert summary["complete"] and summary["mean"] is None
+        assert not summary["complete"]
+        assert summary["mean"] is None
         assert summary["measured_runs"] == 0
-        assert all(row["progress"]["status"] == "failed" for row in summary["runs"])
+        assert all(row["progress"]["status"] == "waiting" for row in summary["runs"])
 
 
 def test_group_transaction_rolls_back_new_runs_on_task_conflict(tmp_path):

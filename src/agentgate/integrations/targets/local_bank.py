@@ -1,7 +1,9 @@
 """HTTP execution of the separately hosted bank-tested-agents runtime.
 
-This is not a generic bank production adapter. Its richer evidence semantics are
-specific to the versioned service in tested-agents/ and verified before mapping.
+This is not a generic bank production adapter. Evidence for each turn is
+requested from the central Trace Server query plane (trace referenced by the
+chat SSE ``trace`` event) and reconciled against the streamed answer before
+mapping.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from uuid import uuid4
 
 from agentgate.domain import FrozenJsonObject, TargetDescriptor, TargetRef, TargetSnapshot
 from agentgate.integrations.observability.trace_sdk import normalize_sdk_exports
+from agentgate.integrations.observability.trace_server import TraceServerClient
 from agentgate.integrations.targets.bank_protocol import build_chatabc_payload, build_cloudshrimp_payload, parse_bank_sse
 from agentgate.run.target_protocol import CaseExecutionResult, CaseExecutionStatus, TargetExecutionError
 
@@ -80,8 +83,9 @@ class LocalBankAdapter:
     adapter_type = "local_bank"
     adapter_version = "1"
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, trace_client=None):
         self.client = client or LocalBankClient()
+        self.trace_server = trace_client or TraceServerClient()
         self.results = {}
         self.statuses = {}
 
@@ -133,19 +137,24 @@ class LocalBankAdapter:
                 payload = build_chatabc_payload({"session_id": session, "txt": turn.input["txt"], "files": [], "stream": True}, request_id=rid, timestamp_ms=int(time.time()*1000))
                 path = prefix + "/chatabc/chat"
             data = self.client.call(path, payload, timeout=remaining(), request_id=rid, raw=True)
-            parse_bank_sse(data.decode().splitlines(), protocol=mode, wire_format="event_lines", request_id=rid)
-            record = self.client.call("/requests/" + rid, timeout=remaining())
-            result = record.get("result") or {}
-            if record.get("status") != "completed" or result.get("mode") != mode or result.get("agent_version") != "v1" or result.get("request_id") != rid or result.get("session_id") != session:
-                raise TargetExecutionError("protocol_error", "bank request evidence correlation mismatch")
-            raw = self.client.call("/requests/" + rid + "/trace", timeout=remaining(), raw=True)
-            root = next((json.loads(l) for l in raw.splitlines() if l.strip() and json.loads(l).get("event_type") == "trace"), None)
-            if root is None or root.get("output") != result:
-                raise TargetExecutionError("protocol_error", "SDK trace output differs from request result")
+            chat = parse_bank_sse(data.decode().splitlines(), protocol=mode, wire_format="event_lines", request_id=rid)
+            trace_ids = {item.get("trace_id") for item in chat.trace_payloads
+                         if isinstance(item, dict) and isinstance(item.get("trace_id"), str) and item["trace_id"].strip()}
+            if len(trace_ids) != 1:
+                raise TargetExecutionError("protocol_error", "chat stream must reference exactly one trace server trace")
+            events = self.trace_server.fetch_events(config["project_id"], trace_ids.pop(), timeout=remaining())
+            root = next((event for event in events if event.get("event_type") == "trace"), None)
+            result = (root or {}).get("output") or {}
+            if (root is None or root.get("status") != "success"
+                    or result.get("mode") != mode or result.get("agent_version") != "v1"
+                    or result.get("request_id") != rid or result.get("session_id") != session
+                    or result.get("output") != chat.output):
+                raise TargetExecutionError("protocol_error", "trace server evidence correlation mismatch")
             if not isinstance(root.get("input"), dict):
                 raise TargetExecutionError("protocol_error", "SDK trace is missing the executed input")
             inputs[turn.id] = root["input"]
-            exports[turn.id] = (result["trace_id"], raw)
+            exports[turn.id] = (root["trace_id"], "\n".join(
+                json.dumps(event, ensure_ascii=False) for event in events).encode())
             outputs[turn.id] = result
         trace = normalize_sdk_exports(request, exports, project_id=config["project_id"])
         spans = []

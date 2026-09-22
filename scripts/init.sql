@@ -187,39 +187,31 @@ CREATE TABLE IF NOT EXISTS agentgate_traces (
     CONSTRAINT uq_trace_run_case UNIQUE (run_key, case_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE IF NOT EXISTS evaluation_task_runs (
+CREATE TABLE IF NOT EXISTS agentgate_evaluation_task_runs (
     run_key BINARY(32) NOT NULL,
     run_id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     task_key BINARY(32) NOT NULL,
     task_id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
-    CONSTRAINT pk_evaluation_task_runs PRIMARY KEY (run_key),
-    INDEX ix_task_runs_task (task_key)
+    CONSTRAINT pk_agentgate_evaluation_task_runs PRIMARY KEY (run_key),
+    INDEX ix_agentgate_evaluation_task_runs_task (task_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE IF NOT EXISTS evaluation_tasks (
+CREATE TABLE IF NOT EXISTS agentgate_evaluation_tasks (
     id_key BINARY(32) NOT NULL,
     id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     created_at DATETIME(6) NOT NULL,
     payload LONGTEXT COLLATE utf8mb4_bin NOT NULL,
-    CONSTRAINT pk_evaluation_tasks PRIMARY KEY (id_key),
-    INDEX ix_tasks_created (created_at)
+    CONSTRAINT pk_agentgate_evaluation_tasks PRIMARY KEY (id_key),
+    INDEX ix_agentgate_evaluation_tasks_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE IF NOT EXISTS optimization_reports (
+CREATE TABLE IF NOT EXISTS agentgate_optimization_reports (
     evidence_key_digest BINARY(32) NOT NULL,
     evidence_key LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     run_key BINARY(32) NOT NULL,
     run_id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     created_at DATETIME(6) NOT NULL,
     payload LONGTEXT COLLATE utf8mb4_bin NOT NULL,
-    CONSTRAINT pk_optimization_reports PRIMARY KEY (evidence_key_digest),
-    INDEX ix_optimization_run (run_key)
+    CONSTRAINT pk_agentgate_optimization_reports PRIMARY KEY (evidence_key_digest),
+    INDEX ix_agentgate_optimization_reports_run (run_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE IF NOT EXISTS alembic_version (
-    version_num VARCHAR(32) NOT NULL,
-    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
-
-INSERT INTO alembic_version (version_num) VALUES ('0001')
-    ON DUPLICATE KEY UPDATE version_num = VALUES(version_num);

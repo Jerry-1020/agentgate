@@ -380,15 +380,13 @@ def test_run_route_persists_failed_run_when_dispatch_fails(tmp_path) -> None:
                 "dataset_version": 1,
             },
         )
-        failed_runs = client.get("/api/runs", params={"status": "failed"})
+        waiting_runs = client.get("/api/runs", params={"status": "waiting"})
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == (
-        "Evaluation dispatch service is unavailable"
-    )
-    assert len(failed_runs.json()) == 1
-    assert failed_runs.json()[0]["error"] == "Run dispatch failed: ConnectionError"
-    assert "secret" not in failed_runs.text
+    assert response.status_code == 202
+    assert len(waiting_runs.json()) == 1
+    assert waiting_runs.json()[0]["status"] == "waiting"
+    assert waiting_runs.json()[0]["dispatch_attempts"] == 1
+    assert "secret" not in waiting_runs.text
 
 
 def test_run_status_returns_not_found(tmp_path) -> None:
@@ -597,19 +595,16 @@ def test_run_route_persists_failed_rerun_when_dispatch_fails(tmp_path) -> None:
 
     with client:
         response = client.post(f"/api/runs/{source.id}/rerun")
-        failed_runs = client.get("/api/runs", params={"status": "failed"})
+        waiting_runs = client.get("/api/runs", params={"status": "waiting"})
 
-    assert response.status_code == 503
-    assert response.json()["detail"] == (
-        "Evaluation dispatch service is unavailable"
-    )
-    assert len(failed_runs.json()) == 1
-    failed_rerun = repository.get_run(failed_runs.json()[0]["id"])
-    assert failed_rerun is not None
-    assert failed_rerun.manifest == source.manifest
-    assert failed_rerun.error == "Run dispatch failed: ConnectionError"
-    assert dispatcher.run_ids == [failed_rerun.id]
-    assert "secret" not in failed_runs.text
+    assert response.status_code == 202
+    assert len(waiting_runs.json()) == 1
+    waiting_rerun = repository.get_run(waiting_runs.json()[0]["id"])
+    assert waiting_rerun is not None
+    assert waiting_rerun.manifest == source.manifest
+    assert waiting_rerun.dispatch_attempts == 1
+    assert dispatcher.run_ids == [waiting_rerun.id]
+    assert "secret" not in waiting_runs.text
 
 
 def test_run_manifest_returns_exact_pending_execution_provenance(tmp_path) -> None:

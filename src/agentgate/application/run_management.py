@@ -22,11 +22,12 @@ from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.run.engine import RunEngine, TraceResolver
 from agentgate.run.retry import retry_delay_seconds
 from agentgate.run.target_protocol import TargetAdapterProtocol
-from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
+from agentgate.storage.repository import AgentGateRepository
 
 from .dataset_management import DatasetManagement
 from .evaluator_management import EvaluatorManagement
+from .run_scheduling import MAX_CONCURRENT_RUNS_PER_API_KEY, MAX_DISPATCH_ATTEMPTS
 from .target_catalog import TargetCatalog
 
 
@@ -135,6 +136,7 @@ class RunManagement:
         if source.status in {
             RunStatus.SCHEDULED,
             RunStatus.PENDING,
+            RunStatus.WAITING,
             RunStatus.RUNNING,
         }:
             raise ValueError(
@@ -184,13 +186,26 @@ class RunManagement:
             raise ValueError(f"unknown EvaluationRun: {run_id}")
         if run.status is not RunStatus.PENDING:
             raise ValueError("only a pending EvaluationRun can be dispatched")
+
+        active = self.repository.count_active_runs_by_api_key(run.api_key)
+        if active > MAX_CONCURRENT_RUNS_PER_API_KEY:
+            waiting = transition_run(run, RunStatus.WAITING)
+            self.repository.save_run(waiting)
+            return waiting
+
         try:
             dispatcher.submit(run.id)
         except Exception as exc:
+            attempts = run.dispatch_attempts + 1
+            if attempts < MAX_DISPATCH_ATTEMPTS:
+                waiting = transition_run(run, RunStatus.WAITING)
+                waiting = waiting.model_copy(update={"dispatch_attempts": attempts})
+                self.repository.save_run(waiting)
+                return waiting
             failed = transition_run(
                 run,
                 RunStatus.FAILED,
-                error=f"Run dispatch failed: {type(exc).__name__}",
+                error=f"Run dispatch failed after {attempts} attempts: {type(exc).__name__}",
             )
             try:
                 self.repository.save_run(failed)

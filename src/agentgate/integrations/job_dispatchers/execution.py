@@ -3,9 +3,16 @@
 from contextlib import ExitStack, closing
 
 from agentgate.application import RunManagement
+from agentgate.application.credential_management import ApiKeyManagement
 from agentgate.application.evaluator_management import build_default_evaluator_management
-from agentgate.domain import RunStatus
+from agentgate.domain import RunStatus, transition_run
+from agentgate.integrations.credentials.environment import load_api_key_encryptor
 from agentgate.integrations.model_providers.environment import load_judge_model_from_environment
+from agentgate.integrations.targets.agent_platform import (
+    PlatformAdapter,
+    PlatformClient,
+    resolve_platform_trace,
+)
 from agentgate.integrations.targets.execution_factory import TargetExecutionFactory
 from agentgate.storage.configuration import create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
@@ -32,7 +39,8 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
         raise ValueError(f"{target.adapter_type} execution requires no retries and serial cases")
 
     with ExitStack() as resources:
-        adapter, trace_resolver = TargetExecutionFactory.create(target, resources)
+        if target.adapter_type != PlatformAdapter.adapter_type:
+            adapter, trace_resolver = TargetExecutionFactory.create(target, resources)
         configured_judge = load_judge_model_from_environment()
         if configured_judge is not None:
             resources.callback(configured_judge.client.close)
@@ -46,6 +54,33 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                 judge_credential_ref=configured_judge.credential_ref,
             )
         )
+        if target.adapter_type == PlatformAdapter.adapter_type:
+            try:
+                reference = target.credential_ref
+                if reference is None:
+                    raise ValueError("platform credential reference is missing")
+                credentials = ApiKeyManagement(repository, load_api_key_encryptor())
+                token = credentials.resolve_api_key(reference)
+                adapter = PlatformAdapter(PlatformClient.from_environment(), token)
+            except (ValueError, LookupError, ConnectionError):
+                failed = transition_run(
+                    run,
+                    RunStatus.FAILED,
+                    error="Platform execution configuration or credential is unavailable",
+                )
+                repository.save_run(failed)
+                return failed.status.value
+            try:
+                completed = RunManagement(repository, evaluator_management).execute_run(
+                    run.id,
+                    adapter,
+                    resolve_platform_trace,
+                )
+                return completed.status.value
+            finally:
+                adapter.token = ""
+                token = ""
+
         completed = RunManagement(repository, evaluator_management).execute_run(
             run.id,
             adapter,
