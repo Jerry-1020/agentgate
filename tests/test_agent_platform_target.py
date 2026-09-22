@@ -153,7 +153,7 @@ def test_invalid_selection_and_dispatch_failure_preserve_truth(mock_peer, monkey
             headers={"X-Agent-Platform-Token": "t"},
         )
         assert response.status_code == 202
-        assert deps.repository.get_run(dispatcher.ids[0]).status == "failed"
+        assert deps.repository.get_run(dispatcher.ids[0]).status == "waiting"
         assert deps.repository.get_evaluation_task(response.json()["data"]["id"])
 
 

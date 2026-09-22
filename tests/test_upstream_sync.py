@@ -79,6 +79,11 @@ def test_existing_database_prefix_and_identity_migration_preserves_payloads(tmp_
         for table in tables:
             for name in ("user_team_id", "user_id", "user_name", "api_key"):
                 if name in {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}:
+                    for index in db.execute(f'PRAGMA index_list("{table}")').fetchall():
+                        index_name = index[1]
+                        columns = {col[2] for col in db.execute(f'PRAGMA index_info("{index_name}")')}
+                        if name in columns:
+                            db.execute(f'DROP INDEX "{index_name}"')
                     db.execute(f'ALTER TABLE "{table}" DROP COLUMN "{name}"')
             db.execute(f'ALTER TABLE "{table}" RENAME TO "{table.removeprefix("agentgate_")}"')
     migrated = SQLiteRepository(path)
