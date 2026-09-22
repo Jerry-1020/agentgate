@@ -397,6 +397,7 @@ class InbankYunxiaTargetAdapter:
         self._run_id = request.run_id
         self._run_customer_suffix = uuid4().hex
         customer_task_id = _task_id_from_run_id(request.run_id)
+        branch_id = _branch_id(request)
         version = request.target.invocation_config.get(
             "agent_version", request.target.ref.external_version_id
         )
@@ -416,6 +417,7 @@ class InbankYunxiaTargetAdapter:
                 payload={
                     "agentId": request.target.ref.external_target_id,
                     "agentVersion": version,
+                    "branchId": branch_id,
                 },
                 timeout=min(
                     request.timeout_seconds, self.settings.request_timeout_seconds
@@ -685,6 +687,7 @@ class InbankYunxiaTargetAdapter:
             raise TargetExecutionError(
                 "invalid_request", "adapter_version does not match"
             )
+        _branch_id(request)
         initial = request.case.initial_state.to_dict()
         if set(initial) - {"customer_id", "config_variables"}:
             raise TargetExecutionError(
@@ -745,6 +748,19 @@ def _input_field(request: CaseExecutionRequest) -> str:
             "invalid_request", "target input_field must be nonblank text"
         )
     return value
+
+
+def _branch_id(request: CaseExecutionRequest) -> str:
+    value = request.target.invocation_config.get("branch_id")
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or value.strip().casefold() in {"null", "none"}
+    ):
+        raise TargetExecutionError(
+            "invalid_request", "Yunxia target branch_id is required"
+        )
+    return value.strip()
 
 
 def resolve_yunxia_trace(

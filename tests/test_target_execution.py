@@ -10,7 +10,14 @@ import pytest
 from test_run_engine import pending_run
 from test_target_execution_factory import configure_inbank, target_snapshot
 
-from agentgate.domain import Case, CaseTurn, EvaluationRun, RunStatus, transition_run
+from agentgate.domain import (
+    Case,
+    CaseTurn,
+    EvaluationRun,
+    RunStatus,
+    TargetSnapshot,
+    transition_run,
+)
 from agentgate.integrations.job_dispatchers import execution
 from agentgate.integrations.job_dispatchers.celery import execute_evaluation_run
 from agentgate.integrations.targets.inbank import chatabc, yunxia
@@ -155,6 +162,11 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
             "payload": {
                 "agentId": "loan-agent",
                 "agentVersion": "loan-agent-v2-fixed",
+                **(
+                    {"branchId": "branch-review"}
+                    if context.run.manifest.target.adapter_type == "inbank_yunxia"
+                    else {}
+                ),
             },
         }
     ]
@@ -280,6 +292,22 @@ def test_run_id_must_provide_an_eight_character_customer_task_id(persisted_targe
     context.repository.save_run(run)
 
     with pytest.raises(TargetExecutionError, match="at least 8 characters"):
+        execution.execute_persisted_run(run.id)
+
+    assert context.transport.created == 0
+
+
+def test_yunxia_requires_branch_before_creation(persisted_target):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_yunxia":
+        pytest.skip("Yunxia-only branch contract")
+    values = context.run.manifest.target.model_dump(exclude={"content_sha256"})
+    values["invocation_config"] = {"agent_version": "loan-agent-v2-fixed"}
+    target = TargetSnapshot(**values)
+    run = EvaluationRun(manifest=pending_run(target=target).manifest)
+    context.repository.save_run(run)
+
+    with pytest.raises(TargetExecutionError, match="branch_id is required"):
         execution.execute_persisted_run(run.id)
 
     assert context.transport.created == 0
