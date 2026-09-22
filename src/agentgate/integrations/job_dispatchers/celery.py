@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from contextlib import closing
@@ -14,6 +15,8 @@ from agentgate.application import RunScheduling
 from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.integrations.job_dispatchers.execution import execute_persisted_run
 from agentgate.storage.configuration import create_repository, load_database_config
+
+LOGGER = logging.getLogger(__name__)
 
 TASK_NAME = "agentgate.execute_evaluation_run"
 SCHEDULER_TASK_NAME = "agentgate.dispatch_due_evaluation_runs"
@@ -128,7 +131,11 @@ celery_app = create_celery_app()
 def execute_evaluation_run(run_id: str) -> str:
     """Load one persisted Run and execute it through the shared application boundary."""
 
-    return execute_persisted_run(run_id)
+    try:
+        return execute_persisted_run(run_id)
+    except Exception:
+        LOGGER.error("Worker execution failed: run_id=%s", run_id, exc_info=True)
+        raise
 
 
 @celery_app.task(

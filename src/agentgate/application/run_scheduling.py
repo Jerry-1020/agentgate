@@ -95,12 +95,19 @@ class RunScheduling:
             release_time,
             limit=limit,
         )
+        if due_runs:
+            LOGGER.debug("Scheduler: dispatch_due_runs starting, %d due runs", len(due_runs))
         dispatched: list[EvaluationRun] = []
         for run in due_runs:
             active = self.repository.count_active_runs_by_api_key(run.api_key)
             if active > MAX_CONCURRENT_RUNS_PER_API_KEY:
                 waiting = _transition_to_waiting(run)
                 self.repository.save_run(waiting)
+                key_display = "None" if run.api_key is None else "***"
+                LOGGER.warning(
+                    "Scheduled run throttled to waiting: run_id=%s active_count=%d max=%d api_key=%s",
+                    run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY, key_display,
+                )
                 continue
             try:
                 dispatcher.submit(run.id)
@@ -109,6 +116,7 @@ class RunScheduling:
                     run, exc, occurred_at=release_time, repository=self.repository
                 )
                 continue
+            LOGGER.info("Scheduled run dispatched: run_id=%s", run.id)
             dispatched.append(run)
         return tuple(dispatched)
 
@@ -123,10 +131,17 @@ class RunScheduling:
         waiting_runs = self.repository.list_runs_by_status(
             RunStatus.WAITING, limit=limit, oldest_first=True
         )
+        if waiting_runs:
+            LOGGER.debug("Scheduler: dispatch_waiting_runs starting, %d waiting runs", len(waiting_runs))
         dispatched: list[EvaluationRun] = []
         for run in waiting_runs:
             active = self.repository.count_active_runs_by_api_key(run.api_key)
             if active >= MAX_CONCURRENT_RUNS_PER_API_KEY:
+                key_display = "None" if run.api_key is None else "***"
+                LOGGER.debug(
+                    "Waiting run still throttled: run_id=%s active_count=%d max=%d api_key=%s",
+                    run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY, key_display,
+                )
                 continue
             claimed = self.repository.claim_waiting_run(run.id, utcnow())
             if claimed is None:
@@ -138,5 +153,6 @@ class RunScheduling:
                     claimed, exc, occurred_at=utcnow(), repository=self.repository
                 )
                 continue
+            LOGGER.info("Waiting run dispatched: run_id=%s", claimed.id)
             dispatched.append(claimed)
         return tuple(dispatched)
