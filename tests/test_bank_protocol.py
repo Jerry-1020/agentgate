@@ -74,6 +74,55 @@ def test_workflow_accepts_customer_auxiliary_events_and_nested_end_node():
     assert result.output == "customer answer"
 
 
+def test_cloudshrimp_accepts_auxiliary_events_without_lifecycle_events():
+    result = parse_bank_sse(
+        stream([
+            ("chat_started", {"chat_id": "chat-1"}),
+            ("node_started", {"node_id": "intentClassification"}),
+            ("chunk", {"content": "partial"}),
+            ("message", {
+                "status": "completed",
+                "output": "customer answer",
+                "intent_code": "loan",
+                "slots": {"amount": 1000},
+                "workflow_calls": [{"node_id": "end"}],
+            }),
+        ]),
+        protocol="cloudshrimp",
+        wire_format="event_lines",
+        request_id="request",
+        session_id="session",
+    )
+
+    assert result.output == "customer answer"
+    assert result.intent_code == "loan"
+    assert result.slots == {"amount": 1000}
+    assert result.workflow_calls == ({"node_id": "end"},)
+
+
+def test_cloudshrimp_rejects_failure_and_mismatched_session_events():
+    with pytest.raises(TargetExecutionError, match="error event"):
+        parse_bank_sse(
+            stream([("failed", {"message": "customer failed"})]),
+            protocol="cloudshrimp",
+            wire_format="event_lines",
+            request_id="request",
+            session_id="session",
+        )
+
+    with pytest.raises(TargetExecutionError, match="session ID mismatch"):
+        parse_bank_sse(
+            stream([
+                ("start", {"request_id": "request", "session_id": "wrong"}),
+                ("message", {"status": "completed", "output": "answer"}),
+            ]),
+            protocol="cloudshrimp",
+            wire_format="event_lines",
+            request_id="request",
+            session_id="session",
+        )
+
+
 @pytest.mark.parametrize("frames", [[], [("message", {"content": "answer"})],
     [("done", "[DONE]")], [("error", {"message": "password=private"}), ("done", "[DONE]")],
     [("message", {"content": ""}), ("done", "[DONE]")],

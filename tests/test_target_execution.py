@@ -30,6 +30,8 @@ class RecordingTransport:
         self.messages = []
         self.fail_chat = False
         self.chat_error_event = False
+        self.yunxia_auxiliary_events = False
+        self.yunxia_error_event = False
 
     def request_json(self, method, url, *, payload=None, **kwargs):
         if "createAgent" in url:
@@ -69,15 +71,37 @@ class RecordingTransport:
         else:
             assert url.endswith("/api/v1/message")
             self.messages.append(payload)
-            events = [
-                (
-                    "start",
-                    {"request_id": headers["X-Request-ID"], "session_id": payload["sessionId"]},
-                ),
-                ("message", {"status": "completed", "output": "answer"}),
-            ]
+            if self.yunxia_error_event:
+                events = [("failed", {"message": "customer Yunxia failed"})]
+            elif self.yunxia_auxiliary_events:
+                events = [
+                    ("chat_started", {"chat_id": "chat-1"}),
+                    ("node_started", {"node_id": "intentClassification"}),
+                    ("chunk", {"content": "partial"}),
+                    ("message", {"status": "completed", "output": "answer"}),
+                ]
+            else:
+                events = [
+                    (
+                        "start",
+                        {
+                            "request_id": headers["X-Request-ID"],
+                            "session_id": payload["sessionId"],
+                        },
+                    ),
+                    ("message", {"status": "completed", "output": "answer"}),
+                    ("done", "[DONE]"),
+                ]
+            return "".join(
+                f"event: {name}\ndata: "
+                f"{data if data == '[DONE]' else json.dumps(data)}\n\n"
+                for name, data in events
+            ).encode()
         return (
-            "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events)
+            "".join(
+                f"event: {name}\ndata: {json.dumps(data)}\n\n"
+                for name, data in events
+            )
             + "event: done\ndata: [DONE]\n\n"
         ).encode()
 
@@ -172,6 +196,30 @@ def test_execution_failure_cleans_pod_and_records_failed_run(persisted_target):
     assert context.transport.created == context.transport.deleted == 1
 
 
+def test_yunxia_accepts_auxiliary_events_without_start_or_done(persisted_target):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_yunxia":
+        pytest.skip("Yunxia-only SSE compatibility")
+    context.transport.yunxia_auxiliary_events = True
+
+    assert execution.execute_persisted_run(context.run.id) == "completed"
+    assert context.repository.get_run(context.run.id).status is RunStatus.COMPLETED
+    assert context.transport.created == context.transport.deleted == 1
+
+
+def test_yunxia_still_rejects_failure_events(persisted_target):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_yunxia":
+        pytest.skip("Yunxia-only SSE compatibility")
+    context.transport.yunxia_error_event = True
+
+    with pytest.raises(TargetExecutionError, match="returned an error event"):
+        execution.execute_persisted_run(context.run.id)
+
+    assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
+    assert context.transport.created == context.transport.deleted == 1
+
+
 @pytest.mark.parametrize("debug_enabled", [False, True])
 def test_chatabc_sse_error_diagnostics_are_opt_in(
     persisted_target, monkeypatch, caplog, debug_enabled
@@ -194,6 +242,28 @@ def test_chatabc_sse_error_diagnostics_are_opt_in(
     assert ("inbank_sse_failure" in caplog.text) is debug_enabled
     assert ("BASE-001" in caplog.text) is debug_enabled
     assert ("customer base failed" in caplog.text) is debug_enabled
+    assert context.transport.created == context.transport.deleted == 1
+
+
+@pytest.mark.parametrize("debug_enabled", [False, True])
+def test_yunxia_sse_error_diagnostics_are_opt_in(
+    persisted_target, monkeypatch, caplog, debug_enabled
+):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_yunxia":
+        pytest.skip("Yunxia-only SSE diagnostics")
+    context.transport.yunxia_error_event = True
+    if debug_enabled:
+        monkeypatch.setenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", "1")
+    else:
+        monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(TargetExecutionError, match="customer chat returned"):
+            execution.execute_persisted_run(context.run.id)
+
+    assert ("inbank_sse_failure" in caplog.text) is debug_enabled
+    assert ("customer Yunxia failed" in caplog.text) is debug_enabled
     assert context.transport.created == context.transport.deleted == 1
 
 

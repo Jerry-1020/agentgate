@@ -16,6 +16,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
 
 from agentgate.domain import SpanStatus, TargetType, Trace, TraceSpan, utcnow
+from agentgate.integrations.targets.bank_protocol import parse_bank_sse
 from agentgate.integrations.targets.inbank.diagnostics import (
     business_summary,
     mapping_shape,
@@ -191,6 +192,7 @@ class YunxiaSettings:
     request_timeout_seconds: float = 180.0
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
+    debug_sse_failures: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -215,14 +217,6 @@ class YunxiaSettings:
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
-
-
-@dataclass(frozen=True, slots=True)
-class _YunxiaChat:
-    output: str
-    intent_code: str | None
-    slots: Mapping[str, Any]
-    workflow_calls: tuple[Any, ...]
 
 
 class InbankYunxiaTargetAdapter:
@@ -563,7 +557,33 @@ class InbankYunxiaTargetAdapter:
                     request.timeout_seconds, self.settings.request_timeout_seconds
                 ),
             )
-            chat = _parse_yunxia_sse(raw, request_id, session_id)
+            try:
+                try:
+                    decoded = raw.decode("utf-8-sig")
+                except UnicodeDecodeError:
+                    raise TargetExecutionError(
+                        "protocol_error", "Yunxia stream is not UTF-8"
+                    ) from None
+                chat = parse_bank_sse(
+                    decoded.splitlines(keepends=True),
+                    protocol="cloudshrimp",
+                    wire_format="event_lines",
+                    request_id=request_id,
+                    session_id=session_id,
+                )
+            except TargetExecutionError:
+                if self.settings.debug_sse_failures:
+                    LOGGER.error(
+                        "inbank_sse_failure adapter=yunxia run_id=%r case_id=%r "
+                        "turn_id=%r request_id=%r session_id=%r response_body=%r",
+                        request.run_id,
+                        request.case.id,
+                        turn.id,
+                        request_id,
+                        session_id,
+                        raw[:8192],
+                    )
+                raise
             ended_at = utcnow()
             final_output = {
                 "output": chat.output,
@@ -773,6 +793,9 @@ def load_yunxia_settings(
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
         ),
+        debug_sse_failures=_environment_flag(
+            values, "AGENTGATE_INBANK_DEBUG_SSE_FAILURES"
+        ),
     )
 
 
@@ -782,117 +805,6 @@ def _task_id_from_run_id(run_id: str) -> str:
             "invalid_request", "run_id must contain at least 8 characters"
         )
     return run_id[-8:]
-
-
-def _parse_yunxia_sse(
-    raw: bytes, request_id: str, session_id: str
-) -> _YunxiaChat:
-    try:
-        lines = raw.decode("utf-8-sig").splitlines()
-    except UnicodeDecodeError:
-        raise TargetExecutionError(
-            "protocol_error", "Yunxia stream is not UTF-8"
-        ) from None
-    frames: list[tuple[str, Any]] = []
-    event_name = ""
-    data_lines: list[str] = []
-
-    def consume() -> None:
-        nonlocal event_name, data_lines
-        if not data_lines:
-            event_name = ""
-            return
-        raw_data = "\n".join(data_lines)
-        try:
-            payload = json.loads(raw_data)
-        except ValueError:
-            payload = raw_data
-        name = event_name
-        if not name:
-            if not isinstance(payload, dict):
-                raise TargetExecutionError(
-                    "protocol_error", "Yunxia SSE envelope must be an object"
-                )
-            name = payload.get("event")
-            payload = payload.get("data")
-        if not isinstance(name, str) or not name.strip():
-            raise TargetExecutionError(
-                "protocol_error", "Yunxia SSE event name is missing"
-            )
-        frames.append((name.strip().lower(), payload))
-        event_name, data_lines = "", []
-
-    for line in lines:
-        line = line.rstrip("\r")
-        if not line:
-            consume()
-        elif line.startswith(":"):
-            continue
-        else:
-            field, separator, value = line.partition(":")
-            value = value.removeprefix(" ")
-            if separator and field == "event":
-                event_name = value
-            elif separator and field == "data":
-                data_lines.append(value)
-    consume()
-
-    starts = [payload for name, payload in frames if name == "start"]
-    messages = [payload for name, payload in frames if name == "message"]
-    done_count = sum(1 for name, _ in frames if name == "done")
-    unknown = {
-        name for name, _ in frames if name not in {"start", "progress", "message", "trace", "done", "error", "failed"}
-    }
-    terminal_seen = False
-    for name, _ in frames:
-        if terminal_seen:
-            raise TargetExecutionError(
-                "protocol_error", "Yunxia SSE data followed the terminal event"
-            )
-        terminal_seen = name == "done"
-    if unknown:
-        raise TargetExecutionError("protocol_error", "unknown Yunxia SSE event")
-    if any(name in {"error", "failed"} for name, _ in frames):
-        raise TargetExecutionError("rejected", "Yunxia returned an error event")
-    if len(starts) != 1 or not isinstance(starts[0], Mapping):
-        raise TargetExecutionError(
-            "protocol_error", "Yunxia requires exactly one start event"
-        )
-    returned_request_id = starts[0].get("request_id", starts[0].get("requestId"))
-    returned_session_id = starts[0].get("session_id", starts[0].get("sessionId"))
-    if returned_request_id != request_id:
-        raise TargetExecutionError("protocol_error", "Yunxia request ID mismatch")
-    if returned_session_id is not None and returned_session_id != session_id:
-        raise TargetExecutionError("protocol_error", "Yunxia session ID mismatch")
-    if done_count != 1 or not messages:
-        raise TargetExecutionError("protocol_error", "incomplete Yunxia SSE response")
-    message = messages[-1]
-    if not isinstance(message, Mapping) or message.get("status") != "completed":
-        raise TargetExecutionError(
-            "protocol_error", "Yunxia message did not complete"
-        )
-    output = message.get("output")
-    if not isinstance(output, str) or not output.strip():
-        raise TargetExecutionError(
-            "protocol_error", "completed Yunxia message has no output"
-        )
-    intent_code = message.get("intent_code")
-    if intent_code is not None and not isinstance(intent_code, str):
-        raise TargetExecutionError(
-            "protocol_error", "Yunxia intent_code must be text"
-        )
-    slots = message.get("slots", {})
-    workflow_calls = message.get("workflow_calls", [])
-    if not isinstance(slots, Mapping) or not isinstance(workflow_calls, list):
-        raise TargetExecutionError(
-            "protocol_error", "Yunxia message metadata has invalid types"
-        )
-    return _YunxiaChat(
-        output=output,
-        intent_code=intent_code,
-        slots=slots,
-        workflow_calls=tuple(workflow_calls),
-    )
 
 
 def _url(
@@ -953,6 +865,10 @@ def _positive_float(
     if result <= 0:
         raise ValueError(f"{name} must be a positive number")
     return result
+
+
+def _environment_flag(values: Mapping[str, str], name: str) -> bool:
+    return values.get(name, "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 __all__ = [
