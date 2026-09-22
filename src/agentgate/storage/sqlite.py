@@ -246,6 +246,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_status_created
     ON {_T_RUNS}(status, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_runs_due
     ON {_T_RUNS}(status, scheduled_for, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_runs_apikey_status
+    ON {_T_RUNS}(api_key, status);
 """
 
 

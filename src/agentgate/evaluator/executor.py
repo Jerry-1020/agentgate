@@ -66,11 +66,9 @@ def _error_result(
     )
     message = _safe_message(exc)
     LOGGER.error(
-        "evaluator %s failed for case %s: %s: %s",
-        spec.id,
-        case.id,
-        type(exc).__name__,
-        message,
+        "Evaluator failed: run_id=%s case_id=%s evaluator_id=%s kind=%s: %s: %s",
+        trace.run_id, case.id, spec.id, spec.kind.value,
+        type(exc).__name__, message,
     )
     return EvaluationResult(
         run_id=trace.run_id,
@@ -345,6 +343,10 @@ def execute_evaluators(
                 return resolve(dependency_id)
 
             resolver: ResultResolver = resolve_dependency
+            LOGGER.info(
+                "Evaluator started: run_id=%s case_id=%s evaluator_id=%s kind=%s dimension=%s metric=%s",
+                trace.run_id, case.id, spec.id, spec.kind.value, spec.dimension, spec.metric,
+            )
             if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
                 case_evaluation = case_implementation.evaluate_case(
@@ -381,6 +383,19 @@ def execute_evaluators(
 
             evaluation = Evaluation(checks=tuple(checks), judge_record=judge_record)
             result = _finalize_evaluation(spec, case, trace, evaluation)
+            if judge_record is not None:
+                LOGGER.info(
+                    "LLM Judge invoked: run_id=%s case_id=%s evaluator_id=%s model=%s input_tokens=%s output_tokens=%s latency=%sms",
+                    trace.run_id, case.id, spec.id,
+                    judge_record.resolved_model or judge_record.requested_model,
+                    judge_record.input_tokens, judge_record.output_tokens,
+                    judge_record.latency_ms,
+                )
+            LOGGER.info(
+                "Evaluator completed: run_id=%s case_id=%s evaluator_id=%s outcome=%s score=%s checks=%d",
+                trace.run_id, case.id, spec.id, result.outcome.value,
+                result.score, len(result.checks),
+            )
         except Exception as exc:
             result = _error_result(spec, case, trace, exc)
         finally:

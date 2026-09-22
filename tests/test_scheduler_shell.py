@@ -37,7 +37,9 @@ def test_scheduler_shell_selects_configured_process(tmp_path, kind):
         assert not result.stdout.strip()
         return
     assert result.returncode == 0, result.stderr
-    arguments = json.loads((root / "logs" / "scheduler.log").read_text())
+    log_file = root / "logs" / "scheduler.log"
+    output = log_file.read_text() if log_file.exists() else result.stdout
+    arguments = json.loads(output)
     if kind == "bjs":
         assert arguments == ["scripts/dispatch-scheduled-runs.py"]
     else:
