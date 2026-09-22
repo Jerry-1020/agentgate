@@ -196,6 +196,7 @@ class ChatABCSettings:
     request_timeout_seconds: float = 60.0
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
+    debug_sse_failures: bool = False
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -580,17 +581,31 @@ class InbankChatABCTargetAdapter:
                 ),
             )
             try:
-                lines = raw.decode("utf-8-sig").splitlines(keepends=True)
+                decoded = raw.decode("utf-8-sig")
             except UnicodeDecodeError:
                 raise TargetExecutionError(
                     "protocol_error", "ChatABC stream is not UTF-8"
                 ) from None
-            chat = parse_bank_sse(
-                lines,
-                protocol=arrange_type,
-                wire_format="event_lines",
-                request_id=request_id,
-            )
+            try:
+                chat = parse_bank_sse(
+                    decoded.splitlines(keepends=True),
+                    protocol=arrange_type,
+                    wire_format="event_lines",
+                    request_id=request_id,
+                )
+            except TargetExecutionError:
+                if self.settings.debug_sse_failures:
+                    LOGGER.error(
+                        "inbank_sse_failure adapter=chatabc run_id=%r case_id=%r "
+                        "turn_id=%r request_id=%r session_id=%r response_body=%r",
+                        request.run_id,
+                        request.case.id,
+                        turn.id,
+                        request_id,
+                        session_id,
+                        decoded[:8192],
+                    )
+                raise
             ended_at = utcnow()
             final_output = {"output": chat.output}
             LOGGER.info(
@@ -784,6 +799,9 @@ def load_chatabc_settings(
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
         ),
+        debug_sse_failures=_environment_flag(
+            values, "AGENTGATE_INBANK_DEBUG_SSE_FAILURES"
+        ),
     )
 
 
@@ -794,6 +812,10 @@ def _arrange_type(request: CaseExecutionRequest) -> ChatABCArrangeType:
             "invalid_request", "ChatABC arrange_type must be base or workflow"
         )
     return value
+
+
+def _environment_flag(values: Mapping[str, str], name: str) -> bool:
+    return values.get(name, "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _task_id_from_run_id(run_id: str) -> str:

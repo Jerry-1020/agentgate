@@ -1,6 +1,7 @@
 """Real in-bank adapters execute persisted Runs through the shared engine."""
 
 import json
+import logging
 from contextlib import closing
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -28,6 +29,7 @@ class RecordingTransport:
         self.sessions = []
         self.messages = []
         self.fail_chat = False
+        self.chat_error_event = False
 
     def request_json(self, method, url, *, payload=None, **kwargs):
         if "createAgent" in url:
@@ -57,6 +59,12 @@ class RecordingTransport:
             raise TargetExecutionError("rejected", "test chat failed")
         if url.endswith("/chat"):
             self.messages.append(payload["data"])
+            if self.chat_error_event:
+                return (
+                    "event: error\n"
+                    'data: {"errorCode": "BASE-001", '
+                    '"message": "customer base failed"}\n\n'
+                ).encode()
             events = [("message", {"content": "answer"})]
         else:
             assert url.endswith("/api/v1/message")
@@ -161,6 +169,31 @@ def test_execution_failure_cleans_pod_and_records_failed_run(persisted_target):
     with pytest.raises(TargetExecutionError, match="test chat failed"):
         execution.execute_persisted_run(context.run.id)
     assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
+    assert context.transport.created == context.transport.deleted == 1
+
+
+@pytest.mark.parametrize("debug_enabled", [False, True])
+def test_chatabc_sse_error_diagnostics_are_opt_in(
+    persisted_target, monkeypatch, caplog, debug_enabled
+):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_chatabc":
+        pytest.skip("ChatABC-only SSE diagnostics")
+    context.transport.chat_error_event = True
+    if debug_enabled:
+        monkeypatch.setenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", "1")
+    else:
+        monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(
+            TargetExecutionError, match="customer chat returned an error event"
+        ):
+            execution.execute_persisted_run(context.run.id)
+
+    assert ("inbank_sse_failure" in caplog.text) is debug_enabled
+    assert ("BASE-001" in caplog.text) is debug_enabled
+    assert ("customer base failed" in caplog.text) is debug_enabled
     assert context.transport.created == context.transport.deleted == 1
 
 
