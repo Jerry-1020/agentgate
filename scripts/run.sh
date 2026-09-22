@@ -19,6 +19,15 @@ export AGENTGATE_DB="${AGENTGATE_DB-$revision_root/runtime/agentgate.db}"
 # 行外（本地虚拟）模式的平台执行后端；行内部署时由环境变量覆盖。
 export AGENTGATE_AGENT_PLATFORM_MODE="${AGENTGATE_AGENT_PLATFORM_MODE-mock}"
 export AGENTGATE_AGENT_PLATFORM_ORIGIN="${AGENTGATE_AGENT_PLATFORM_ORIGIN-http://127.0.0.1:8119}"
+# 平台 token 凭据加密主密钥：api 提交与 worker 执行必须共享同一密钥。
+if [[ -z "${AGENTGATE_API_KEY_ENCRYPTION_KEY:-}" ]]; then
+  key_file="$revision_root/runtime/credential.key"
+  if [[ ! -f "$key_file" ]]; then
+    umask 077
+    printf '%s' "$(.venv/bin/python -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" > "$key_file"
+  fi
+  export AGENTGATE_API_KEY_ENCRYPTION_KEY="$(cat "$key_file")"
+fi
 case "${1:-}" in
   dispatcher-type) cd "$revision_root"; exec .venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())' ;;
   execute-run) cd "$revision_root"; shift; exec .venv/bin/python scripts/bjs/run_evaluation.py "$@" ;;

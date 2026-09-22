@@ -519,7 +519,7 @@ test('real picker consumes the HTTP directory through an exact abcclaw version',
 });
 
 const sampleCases = [
-  { id: 'case-1', name: '样本一', turns: [{ expectations: [{ kind: 'output' }] }] },
+  { id: 'case-1', name: '样本一', turns: [{ input: { txt: '问题一' }, expectations: [{ kind: 'output' }] }] },
 ];
 async function openForm(page: Page, selected = false) {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
@@ -675,6 +675,29 @@ test('form submits workflow target and selected source cases with isolated token
       storage: JSON.stringify({ ...localStorage, ...sessionStorage }),
     })),
   ).toEqual({ updates: 1, storage: '{}' });
+});
+
+test('personal space submits without a team_id field', async ({ page }) => {
+  const requests = await openForm(page);
+  await page.evaluate(() =>
+    (window as any).setAuth({
+      loginMode: 'bank',
+      token: 'form-secret',
+      teamId: '',
+      teamName: '个人空间',
+    }),
+  );
+  await choose(page, '选择智能体', '工作流 · workflow');
+  await choose(page, '智能体版本', 'v1');
+  await start(page).click();
+  await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+  const submission = requests.find((r) => r.path === '/api/agent-platform/evaluations')!;
+  expect(submission.body.target).toEqual({
+    agent_id: 'workflow',
+    type_group: 'base/workflow',
+    agent_version: 'v1',
+  });
+  expect('team_id' in submission.body.target).toBe(false);
 });
 
 test('abcclaw stability sends original branchId and exact settings', async ({ page }) => {
@@ -864,7 +887,9 @@ test('cancelling uncovered-case confirmation releases the lock without a creatio
   await page.reload();
   await expect(page.getByLabel('任务评测集版本', { exact: true })).toHaveValue('2');
   await page.route('**/api/datasets/dataset/versions/2', (route) =>
-    reply(route, { cases: [...sampleCases, { id: 'uncovered', turns: [{ expectations: [] }] }] }),
+    reply(route, {
+      cases: [...sampleCases, { id: 'uncovered', turns: [{ input: { txt: '未覆盖' }, expectations: [] }] }],
+    }),
   );
   await selectFormTarget(page);
   await start(page).click();

@@ -477,6 +477,23 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
+    if (platform) {
+      const incompatible = exact.cases.filter(
+        (c) =>
+          Object.keys(c.initial_state ?? {}).length > 0 ||
+          c.turns.some(
+            (t: { input?: Record<string, unknown> }) =>
+              !t.input ||
+              Object.keys(t.input).length !== 1 ||
+              typeof t.input.txt !== 'string' ||
+              !t.input.txt.trim(),
+          ),
+      );
+      if (incompatible.length)
+        invalid(
+          `所选评测集有 ${incompatible.length} 条用例包含业务初始状态或非纯文本输入，平台目标仅支持纯文本（txt）用例；请选择如“平台模拟验收”类评测集。`,
+        );
+    }
     const chosen = snapshot.chosen;
     if (chosen.length !== snapshot.evaluatorIds.length) invalid('所选评估器已不可用，请重新选择。');
     try {
@@ -503,7 +520,7 @@ async function submit() {
         headers: { 'X-Agent-Platform-Token': platform.token },
         data: {
           target: {
-            team_id: target.teamId,
+            ...(target.teamId ? { team_id: target.teamId } : {}),
             agent_id: target.agentId,
             type_group: target.typeGroup,
             agent_version: target.agentVersion,

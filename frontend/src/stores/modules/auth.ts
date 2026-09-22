@@ -10,12 +10,13 @@ export interface AuthSession {
 }
 
 // 纯内存会话：token 不进 localStorage/sessionStorage（与平台安全约定一致），
-// 刷新页面回到欢迎页重新登录。
+// 刷新页面回到欢迎页重新登录。teamId 空串统一表示个人空间（目录查询省略
+// teamId 参数、任务提交省略 team_id 字段）。
 export const useAuthStore = defineStore('agentgate-auth', {
   state: (): AuthSession => ({
     loginMode: 'bank',
     token: '',
-    teamId: 'personal',
+    teamId: '',
     teamName: '个人空间',
   }),
   getters: {
@@ -23,7 +24,9 @@ export const useAuthStore = defineStore('agentgate-auth', {
     isBank: (state) => state.loginMode === 'bank',
     modeLabel: (state) =>
       state.loginMode === 'bank'
-        ? `行内 · ${state.teamId === 'personal' ? '个人空间' : state.teamName || state.teamId}`
+        ? state.teamId
+          ? `行内 · ${state.teamName || state.teamId}`
+          : '行内 · 个人空间'
         : '行外模式 · 本地环境',
   },
   actions: {

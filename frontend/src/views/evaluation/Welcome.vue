@@ -53,7 +53,11 @@ async function bankLogin() {
 
 function confirmSpace() {
   const team = teams.value.find((item) => item.teamId === space.value);
-  auth.loginBank(tokenDraft.value, space.value, team?.teamName ?? '');
+  auth.loginBank(
+    tokenDraft.value,
+    space.value === 'personal' ? '' : space.value,
+    space.value === 'personal' ? '个人空间' : (team?.teamName ?? ''),
+  );
   spaceVisible.value = false;
   tokenDraft.value = '';
   ElMessage.success('登录成功');
