@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import signal
 from contextlib import closing
@@ -11,6 +12,9 @@ from threading import Event
 from agentgate.application import RunScheduling
 from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.storage.configuration import create_repository, load_database_config
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def main() -> int:
@@ -23,8 +27,14 @@ def main() -> int:
     dispatcher = create_dispatcher()
     config = load_database_config()
     stopped = Event()
-    signal.signal(signal.SIGTERM, lambda *_: stopped.set())
-    signal.signal(signal.SIGINT, lambda *_: stopped.set())
+
+    def _handle_stop(signum, *_):
+        LOGGER.info("BJS scheduler received stop signal (%s), shutting down", signum)
+        stopped.set()
+
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+    LOGGER.info("BJS scheduler started (interval=%ds)", interval)
     while not stopped.is_set():
         with closing(create_repository(config)) as repository:
             scheduling = RunScheduling(repository)
@@ -35,6 +45,7 @@ def main() -> int:
         if options.once:
             return 0
         stopped.wait(interval)
+    LOGGER.info("BJS scheduler stopped")
     return 0
 
 

@@ -1,5 +1,6 @@
 """Process-local execution shared by Celery workers and BJS jobs."""
 
+import logging
 from contextlib import closing
 
 from agentgate.application import RunManagement
@@ -18,6 +19,9 @@ from agentgate.integrations.targets.agent_platform import (
 from agentgate.integrations.targets.local_bank import LocalBankAdapter, resolve_local_bank_trace
 from agentgate.storage.configuration import create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def execute_persisted_run(run_id: str) -> str:
@@ -63,6 +67,10 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                 token = credentials.resolve_api_key(reference)
                 adapter = PlatformAdapter(PlatformClient.from_environment(), token)
             except (ValueError, LookupError, ConnectionError):
+                LOGGER.error(
+                    "Platform credential or configuration unavailable: run_id=%s",
+                    run.id,
+                )
                 failed = transition_run(
                     run,
                     RunStatus.FAILED,

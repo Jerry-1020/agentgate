@@ -18,7 +18,7 @@ from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.dependencies import build_dependencies
 from agentgate.server.errors import _safe_message
-from agentgate.server.logging_config import setup_logging
+from agentgate.server.logging_config import log_environment_summary, setup_logging
 from agentgate.server.routes import (
     agent_platform,
     bank_targets,
@@ -135,10 +135,13 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        log_environment_summary()
+        LOGGER.info("AgentGate server starting up")
         try:
             dependencies.runs.fail_stale_runs()
             yield
         finally:
+            LOGGER.info("AgentGate server shutting down")
             dependencies.close()
 
     application = FastAPI(
@@ -168,6 +171,22 @@ def create_app(
 
     application.add_middleware(UserContextMiddleware)
     application.add_middleware(ResponseEnvelopeMiddleware)
+
+    class RequestLogMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            if request.method == "POST" and request.url.path not in SKIP_ENVELOPE_PATHS:
+                client_ip = request.client.host if request.client else "unknown"
+                user_id = request.headers.get("user_id") or "anonymous"
+                LOGGER.info(
+                    "API request: %s %s user_id=%s ip=%s",
+                    request.method,
+                    request.url.path,
+                    user_id,
+                    client_ip,
+                )
+            return await call_next(request)
+
+    application.add_middleware(RequestLogMiddleware)
 
     from agentgate.application.agent_platform_evaluation import submit_platform_evaluation
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from time import sleep
@@ -66,8 +67,17 @@ class RunEngine:
             claimed = self.repository.get_run(run.id)
             if claimed is None:
                 raise ValueError("EvaluationRun disappeared while being claimed")
+            LOGGER.debug("Run claim lost (another worker won): run_id=%s", run.id)
             return claimed
 
+        start_time = time.monotonic()
+        LOGGER.info(
+            "Run execution started: run_id=%s case_count=%d adapter_type=%s adapter_version=%s",
+            run.id,
+            len(run.manifest.execution_cases),
+            target_adapter.adapter_type,
+            target_adapter.adapter_version,
+        )
         try:
             self._validate_execution(running, target_adapter)
             self._execute_cases(running, target_adapter)
@@ -75,10 +85,15 @@ class RunEngine:
 
             completed = transition_run(running, RunStatus.COMPLETED)
             self.repository.save_run(completed)
+            LOGGER.info(
+                "Run execution completed: run_id=%s duration=%.1fs",
+                run.id, time.monotonic() - start_time,
+            )
             return completed
         except Exception as exc:
             current = self.repository.get_run(running.id)
             if current is not None and current.status is RunStatus.CANCELLED:
+                LOGGER.warning("Run execution cancelled: run_id=%s", run.id)
                 return current
             terminal_status = (
                 RunStatus.CANCELLED
@@ -88,6 +103,11 @@ class RunEngine:
             error = None if terminal_status == RunStatus.CANCELLED else self._safe_error(exc)
             terminal = transition_run(running, terminal_status, error=error)
             self.repository.save_run(terminal)
+            if terminal_status is RunStatus.FAILED:
+                LOGGER.error(
+                    "Run execution failed: run_id=%s duration=%.1fs error=%s",
+                    run.id, time.monotonic() - start_time, error,
+                )
             raise
 
     def _execute_cases(
@@ -134,6 +154,10 @@ class RunEngine:
                         retries_used=retries_used,
                         max_retries=run.manifest.max_retries,
                     ):
+                        LOGGER.warning(
+                            "Case target failed, no retry left: run_id=%s case_id=%s error=%s retries_used=%d",
+                            run.id, case.id, error.code, retries_used,
+                        )
                         raise
                     self._cancel(target_adapter, handle)
                     active.popleft()
@@ -153,8 +177,18 @@ class RunEngine:
                 self._record_case(run, case, request, outcome)
                 active.popleft()
         except Exception:
+            if active:
+                case_ids = ",".join(item[0].id for item in active)
+                LOGGER.warning(
+                    "Cancelling active cases due to execution error: run_id=%s case_ids=[%s]",
+                    run.id, case_ids,
+                )
             self._cancel_active(target_adapter, active)
             raise
+        LOGGER.info(
+            "All cases completed: run_id=%s case_count=%d",
+            run.id, len(run.manifest.execution_cases),
+        )
 
     def _start_case(
         self,
@@ -164,6 +198,11 @@ class RunEngine:
         *,
         retries_used: int = 0,
     ) -> ActiveCase:
+        if retries_used == 0:
+            LOGGER.info(
+                "Case started: run_id=%s case_id=%s turn_count=%d adapter_type=%s",
+                run.id, case.id, len(case.turns), target_adapter.adapter_type,
+            )
         while True:
             self._raise_if_cancelled(run.id)
             request = self._build_request(run, case)
@@ -173,6 +212,10 @@ class RunEngine:
                     raise TargetExecutionError(
                         "protocol_error", "Target returned a blank execution handle"
                     )
+                LOGGER.debug(
+                    "Case submitted to target: run_id=%s case_id=%s handle=%s",
+                    run.id, case.id, handle,
+                )
                 return case, request, handle, retries_used
             except TargetExecutionError as error:
                 if not can_retry_target_failure(
@@ -182,6 +225,10 @@ class RunEngine:
                 ):
                     raise
                 retries_used += 1
+                LOGGER.warning(
+                    "Case start failed, retrying: run_id=%s case_id=%s retry=%d/%d error=%s",
+                    run.id, case.id, retries_used, run.manifest.max_retries, error.code,
+                )
                 self.retry_sleep(retry_delay_seconds(retries_used))
 
     @staticmethod
@@ -199,6 +246,10 @@ class RunEngine:
                 "protocol_error",
                 f"Target wait returned while execution status was {status.value}",
             )
+        LOGGER.info(
+            "Case target completed: run_id=%s case_id=%s trace_id=%s",
+            request.run_id, request.case.id, outcome.trace_id,
+        )
         return outcome
 
     def _record_case(
