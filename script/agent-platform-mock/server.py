@@ -5,12 +5,20 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 
 def create_app():
     fixtures = json.loads(Path(__file__).with_name("fixtures.json").read_text())
     app = FastAPI(title="Agent platform local simulated peer")
+    # 本机页面（如主栈 5197 行外模式）直连本对端时需要跨域读取目录。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?",
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type", "Accept"],
+    )
     instances, sessions = {}, {}
     events = []
     app.state.events = events
@@ -72,16 +80,16 @@ def create_app():
 
     @app.get("/web/agent/agents")
     def agents(
-        teamId: str,
+        teamId: str | None = None,
         name: str = "",
         page: int = Query(1, ge=1),
         limit: int = Query(1000, ge=1, le=1000),
     ):
-        return page_of(
-            [a for a in fixtures["agents"] if a["teamId"] == teamId and name in a["name"]],
-            page,
-            limit,
-        )
+        # 文档A：不传 teamId = 个人空间；本地模拟目录中个人空间返回全部智能体。
+        rows = [a for a in fixtures["agents"] if name in a["name"]]
+        if teamId is not None:
+            rows = [a for a in rows if a["teamId"] == teamId]
+        return page_of(rows, page, limit)
 
     @app.get("/web/agent/getAgentVersionList")
     def versions(agentId: str):

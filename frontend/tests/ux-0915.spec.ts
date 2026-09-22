@@ -1,4 +1,10 @@
 import {test,expect} from '@playwright/test'
+import { passAuthGate } from './auth-gate';
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await passAuthGate(page);
+});
+
 test('September 15 UI: menu, version deletion boundaries, graph and evaluator copy',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto('/#datasets')

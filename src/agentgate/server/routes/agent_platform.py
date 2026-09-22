@@ -31,7 +31,7 @@ TypeGroup = Literal["base/workflow", "abcclaw"]
 class PlatformTargetInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    team_id: Identifier
+    team_id: Identifier | None = None
     agent_id: Identifier
     type_group: TypeGroup
     agent_version: Identifier

@@ -1,4 +1,10 @@
 import {test,expect} from '@playwright/test'
+import { passAuthGate } from './auth-gate';
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await passAuthGate(page);
+});
+
 test('unified tasks, legacy reports and optimizer return path',async({page,request})=>{
  const runs=(await (await request.get('/api/runs?limit=200')).json()).data
  const run=runs.find((r:any)=>r.status==='completed')

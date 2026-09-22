@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { passAuthGate } from './auth-gate';
 
 // Browser-only fixtures: no tasks or dataset samples are written to the backend.
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await passAuthGate(page);
+});
+
 test('single-turn and multi-turn samples have distinct layouts and working view modes', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));

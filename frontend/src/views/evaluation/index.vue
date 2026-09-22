@@ -7,6 +7,7 @@ import EvaluationTaskForm from './components/EvaluationTaskForm.vue';
 import { readTaskLinks, refreshTaskLinks, type TaskLink } from './utils/task-links';
 import { shallowRef, computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useAuthStore } from '../../stores/modules/auth';
 import {
   api,
   request,
@@ -129,6 +130,21 @@ onBeforeRouteUpdate((to, from) => {
 });
 const runs = shallowRef<EvaluationRun[]>([]),
   overview = ref<Overview | null>(null);
+const auth = useAuthStore();
+const authLabel = computed(() => auth.modeLabel);
+async function confirmLogout() {
+  try {
+    await ElMessageBox.confirm(
+      '将清空登陆用户信息（token、团队选择），页面将返回欢迎页面。',
+      '登出确认',
+      { confirmButtonText: '确认登出', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  auth.logout();
+  void router.push('/welcome');
+}
 const error = ref(''),
   online = ref<boolean | null>(null),
   loading = ref(false);
@@ -302,7 +318,7 @@ async function taskCreated(link: TaskLink) {
 }
 </script>
 <template>
-  <EvaluationLayout :page="page" :online="online">
+  <EvaluationLayout :page="page" :online="online" :auth-label="authLabel" @logout="confirmLogout">
     <div v-if="error" class="notice error" role="alert">
       服务连接失败：{{ error }}
       <button class="link" @click="refresh">重试</button>。不使用模拟数据替代。
