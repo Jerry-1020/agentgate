@@ -1,6 +1,41 @@
 # AgentGate Project Progress
 
-Last updated: 2026-09-18
+Last updated: 2026-09-22
+
+## Agent platform local acceptance — 2026-09-22
+
+- Requirement 001 is implemented end to end on `feature/agent-target-selection`; the user's final instruction waived remaining approval checkpoints. Local UI, directory mock, exact target snapshot, encrypted credentials, real task persistence, worker execution, scheduling and result pages are connected.
+- Workflow retains agentId + agentVersion. Cloudshrimp branch creation is explicitly mock-only. Dataset/execution selections survive target changes; missing graph/static-analysis metadata is explained in the UI.
+- Live workflow, base reservation and Cloudshrimp stability tasks completed successfully. Original Demo A/B also completed and displayed comparison results. Fixed the form's unsupported A/B parameters and single-task detail identity coupling.
+- Verification: 1237 Python tests passed, 25 environment-dependent skips, two dependency warnings; 36 focused browser tests passed; frontend typecheck/build passed with the existing bundle-size warning.
+- Ready at http://127.0.0.1:5199/#/tasks . See [local acceptance instructions](../script/agent-platform-mock/README.md) and [completed implementation record](agent-platform/implementation-plan.md). No commit, push or merge performed. Earlier checkpoints below are historical.
+
+## Agent platform submission route — 2026-09-21
+
+- Implemented the approved HTTP route in isolation: strict target/task input checks, separate transient token header, explicit application callable, caller/team separation, safe errors and the agreed 202 task/run response.
+- Verification: 84 new route scenarios and 44 existing related regressions passed (128 total); Ruff lint/format checks passed. Existing dependency deprecation warnings remain. Tests use fake submitters and verify response-envelope integration without real platform calls.
+- Route registration and production application submission remain pending. No task persistence, runtime execution, local peer or proxy is claimed. No commit, push or merge performed.
+
+## Agent platform task form — 2026-09-21
+
+- User approved the implemented and verified form checkpoint. The responsibility of `src/agentgate/server/routes/agent_platform.py` is also approved. Its detailed design is approved and isolated implementation is complete; see the newer route checkpoint above.
+
+- Implemented the approved `EvaluationTaskForm.vue` design: the single-task path now uses the platform picker/provider; platform target changes preserve dataset/evaluator/execution settings and source-prefilled cases. A/B retains its existing endpoint and association behavior, including Demo availability when the registered bank catalog fails.
+- Submission takes one target/token/form snapshot, locks controls before asynchronous validation, sends the token only in a request-specific header and validates the returned task/run association. Refresh failure preserves confirmed task identity; uncertain creation is reported without retries or raw server detail.
+- Verification: 36 focused browser scenarios passed across the complete 35-test run and the added A/B catalog-failure regression; affected A/B tests were rerun after that compatibility adjustment. Frontend typecheck/build, lint and formatting passed, with the existing large-bundle warning. Tests intercept HTTP locally and do not demonstrate backend execution.
+- Backend task creation, proxy, local peer and execution loop remain pending their per-file reviews. New-platform static analysis/graph are explicitly unavailable until matching metadata exists. Workflow instance creation remains `agentId + agentVersion` with taskId. No commit, push or merge performed.
+
+## Agent platform directory API — 2026-09-21
+
+- Implemented the approved `frontend/src/api/agent-platform.ts` provider for interfaces 2–6, with per-call tokens, separate platform origins, complete pagination, explicit type normalization, branch-version consistency checks and sanitized failures. Existing AgentGate Axios requests are unchanged.
+- Verification: 23 browser tests passed (11 new HTTP/provider tests and 12 picker regression tests); frontend typecheck/build, API lint and formatting passed. The picker/provider integration test intercepts HTTP locally and does not claim real bank execution.
+- At this API checkpoint, production form wiring, proxy configuration, local peer and task execution remained pending. The newer form checkpoint above supersedes the frontend wiring status. No commit, push or merge performed.
+
+## Agent target picker component — 2026-09-21
+
+- On `feature/agent-target-selection`, implemented the approved isolated selection component with an explicit directory input: temporary token login/logout, team/type/agent/branch/version selection, exact-target submission reads and stale-response rejection.
+- Verification: 12 focused browser tests passed; frontend typecheck/build, component lint and formatting passed. Existing large-bundle warning remains.
+- At that component checkpoint the production task form, network provider, local peer and execution integration remained pending their file reviews; A/B and dataset/execution controls have not been modified. See [implementation plan](agent-platform/implementation-plan.md) and [requirement 001](requirements/001-agent-target-selection.md).
 
 ## Upstream 33db48a integration — 2026-09-18
 
