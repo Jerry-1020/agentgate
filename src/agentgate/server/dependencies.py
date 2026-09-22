@@ -206,7 +206,7 @@ class ServerDependencies:
             raise ValueError("stability does not support scheduling")
         runs = [template, *(EvaluationRun(manifest=template.manifest,
             user_team_id=template.user_team_id, user_id=template.user_id,
-            user_name=template.user_name)
+            user_name=template.user_name, api_key=template.api_key)
             for _ in range(repetitions - 1))]
         task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
         self.repository.save_task_runs(task, runs)

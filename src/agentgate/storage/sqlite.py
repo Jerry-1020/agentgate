@@ -228,7 +228,7 @@ CREATE TABLE {_T_RUNS} (
     id TEXT PRIMARY KEY,
     status TEXT NOT NULL CHECK(
         status IN (
-            'scheduled', 'pending', 'running', 'completed', 'failed', 'cancelled'
+            'scheduled', 'pending', 'waiting', 'running', 'completed', 'failed', 'cancelled'
         )
     ),
     created_at TEXT NOT NULL,
@@ -316,9 +316,9 @@ class SQLiteRepository:
             db.execute("BEGIN IMMEDIATE")
             for run in runs:
                 references = self._run_asset_references(db, run)
-                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name) VALUES(?,?,?,?,?,?,?,?)",
+                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name,api_key) VALUES(?,?,?,?,?,?,?,?,?)",
                            (run.id, run.status, run.created_at.isoformat(), run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run),
-                            run.user_team_id, run.user_id, run.user_name))
+                            run.user_team_id, run.user_id, run.user_name, run.api_key))
                 db.executemany(f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)", references)
             db.execute(f"INSERT INTO {_T_EVALUATION_TASKS} VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
             db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)", [(r.id, task.id) for r in runs])
@@ -423,16 +423,24 @@ class SQLiteRepository:
         columns = {
             column[1] for column in db.execute(f"PRAGMA table_info({_T_RUNS})").fetchall()
         }
-        if "scheduled_for" in columns and "'scheduled'" in row[0]:
+        if "'waiting'" in row[0] and "scheduled_for" in columns:
             return
 
         db.execute("PRAGMA foreign_keys = OFF")
         try:
             db.execute(_RUNS_TABLE_SCHEMA.replace(f"CREATE TABLE {_T_RUNS}", f"CREATE TABLE {_T_RUNS_NEW}", 1))
+            old_columns = {
+                column[1] for column in db.execute(f"PRAGMA table_info({_T_RUNS})").fetchall()
+            }
+            new_columns = {
+                "id", "status", "created_at", "scheduled_for",
+                "user_team_id", "user_id", "user_name", "api_key", "payload",
+            }
+            copy_cols = ", ".join(sorted(old_columns & new_columns))
             db.execute(
                 f"""
-                INSERT INTO {_T_RUNS_NEW}(id, status, created_at, scheduled_for, payload)
-                SELECT id, status, created_at, NULL, payload FROM {_T_RUNS}
+                INSERT INTO {_T_RUNS_NEW}({copy_cols})
+                SELECT {copy_cols} FROM {_T_RUNS}
                 """
             )
             db.execute(f"DROP TABLE {_T_RUNS}")
@@ -1682,6 +1690,7 @@ class SQLiteRepository:
             if current.status not in {
                 RunStatus.SCHEDULED,
                 RunStatus.PENDING,
+                RunStatus.WAITING,
                 RunStatus.RUNNING,
             }:
                 return None
@@ -1745,6 +1754,45 @@ class SQLiteRepository:
         for row in rows:
             counts[RunStatus(row["status"])] = row["count"]
         return counts
+
+    def count_active_runs_by_api_key(self, api_key: str | None) -> int:
+        with self._connect() as db:
+            if api_key is None:
+                row = db.execute(
+                    f"SELECT COUNT(*) AS count FROM {_T_RUNS} "
+                    f"WHERE status IN ('pending','running') AND api_key IS NULL"
+                ).fetchone()
+            else:
+                row = db.execute(
+                    f"SELECT COUNT(*) AS count FROM {_T_RUNS} "
+                    f"WHERE status IN ('pending','running') AND api_key=?",
+                    (api_key,),
+                ).fetchone()
+        return row["count"] if row else 0
+
+    def claim_waiting_run(
+        self, run_id: str, claimed_at: datetime
+    ) -> EvaluationRun | None:
+        with self._connect() as db:
+            row = db.execute(
+                f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            waiting = EvaluationRun.model_validate_json(row[0])
+            if waiting.status is not RunStatus.WAITING:
+                return None
+            pending = transition_run(
+                waiting, RunStatus.PENDING, occurred_at=claimed_at
+            )
+            cursor = db.execute(
+                f"""
+                UPDATE {_T_RUNS} SET status=?, payload=?
+                WHERE id=? AND status='waiting'
+                """,
+                (pending.status, canonical_json(pending), run_id),
+            )
+            return pending if cursor.rowcount == 1 else None
     def save_trace(self, trace: Trace) -> None:
         with self._connect() as db:
             existing = db.execute(

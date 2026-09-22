@@ -185,7 +185,7 @@ def test_launch_run_comparison_returns_partial_dispatch_states(tmp_path) -> None
         body["baseline"]["run_id"],
         body["candidate"]["run_id"],
     ]
-    assert body["baseline"]["status"] == "failed"
+    assert body["baseline"]["status"] == "waiting"
     assert body["candidate"]["status"] == "pending"
     assert "secret" not in response.text
 
@@ -194,7 +194,7 @@ def test_launch_run_comparison_returns_partial_dispatch_states(tmp_path) -> None
     candidate = repository.get_run(body["candidate"]["run_id"])
     assert baseline is not None
     assert candidate is not None
-    assert baseline.error == "Run dispatch failed: ConnectionError"
+    assert baseline.dispatch_attempts == 1
     assert candidate.error is None
 
 

@@ -445,7 +445,7 @@ def test_dispatch_run_submits_only_the_persisted_run_id(tmp_path) -> None:
     assert repository.get_run(run.id).status is RunStatus.PENDING
 
 
-def test_dispatch_failure_is_persisted_without_exception_details(tmp_path) -> None:
+def test_dispatch_failure_transitions_to_waiting_for_retry(tmp_path) -> None:
     repository = SQLiteRepository(tmp_path / "dispatch-failure.db")
     seed_demo(repository)
     management, _ = run_management(repository)
@@ -454,12 +454,45 @@ def test_dispatch_failure_is_persisted_without_exception_details(tmp_path) -> No
         ConnectionError("redis://user:secret@example.invalid")
     )
 
+    result = management.dispatch_run(run.id, dispatcher)
+
+    assert result.status is RunStatus.WAITING
+    assert result.dispatch_attempts == 1
+    stored = repository.get_run(run.id)
+    assert stored.status is RunStatus.WAITING
+    assert stored.dispatch_attempts == 1
+
+
+def test_dispatch_failure_exhausts_retries_to_failed(tmp_path) -> None:
+    from agentgate.application.run_scheduling import MAX_DISPATCH_ATTEMPTS
+
+    repository = SQLiteRepository(tmp_path / "dispatch-exhausted.db")
+    seed_demo(repository)
+    management, _ = run_management(repository)
+    run = management.create_run(target(), dataset_id=LOAN_DATASET.id)
+    dispatcher = RecordingDispatcher(
+        ConnectionError("redis://user:secret@example.invalid")
+    )
+
+    result = management.dispatch_run(run.id, dispatcher)
+    assert result.status is RunStatus.WAITING
+    assert result.dispatch_attempts == 1
+
+    for expected_attempts in range(2, MAX_DISPATCH_ATTEMPTS):
+        claimed = repository.claim_waiting_run(run.id, run.created_at)
+        assert claimed is not None
+        assert claimed.status is RunStatus.PENDING
+        result = management.dispatch_run(run.id, dispatcher)
+        assert result.status is RunStatus.WAITING
+        assert result.dispatch_attempts == expected_attempts
+
+    claimed = repository.claim_waiting_run(run.id, run.created_at)
+    assert claimed is not None
     with pytest.raises(RuntimeError, match="Run dispatch failed"):
         management.dispatch_run(run.id, dispatcher)
 
     failed = repository.get_run(run.id)
     assert failed.status is RunStatus.FAILED
-    assert failed.error == "Run dispatch failed: ConnectionError"
     assert "secret" not in failed.error
 
 

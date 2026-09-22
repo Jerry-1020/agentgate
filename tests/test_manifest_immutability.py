@@ -258,6 +258,7 @@ def test_repository_lists_and_counts_runs_by_status(tmp_path):
     assert repository.count_runs_by_status(user_team_id="") == {
         RunStatus.SCHEDULED: 0,
         RunStatus.PENDING: 1,
+        RunStatus.WAITING: 0,
         RunStatus.RUNNING: 1,
         RunStatus.COMPLETED: 0,
         RunStatus.FAILED: 0,
