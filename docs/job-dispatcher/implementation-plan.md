@@ -296,6 +296,21 @@ Initial settings:
 Secrets and Redis URLs come from environment configuration and are never stored in a
 RunManifest or returned by an API.
 
+Redis deployment modes:
+
+- `AGENTGATE_REDIS_MODE=single` is the default and retains the ordinary Kombu Redis
+  transport and existing `AGENTGATE_REDIS_URL` behavior;
+- `AGENTGATE_REDIS_MODE=cluster` selects the AgentGate Redis Cluster transport while
+  retaining Redis as broker-only infrastructure;
+- Cluster URLs must select database `0` and name a seed node reachable by every API,
+  worker, and scheduler process;
+- `AGENTGATE_REDIS_CLUSTER_HASH_TAG` defaults to `{agentgate}` and places every Celery
+  broker key in one Redis Cluster slot, which is required for queue and acknowledgement
+  multi-key operations;
+- the Cluster transport is adapted from the pending Kombu Redis Cluster transport and
+  is pinned to Celery 5.6.3, Kombu 5.6.2, and redis-py 6.4.0 until upstream support is
+  released and revalidated.
+
 ## 11. Source Assessment
 
 ### `goal/p1-demo`

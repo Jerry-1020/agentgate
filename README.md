@@ -163,6 +163,24 @@ python3 -m celery \
   --loglevel=INFO --concurrency=1
 ```
 
+For a Redis Cluster broker, give the API, workers, and scheduler the same cluster
+settings. The URL names one reachable seed node; redis-py discovers the remaining
+topology. Redis Cluster supports only database `0`.
+
+```bash
+AGENTGATE_REDIS_MODE=cluster \
+AGENTGATE_REDIS_URL="redis://username:password@redis-seed:6379/0" \
+AGENTGATE_REDIS_CLUSTER_HASH_TAG="{agentgate}" \
+PYTHONPATH=src \
+python3 -m celery \
+  -A agentgate.integrations.job_dispatchers.celery:celery_app worker \
+  --loglevel=INFO --concurrency=1
+```
+
+The hash tag keeps Celery queue, binding, and unacknowledged-message keys in one
+Redis Cluster slot so Kombu's multi-key operations do not fail with `CROSSSLOT`.
+AgentGate does not use Redis as a Celery result backend.
+
 Scheduled Runs additionally require one lightweight scheduler worker and Celery Beat:
 
 ```bash

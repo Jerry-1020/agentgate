@@ -10,9 +10,34 @@ from agentgate.run.target_protocol import CaseExecutionRequest, TargetExecutionE
 from agentgate.server.app import create_app
 
 
+class TraceServer:
+    def __init__(self):
+        self.traces = {}
+        self.corrupt = False
+
+    def record(self, trace_id, result, turn_input):
+        self.traces[trace_id] = (result, turn_input)
+
+    def fetch_events(self, project_id, trace_id, *, timeout=30):
+        result, turn_input = self.traces[trace_id]
+        common = {"project_id": project_id, "trace_id": trace_id}
+        return [
+            {"event_type": "span", "event_id": "s", "span_id": "s", "name": "agent",
+             "span_type": "agent", "parent_span_id": None, "status": "success",
+             "started_at": "2026-09-17T00:00:00Z", "duration_ms": 1, **common},
+            {"event_type": "observation", "event_id": "o", "span_id": "s",
+             "model": "test", "prompt_tokens": 1, "completion_tokens": 1, **common},
+            {"event_type": "trace", "event_id": "t", "input": turn_input,
+             "output": {} if self.corrupt else result, "status": "success",
+             "started_at": "2026-09-17T00:00:00Z", "duration_ms": 1,
+             "session_id": result["session_id"], **common},
+        ]
+
+
 class Client:
     def __init__(self, mode="base"):
         self.mode, self.requests, self.inputs, self.session = mode, {}, {}, None
+        self.trace_server = TraceServer()
         self.corrupt = False
 
     def call(self, path, payload=None, **kwargs):
@@ -31,23 +56,18 @@ class Client:
                       "trace_id": rid}
             self.requests[rid] = result
             self.inputs[rid] = {"txt": payload["txt"] if self.mode == "cloudshrimp" else payload["data"]["txt"]}
+            self.trace_server.record(rid, result, self.inputs[rid])
             if self.mode == "workflow":
                 message = {"node_id": "end", "additional_kwargs": {"node_output": {"output": "test answer"}}}
             elif self.mode == "base":
                 message = {"content": "test answer"}
             else:
                 message = result
-            return f'event: message\ndata: {json.dumps(message)}\n\nevent: done\ndata: [DONE]\n\n'.encode()
-        rid = path.split("/")[2]
-        result = self.requests[rid]
-        if path.endswith("/trace"):
-            common = {"project_id": "bank-tested-agents", "trace_id": rid, "status": "success",
-                      "started_at": "2026-09-17T00:00:00Z", "duration_ms": 1}
-            rows = [{**common, "event_type": "span", "event_id": "s", "span_id": "s", "name": "agent",
-                     "span_type": "agent", "parent_span_id": None},
-                    {**common, "event_type": "trace", "event_id": "t", "input": self.inputs[rid], "output": {} if self.corrupt else result}]
-            return "\n".join(json.dumps(x) for x in rows).encode()
-        return {"status": "completed", "result": result}
+            trace = {"project_id": "bank-tested-agents", "trace_id": rid, "request_id": rid}
+            return (f'event: message\ndata: {json.dumps(message)}\n\n'
+                    f'event: trace\ndata: {json.dumps(trace)}\n\n'
+                    f'event: done\ndata: [DONE]\n\n').encode()
+        raise AssertionError(f"unexpected path: {path}")
 
 
 @pytest.mark.parametrize("mode", ["base", "workflow", "cloudshrimp"])
@@ -56,7 +76,7 @@ def test_live_adapter_correlates_each_turn_and_preserves_business_state(mode):
     _, snapshot = local_bank_target(client, mode)
     case = Case(id="case", name="Test", turns=(CaseTurn(id="one", input={"txt": "hello"}), CaseTurn(id="two", input={"txt": "details"})))
     request = CaseExecutionRequest("exec", "run", case, snapshot, 30, "00-" + "a"*32 + "-" + "b"*16 + "-01")
-    adapter = LocalBankAdapter(client)
+    adapter = LocalBankAdapter(client, client.trace_server)
     result = adapter.wait(adapter.start(request), 30)
     assert result.inline_trace.final_state["status"] == "pending_review"
     assert len(client.requests) == 2
@@ -65,8 +85,30 @@ def test_live_adapter_correlates_each_turn_and_preserves_business_state(mode):
         trace = result.inline_trace.for_turn(turn.id)
         assert trace.spans[0].attributes["trace_sdk.replay"] is False
         assert trace.spans[0].attributes["bank.request_id"] in client.requests
-    client.corrupt = True
-    with pytest.raises(TargetExecutionError): LocalBankAdapter(client).start(request)
+    client.trace_server.corrupt = True
+    with pytest.raises(TargetExecutionError): LocalBankAdapter(client, client.trace_server).start(request)
+
+
+def test_adapter_requires_a_single_trace_reference_per_turn():
+    client = Client("base")
+    _, snapshot = local_bank_target(client, "base")
+    case = Case(id="case", name="Test", turns=(CaseTurn(id="one", input={"txt": "hello"}),))
+    request = CaseExecutionRequest("exec", "run", case, snapshot, 30, "00-" + "a"*32 + "-" + "b"*16 + "-01")
+
+    class NoTraceServer:
+        def fetch_events(self, project_id, trace_id, *, timeout=30):
+            raise AssertionError("must not be reached")
+
+    original = client.call
+
+    def call_without_trace(path, payload=None, **kwargs):
+        data = original(path, payload, **kwargs)
+        if isinstance(data, bytes):
+            return b'event: message\ndata: {"content": "test answer"}\n\nevent: done\ndata: [DONE]\n\n'
+        return data
+
+    client.call = call_without_trace
+    with pytest.raises(TargetExecutionError): LocalBankAdapter(client, NoTraceServer()).start(request)
 
 
 @pytest.mark.parametrize("url", ["http://example.com", "http://localhost.evil.test", "http://user:pw@localhost", "http://127.0.0.1/path", "https://127.0.0.1"])
