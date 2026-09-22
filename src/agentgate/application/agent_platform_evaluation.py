@@ -22,7 +22,7 @@ def submit_platform_evaluation(
     evaluators: EvaluatorManagement,
     credentials: ApiKeyManagement | None,
     dispatcher: JobDispatcher,
-    team_id: str,
+    team_id: str | None,
     agent_id: str,
     type_group: Literal["base/workflow", "abcclaw"],
     agent_version: str,

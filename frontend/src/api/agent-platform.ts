@@ -46,36 +46,46 @@ function validateId(value: string) {
   if (typeof value !== 'string' || !value.trim()) throw failure('invalid_input');
 }
 
-function endpoint(path: string, parameters: Record<string, string | number>): string {
-  const configured: unknown = path.startsWith('/web/abcclaw/')
-    ? import.meta.env.VITE_ABCCLAW_PLATFORM_ORIGIN
-    : import.meta.env.VITE_AGENT_PLATFORM_ORIGIN;
+function validatedOrigin(configured: unknown): string {
+  if (
+    typeof configured !== 'string' ||
+    /\s/.test(configured) ||
+    !/^https?:\/\/[^/?#\\]+\/?$/i.test(configured)
+  )
+    throw failure('configuration');
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    throw failure('configuration');
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== '/' ||
+    /[?#]/.test(configured)
+  ) {
+    throw failure('configuration');
+  }
+  return url.origin;
+}
+
+function endpoint(
+  path: string,
+  parameters: Record<string, string | number>,
+  originOverride = '',
+): string {
   let origin = '';
-  if (configured !== undefined && configured !== '') {
-    if (
-      typeof configured !== 'string' ||
-      /\s/.test(configured) ||
-      !/^https?:\/\/[^/?#\\]+\/?$/i.test(configured)
-    )
-      throw failure('configuration');
-    let url: URL;
-    try {
-      url = new URL(configured);
-    } catch {
-      throw failure('configuration');
-    }
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.username ||
-      url.password ||
-      url.search ||
-      url.hash ||
-      url.pathname !== '/' ||
-      /[?#]/.test(configured)
-    ) {
-      throw failure('configuration');
-    }
-    origin = url.origin;
+  if (originOverride) {
+    origin = validatedOrigin(originOverride);
+  } else {
+    const configured: unknown = path.startsWith('/web/abcclaw/')
+      ? import.meta.env.VITE_ABCCLAW_PLATFORM_ORIGIN
+      : import.meta.env.VITE_AGENT_PLATFORM_ORIGIN;
+    if (configured !== undefined && configured !== '') origin = validatedOrigin(configured);
   }
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(parameters)) query.set(key, String(value));
@@ -98,8 +108,9 @@ async function getJson(
   parameters: Record<string, string | number>,
   token: string,
   signal: AbortSignal,
+  origin = '',
 ) {
-  const url = endpoint(path, parameters);
+  const url = endpoint(path, parameters, origin);
   let response: Response;
   try {
     response = await fetch(url, {
@@ -186,12 +197,13 @@ async function allPages<T>(
   wrapped: boolean,
   normalize: (value: unknown, status: number) => T,
   identity: (value: T) => string,
+  origin = '',
 ): Promise<T[]> {
   const result = new Map<string, T>();
   let initial: { total: number; size: number; pages: number } | undefined;
   let count = 0;
   for (let current = 1; ; current++) {
-    const response = await getJson(path, { ...parameters, page: current }, token, signal);
+    const response = await getJson(path, { ...parameters, page: current }, token, signal, origin);
     const value = wrapped ? unwrap(response.value, response.status) : response.value;
     const batch = page(value, current, response.status);
     if (
@@ -284,72 +296,92 @@ function normalizeVersions(value: unknown, status: number, branchId?: string): P
   return [...result.values()];
 }
 
-export const getTeams: AgentDirectory['getTeams'] = async ({ token }) =>
-  query(token, (signal) =>
-    allPages(
-      '/web/ops/team/getTeamRole',
-      { limit: 300 },
-      token,
-      signal,
-      true,
-      normalizeTeam,
-      (item) => item.teamId,
-    ),
-  );
+// 行内目录：origin 由部署环境配置（VITE_AGENT_PLATFORM_ORIGIN / VITE_ABCCLAW_PLATFORM_ORIGIN，
+// 空值走同源 /web 代理）。行外目录：固定本地虚拟地址（VITE_LOCAL_PLATFORM_ORIGIN 可覆盖）。
+const LOCAL_PLATFORM_ORIGIN: string =
+  ((import.meta.env.VITE_LOCAL_PLATFORM_ORIGIN as unknown) as string | undefined) ||
+  'http://127.0.0.1:8119';
 
-export const getAgents: AgentDirectory['getAgents'] = async ({ token, teamId }) => {
-  validateId(teamId);
-  return query(token, (signal) =>
-    allPages(
-      '/web/agent/agents',
-      { teamId, name: '', limit: 1000 },
-      token,
-      signal,
-      false,
-      normalizeAgent,
-      (item) => item.agentId,
-    ),
-  );
-};
-
-export const getAgentVersions: AgentDirectory['getAgentVersions'] = async ({ token, agentId }) => {
-  validateId(agentId);
-  return query(token, async (signal) => {
-    const response = await getJson('/web/agent/getAgentVersionList', { agentId }, token, signal);
-    return normalizeVersions(unwrap(response.value, response.status), response.status);
-  });
-};
-
-export const getBranches: AgentDirectory['getBranches'] = async ({ token, agentId }) => {
-  validateId(agentId);
-  return query(token, async (signal) => {
-    const response = await getJson('/web/abcclaw/v2/branchTree', { agentId }, token, signal);
-    return normalizeBranches(unwrap(response.value, response.status), response.status);
-  });
-};
-
-export const getBranchVersions: AgentDirectory['getBranchVersions'] = async ({
-  token,
-  agentId,
-  branchId,
-}) => {
-  validateId(agentId);
-  validateId(branchId);
-  return query(token, async (signal) => {
-    const response = await getJson(
-      '/web/abcclaw/v2/listVersions',
-      { agentId, branchId },
-      token,
-      signal,
+function createDirectory(fixedOrigin: string): AgentDirectory {
+  const getTeams: AgentDirectory['getTeams'] = async ({ token }) =>
+    query(token, (signal) =>
+      allPages(
+        '/web/ops/team/getTeamRole',
+        { limit: 300 },
+        token,
+        signal,
+        true,
+        normalizeTeam,
+        (item) => item.teamId,
+        fixedOrigin,
+      ),
     );
-    return normalizeVersions(unwrap(response.value, response.status), response.status, branchId);
-  });
-};
+  const getAgents: AgentDirectory['getAgents'] = async ({ token, teamId }) => {
+    const parameters: Record<string, string | number> = { name: '', limit: 1000 };
+    if (teamId !== '') {
+      validateId(teamId);
+      parameters.teamId = teamId;
+    }
+    return query(token, (signal) =>
+      allPages(
+        '/web/agent/agents',
+        parameters,
+        token,
+        signal,
+        false,
+        normalizeAgent,
+        (item) => item.agentId,
+        fixedOrigin,
+      ),
+    );
+  };
+  const getAgentVersions: AgentDirectory['getAgentVersions'] = async ({ token, agentId }) => {
+    validateId(agentId);
+    return query(token, async (signal) => {
+      const response = await getJson(
+        '/web/agent/getAgentVersionList',
+        { agentId },
+        token,
+        signal,
+        fixedOrigin,
+      );
+      return normalizeVersions(unwrap(response.value, response.status), response.status);
+    });
+  };
+  const getBranches: AgentDirectory['getBranches'] = async ({ token, agentId }) => {
+    validateId(agentId);
+    return query(token, async (signal) => {
+      const response = await getJson(
+        '/web/abcclaw/v2/branchTree',
+        { agentId },
+        token,
+        signal,
+        fixedOrigin,
+      );
+      return normalizeBranches(unwrap(response.value, response.status), response.status);
+    });
+  };
+  const getBranchVersions: AgentDirectory['getBranchVersions'] = async ({
+    token,
+    agentId,
+    branchId,
+  }) => {
+    validateId(agentId);
+    validateId(branchId);
+    return query(token, async (signal) => {
+      const response = await getJson(
+        '/web/abcclaw/v2/listVersions',
+        { agentId, branchId },
+        token,
+        signal,
+        fixedOrigin,
+      );
+      return normalizeVersions(unwrap(response.value, response.status), response.status, branchId);
+    });
+  };
+  return { getTeams, getAgents, getBranches, getAgentVersions, getBranchVersions };
+}
 
-export const agentDirectory: AgentDirectory = {
-  getTeams,
-  getAgents,
-  getBranches,
-  getAgentVersions,
-  getBranchVersions,
-};
+export const agentDirectory: AgentDirectory = createDirectory('');
+export const localAgentDirectory: AgentDirectory = createDirectory(LOCAL_PLATFORM_ORIGIN);
+export const getTeams = agentDirectory.getTeams;

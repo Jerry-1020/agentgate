@@ -1,4 +1,10 @@
 import {test,expect} from '@playwright/test'
+import { passAuthGate } from './auth-gate';
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await passAuthGate(page);
+});
+
 test('upstream API: XLSX import, archive restore, scheduling, rerun and lineage',async({request})=>{
  test.setTimeout(60000)
  async function body(r:any){expect(r.ok(),await r.text()).toBeTruthy();return r.json().then(j=>j.data)}

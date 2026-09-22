@@ -16,6 +16,9 @@ case "${1:-}" in
     ;;
 esac
 export AGENTGATE_DB="${AGENTGATE_DB-$revision_root/runtime/agentgate.db}"
+# 行外（本地虚拟）模式的平台执行后端；行内部署时由环境变量覆盖。
+export AGENTGATE_AGENT_PLATFORM_MODE="${AGENTGATE_AGENT_PLATFORM_MODE-mock}"
+export AGENTGATE_AGENT_PLATFORM_ORIGIN="${AGENTGATE_AGENT_PLATFORM_ORIGIN-http://127.0.0.1:8119}"
 case "${1:-}" in
   dispatcher-type) cd "$revision_root"; exec .venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())' ;;
   execute-run) cd "$revision_root"; shift; exec .venv/bin/python scripts/bjs/run_evaluation.py "$@" ;;
