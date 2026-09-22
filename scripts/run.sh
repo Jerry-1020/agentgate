@@ -2,7 +2,8 @@
 set -euo pipefail
 revision_root="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$revision_root/runtime"
-export AGENTGATE_REDIS_URL="redis://127.0.0.1:6397/0"
+export AGENTGATE_REDIS_MODE="${AGENTGATE_REDIS_MODE:-single}"
+export AGENTGATE_REDIS_URL="${AGENTGATE_REDIS_URL:-redis://127.0.0.1:6397/0}"
 export PYTHONPATH="$revision_root/src"
 # Private per-user model configuration is deliberately outside the project/package.
 case "${1:-}" in

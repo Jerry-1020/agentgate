@@ -20,13 +20,13 @@ from agentgate.demo.targets import (
 from agentgate.domain import RunStatus, TargetSnapshot
 from agentgate.evaluator.judge import JudgeRequest, JudgeResponse
 from agentgate.integrations.job_dispatchers.celery import (
+    REDIS_CLUSTER_TRANSPORT,
     CeleryJobDispatcher,
     create_celery_app,
     dispatch_due_evaluation_runs,
     execute_evaluation_run,
 )
 from agentgate.integrations.model_providers.environment import ConfiguredJudgeModel
-from agentgate.integrations.targets import DemoLoanTargetAdapter
 from agentgate.storage.sqlite import SQLiteRepository
 
 
@@ -89,9 +89,7 @@ def configured_judge(client: RecordingJudgeClient) -> ConfiguredJudgeModel:
 
 
 def target() -> TargetSnapshot:
-    return build_demo_target_snapshot(
-        get_demo_target_descriptor("loan-agent-v2-fixed")
-    )
+    return build_demo_target_snapshot(get_demo_target_descriptor("loan-agent-v2-fixed"))
 
 
 def seed_demo(repository: SQLiteRepository) -> None:
@@ -123,6 +121,7 @@ def test_dispatcher_revokes_correlated_task_without_terminating_worker() -> None
 
 
 def test_celery_app_uses_json_broker_only_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("AGENTGATE_REDIS_MODE", "single")
     monkeypatch.setenv("AGENTGATE_REDIS_URL", "redis://broker.example:6379/4")
     monkeypatch.setenv("AGENTGATE_WORKER_CONCURRENCY", "2")
     monkeypatch.setenv("AGENTGATE_TASK_TIME_LIMIT_SECONDS", "420")
@@ -131,6 +130,8 @@ def test_celery_app_uses_json_broker_only_configuration(monkeypatch) -> None:
     app = create_celery_app()
 
     assert app.conf.broker_url == "redis://broker.example:6379/4"
+    assert app.conf.broker_transport is None
+    assert app.conf.broker_transport_options == {}
     assert app.conf.result_backend is None
     assert app.conf.accept_content == ["json"]
     assert app.conf.task_serializer == "json"
@@ -146,9 +147,58 @@ def test_celery_app_uses_json_broker_only_configuration(monkeypatch) -> None:
     )
 
 
-def test_scheduler_task_uses_configured_database_and_dispatcher(
-    tmp_path, monkeypatch
+def test_celery_app_uses_redis_cluster_transport(monkeypatch) -> None:
+    monkeypatch.setenv("AGENTGATE_REDIS_MODE", "cluster")
+    monkeypatch.setenv(
+        "AGENTGATE_REDIS_URL",
+        "redis://user:secret@redis-seed.example:6379/0",
+    )
+    monkeypatch.setenv("AGENTGATE_REDIS_CLUSTER_HASH_TAG", "{customer-agentgate}")
+
+    app = create_celery_app()
+
+    assert app.conf.broker_url == "redis://user:secret@redis-seed.example:6379/0"
+    assert app.conf.broker_transport == REDIS_CLUSTER_TRANSPORT
+    assert app.conf.broker_transport_options == {
+        "hash_tag": "{customer-agentgate}",
+    }
+    assert app.conf.result_backend is None
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        (
+            {"AGENTGATE_REDIS_MODE": "replicated"},
+            "AGENTGATE_REDIS_MODE must be single or cluster",
+        ),
+        (
+            {
+                "AGENTGATE_REDIS_MODE": "cluster",
+                "AGENTGATE_REDIS_URL": "redis://redis-seed.example:6379/2",
+            },
+            "Redis Cluster supports only database 0",
+        ),
+        (
+            {
+                "AGENTGATE_REDIS_MODE": "cluster",
+                "AGENTGATE_REDIS_CLUSTER_HASH_TAG": "customer-agentgate",
+            },
+            "AGENTGATE_REDIS_CLUSTER_HASH_TAG",
+        ),
+    ],
+)
+def test_celery_app_rejects_invalid_redis_cluster_configuration(
+    monkeypatch, environment, message
 ) -> None:
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message):
+        create_celery_app()
+
+
+def test_scheduler_task_uses_configured_database_and_dispatcher(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "scheduler-task.db"
     monkeypatch.setenv("AGENTGATE_DB", str(database_path))
     calls: list[str] = []
@@ -170,17 +220,13 @@ def test_scheduler_task_uses_configured_database_and_dispatcher(
     assert calls == [str(database_path), "CeleryJobDispatcher"]
 
 
-def test_worker_executes_persisted_run_and_duplicate_is_noop(
-    tmp_path, monkeypatch
-) -> None:
+def test_worker_executes_persisted_run_and_duplicate_is_noop(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "worker.db"
     monkeypatch.setenv("AGENTGATE_DB", str(database_path))
     repository = SQLiteRepository(database_path)
     seed_demo(repository)
     management = build_default_evaluator_management(repository)
-    run = RunManagement(repository, management).create_run(
-        target(), dataset_id=LOAN_DATASET.id
-    )
+    run = RunManagement(repository, management).create_run(target(), dataset_id=LOAN_DATASET.id)
 
     assert execute_evaluation_run.run(run.id) == RunStatus.COMPLETED.value
     completed = repository.get_run(run.id)
@@ -199,9 +245,7 @@ def test_worker_skips_run_cancelled_before_delivery(tmp_path, monkeypatch) -> No
     repository = SQLiteRepository(database_path)
     seed_demo(repository)
     management = build_default_evaluator_management(repository)
-    run = RunManagement(repository, management).create_run(
-        target(), dataset_id=LOAN_DATASET.id
-    )
+    run = RunManagement(repository, management).create_run(target(), dataset_id=LOAN_DATASET.id)
     cancelled = repository.cancel_run(run.id, run.created_at, user_team_id="")
     assert cancelled is not None
 
@@ -213,9 +257,7 @@ def test_worker_skips_run_cancelled_before_delivery(tmp_path, monkeypatch) -> No
     assert repository.list_results(run.id) == []
 
 
-def test_worker_executes_configured_judge_and_closes_client(
-    tmp_path, monkeypatch
-) -> None:
+def test_worker_executes_configured_judge_and_closes_client(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "judge-worker.db"
     monkeypatch.setenv("AGENTGATE_DB", str(database_path))
     repository = SQLiteRepository(database_path)
@@ -228,12 +270,9 @@ def test_worker_executes_configured_judge_and_closes_client(
         judge_model_id=configuration.model_id,
         judge_credential_ref=configuration.credential_ref,
     )
-    run = RunManagement(repository, management).create_run(
-        target(), dataset_id=LOAN_DATASET.id
-    )
+    run = RunManagement(repository, management).create_run(target(), dataset_id=LOAN_DATASET.id)
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.execution."
-        "load_judge_model_from_environment",
+        "agentgate.integrations.job_dispatchers.execution.load_judge_model_from_environment",
         lambda: configuration,
     )
 
@@ -244,22 +283,17 @@ def test_worker_executes_configured_judge_and_closes_client(
     assert client.closed is True
 
 
-def test_worker_closes_judge_client_when_composition_fails(
-    tmp_path, monkeypatch
-) -> None:
+def test_worker_closes_judge_client_when_composition_fails(tmp_path, monkeypatch) -> None:
     database_path = tmp_path / "judge-composition-failure.db"
     monkeypatch.setenv("AGENTGATE_DB", str(database_path))
     repository = SQLiteRepository(database_path)
     seed_demo(repository)
     management = build_default_evaluator_management(repository)
-    run = RunManagement(repository, management).create_run(
-        target(), dataset_id=LOAN_DATASET.id
-    )
+    run = RunManagement(repository, management).create_run(target(), dataset_id=LOAN_DATASET.id)
     client = RecordingJudgeClient()
     configuration = configured_judge(client)
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.execution."
-        "load_judge_model_from_environment",
+        "agentgate.integrations.job_dispatchers.execution.load_judge_model_from_environment",
         lambda: configuration,
     )
 
@@ -269,8 +303,7 @@ def test_worker_closes_judge_client_when_composition_fails(
         raise ValueError("composition failed")
 
     monkeypatch.setattr(
-        "agentgate.integrations.job_dispatchers.execution."
-        "build_default_evaluator_management",
+        "agentgate.integrations.job_dispatchers.execution.build_default_evaluator_management",
         fail_composition,
     )
 
