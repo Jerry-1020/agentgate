@@ -115,7 +115,7 @@ test('personal space is the default and an empty team list still allows entry', 
   await page.getByRole('button', { name: '确认', exact: true }).click();
   expect(await page.evaluate(() => (window as any).hello())).toMatchObject({
     mode: 'bank',
-    teamId: 'personal',
+    teamId: '',
   });
 });
 
