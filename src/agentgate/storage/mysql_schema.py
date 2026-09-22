@@ -127,6 +127,7 @@ runs = _table(
     Index("ix_runs_due", "status", "scheduled_for", "created_at"),
     Index("ix_runs_team_created", "user_team_key", "created_at"),
     Index("ix_runs_team_status", "user_team_key", "status", "created_at"),
+    Index("ix_runs_apikey_status", "api_key", "status"),
 )
 
 run_asset_refs = _table(

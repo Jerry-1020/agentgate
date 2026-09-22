@@ -211,6 +211,9 @@ def test_scheduler_task_uses_configured_database_and_dispatcher(tmp_path, monkey
             calls.append(type(dispatcher).__name__)
             return (object(), object())
 
+        def dispatch_waiting_runs(self, dispatcher, *, limit=100):
+            return ()
+
     monkeypatch.setattr(
         "agentgate.integrations.job_dispatchers.celery.RunScheduling",
         RecordingScheduling,

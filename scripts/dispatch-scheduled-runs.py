@@ -27,8 +27,11 @@ def main() -> int:
     signal.signal(signal.SIGINT, lambda *_: stopped.set())
     while not stopped.is_set():
         with closing(create_repository(config)) as repository:
-            dispatched = RunScheduling(repository).dispatch_due_runs(dispatcher)
-        print(f"Dispatched {len(dispatched)} due Runs", flush=True)
+            scheduling = RunScheduling(repository)
+            due = scheduling.dispatch_due_runs(dispatcher)
+            waiting = scheduling.dispatch_waiting_runs(dispatcher)
+        total = len(due) + len(waiting)
+        print(f"Dispatched {total} Runs ({len(due)} due, {len(waiting)} waiting)", flush=True)
         if options.once:
             return 0
         stopped.wait(interval)

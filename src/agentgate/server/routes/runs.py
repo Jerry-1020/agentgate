@@ -40,7 +40,7 @@ class LaunchRequest(BaseModel):
     max_retries: int = Field(default=0, ge=0, le=5)
     case_ids: list[str] | None = None
     scheduled_for: datetime | None = None
-    api_key: None = None
+    api_key: str | None = None
 
 
 class RunSetupSkillAnalysisRequest(BaseModel):
