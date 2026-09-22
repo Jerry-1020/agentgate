@@ -179,6 +179,8 @@ def parse_bank_sse(
         if last.get("status") != "completed":
             raise TargetExecutionError("protocol_error", "cloudshrimp message did not complete")
         output = last.get("output")
+        if not isinstance(output, str) or not output.strip():
+            output = last.get("message")
         intent = last.get("intent_code")
         if intent is not None and not isinstance(intent, str):
             raise TargetExecutionError("protocol_error", "intent_code must be text")

@@ -583,7 +583,7 @@ class InbankYunxiaTargetAdapter:
                         turn.id,
                         request_id,
                         session_id,
-                        raw[:8192],
+                        decoded[:8192],
                     )
                 raise
             ended_at = utcnow()

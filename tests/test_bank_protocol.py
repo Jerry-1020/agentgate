@@ -100,6 +100,28 @@ def test_cloudshrimp_accepts_auxiliary_events_without_lifecycle_events():
     assert result.workflow_calls == ({"node_id": "end"},)
 
 
+def test_cloudshrimp_uses_message_text_when_completed_output_is_blank():
+    result = parse_bank_sse(
+        stream([
+            ("message", {
+                "ok": True,
+                "status": "completed",
+                "output": "",
+                "message": "customer answer from actual stream",
+                "intent_code": "hello-ces-skills",
+            }),
+            ("done", "[DONE]"),
+        ]),
+        protocol="cloudshrimp",
+        wire_format="event_lines",
+        request_id="request",
+        session_id="session",
+    )
+
+    assert result.output == "customer answer from actual stream"
+    assert result.intent_code == "hello-ces-skills"
+
+
 def test_cloudshrimp_rejects_failure_and_mismatched_session_events():
     with pytest.raises(TargetExecutionError, match="error event"):
         parse_bank_sse(
