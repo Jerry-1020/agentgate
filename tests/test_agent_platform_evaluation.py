@@ -25,6 +25,7 @@ def payload():
             "agent_id": "agent/raw",
             "type_group": "base/workflow",
             "agent_version": "v1",
+            "arrange_type": "workflow",
         },
         "dataset_id": "dataset",
         "dataset_version": 2,
@@ -82,6 +83,7 @@ def test_exact_submission_and_safe_response(claw, count):
     body["repetitions"] = count
     body["case_ids"] = ["case-2", "case-1"]
     if claw:
+        body["target"].pop("arrange_type")
         body["target"].update(type_group="abcclaw", branch_id="branch/raw")
     with client_for(submit) as client:
         response = client.post(PATH, json=body, headers=HEADERS)
@@ -95,6 +97,7 @@ def test_exact_submission_and_safe_response(claw, count):
     assert calls == [
         {
             **body["target"],
+            "arrange_type": None if claw else "workflow",
             "branch_id": "branch/raw" if claw else None,
             **{k: v for k, v in body.items() if k != "target"},
             "case_ids": ("case-2", "case-1"),
