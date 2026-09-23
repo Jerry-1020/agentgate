@@ -12,18 +12,23 @@ import Picker from '/src/views/evaluation/components/AgentTargetPicker.vue';
 import '/node_modules/element-plus/dist/index.css';
 window.directory=agentDirectory;
 window.callDirectory=async(name,input)=>{try{return {ok:true,value:await agentDirectory[name](input)}}catch(error){return {ok:false,error:{status:error.status,kind:error.kind,message:error.message,properties:Object.keys(error),cause:error.cause}}}};
-createApp({setup(){const picker=ref(null);window.readTarget=()=>picker.value?.readSubmissionSelection();return()=>h(Picker,{ref:picker,directory:agentDirectory});}}).mount('#app');
+createApp({setup(){const picker=ref(null),token=ref('test-token'),teamId=ref('a');window.readTarget=()=>picker.value?.readSubmissionSelection();window.setAuth=auth=>{token.value=auth.token;teamId.value=auth.teamId;};return()=>h(Picker,{ref:picker,directory:agentDirectory,token:token.value,teamId:teamId.value});}}).mount('#app');
 </script></body></html>`;
 
 const formFixture = `<!doctype html><html><body><div id="app"></div><script type="module">
 import {createApp,h} from 'vue';
 import ElementPlus from 'element-plus';
+import {pinia} from '/src/stores/index.ts';
+import {useAuthStore} from '/src/stores/modules/auth';
 import Form from '/src/views/evaluation/components/EvaluationTaskForm.vue';
 import '/node_modules/element-plus/dist/index.css';
 window.created=[];window.updates=0;
 window.addEventListener('task-links-updated',()=>window.updates++);
+window.setAuth=state=>{const auth=useAuthStore();if(state==='logout')auth.$reset();else auth.$patch(state);};
 const source={id:'dataset',version:2,evaluatorId:'judge',targetVersion:'old-1',...(location.search.includes('selected')?{caseIds:['case-1']}: {})};
-createApp({render:()=>h(Form,{source,onCreated:link=>window.created.push(link)})}).use(ElementPlus).mount('#app');
+const app=createApp({render:()=>h(Form,{source,onCreated:link=>window.created.push(link)})}).use(pinia).use(ElementPlus);
+useAuthStore().$patch({loginMode:'bank',token:'form-secret',teamId:'team',teamName:'测试团队'});
+app.mount('#app');
 </script></body></html>`;
 
 async function startServer(origins?: { platform: string; claw: string }) {
@@ -479,7 +484,7 @@ test('invalid origin configuration and HTTP redirects cannot redirect credential
   expect(redirected).toBe(false);
 });
 
-test('real picker consumes the HTTP directory from team through exact abcclaw version', async ({
+test('real picker consumes the HTTP directory through an exact abcclaw version', async ({
   page,
 }) => {
   await page.route('**/web/**', async (route) => {
@@ -499,12 +504,8 @@ test('real picker consumes the HTTP directory from team through exact abcclaw ve
           : wrap([{ agentVersion: '1.2', status: 'test', branchId: 'leaf' }]);
     await reply(route, data);
   });
-  await page.getByLabel('请填写token', { exact: true }).fill('test-token');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  await choose(page, '选择团队', '测试团队 · a');
-  await choose(page, '智能体类型', 'abcclaw');
   await choose(page, '选择智能体', '测试云虾 · claw');
-  await choose(page, 'branchId', '↳ 测试分支 · leaf');
+  await choose(page, '分支地址', '↳ 测试分支 · leaf');
   await choose(page, '智能体版本', '1.2 · test');
   expect(await page.evaluate(() => (window as any).readTarget())).toMatchObject({
     token: 'test-token',
@@ -518,7 +519,7 @@ test('real picker consumes the HTTP directory from team through exact abcclaw ve
 });
 
 const sampleCases = [
-  { id: 'case-1', name: '样本一', turns: [{ expectations: [{ kind: 'output' }] }] },
+  { id: 'case-1', name: '样本一', turns: [{ input: { txt: '问题一' }, expectations: [{ kind: 'output' }] }] },
 ];
 async function openForm(page: Page, selected = false) {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
@@ -601,16 +602,20 @@ async function openForm(page: Page, selected = false) {
   });
   await page.goto(url.replace('__directory', '__form') + (selected ? '?selected' : ''));
   await expect(page.getByLabel('任务评测集版本', { exact: true })).toHaveValue('2');
-  await expect(page.getByLabel('请填写token', { exact: true })).toBeEnabled();
+  await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeEnabled();
   return requests;
 }
 async function selectFormTarget(page: Page, claw = false) {
-  await page.getByLabel('请填写token', { exact: true }).fill('form-secret');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
-  await choose(page, '选择团队', '测试团队 · team');
-  await choose(page, '智能体类型', claw ? 'abcclaw' : 'base/workflow');
+  await page.evaluate(() =>
+    (window as any).setAuth({
+      loginMode: 'bank',
+      token: 'form-secret',
+      teamId: 'team',
+      teamName: '测试团队',
+    }),
+  );
   await choose(page, '选择智能体', claw ? '云虾 · claw' : '工作流 · workflow');
-  if (claw) await choose(page, 'branchId', '分支 · branch/raw');
+  if (claw) await choose(page, '分支地址', '分支 · branch/raw');
   await choose(page, '智能体版本', claw ? 'v2' : 'v1');
 }
 const start = (page: Page) => page.getByRole('button', { name: '开始评测', exact: true });
@@ -628,7 +633,7 @@ test('form preserves dataset/execution choices through target changes and logout
   await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('7');
   await expect(page.getByLabel('执行超时（秒）', { exact: true })).toHaveValue('999');
   await expect(page.getByRole('button', { name: 'Skill 静态分析', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '取消登录', exact: true }).click();
+  await page.evaluate(() => (window as any).setAuth('logout'));
   await expect(start(page)).toBeDisabled();
   expect(requests.some((r) => ['/api/versions', '/api/bank-targets'].includes(r.path))).toBe(false);
 });
@@ -673,6 +678,29 @@ test('form submits workflow target and selected source cases with isolated token
   ).toEqual({ updates: 1, storage: '{}' });
 });
 
+test('personal space submits without a team_id field', async ({ page }) => {
+  const requests = await openForm(page);
+  await page.evaluate(() =>
+    (window as any).setAuth({
+      loginMode: 'bank',
+      token: 'form-secret',
+      teamId: '',
+      teamName: '个人空间',
+    }),
+  );
+  await choose(page, '选择智能体', '工作流 · workflow');
+  await choose(page, '智能体版本', 'v1');
+  await start(page).click();
+  await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+  const submission = requests.find((r) => r.path === '/api/agent-platform/evaluations')!;
+  expect(submission.body.target).toEqual({
+    agent_id: 'workflow',
+    type_group: 'base/workflow',
+    agent_version: 'v1',
+  });
+  expect('team_id' in submission.body.target).toBe(false);
+});
+
 test('abcclaw stability sends original branchId and exact settings', async ({ page }) => {
   const requests = await openForm(page);
   await selectFormTarget(page, true);
@@ -713,7 +741,7 @@ test('submission locks all inputs before asynchronous validation and prevents du
   });
   await start(page).click();
   await expect(page.getByRole('button', { name: 'A/B 实验', exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: '取消登录', exact: true })).toBeDisabled();
+  await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeDisabled();
   await expect(page.getByLabel('并发样本数', { exact: true })).toBeDisabled();
   await page.locator('.dataset-selection .el-select').click({ force: true });
   await expect(page.getByRole('listbox', { name: '指定用例', exact: true })).toBeHidden();
@@ -767,7 +795,7 @@ for (const failure of ['reject', 'server', 'malformed', 'refresh'] as const)
     expect(await page.locator('body').innerText()).not.toContain('form-secret');
   });
 
-test('A/B keeps legacy endpoint and association, returning to single requires fresh login', async ({
+test('A/B keeps legacy endpoint and association, returning to single requires fresh target selection', async ({
   page,
 }) => {
   const requests = await openForm(page);
@@ -790,7 +818,7 @@ test('A/B keeps legacy endpoint and association, returning to single requires fr
     true,
   );
   await page.getByRole('button', { name: '单任务', exact: true }).click();
-  await expect(page.getByLabel('请填写token', { exact: true })).toHaveValue('');
+  await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeEnabled();
   await expect(start(page)).toBeDisabled();
 });
 
@@ -811,7 +839,7 @@ test('late A/B catalogs cannot change the single task dataset or execution setti
   await page.getByRole('button', { name: '单任务', exact: true }).click();
   await page.getByLabel('并发样本数', { exact: true }).fill('9');
   release();
-  await expect(page.getByLabel('请填写token', { exact: true })).toBeEnabled();
+  await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeEnabled();
   await selectFormTarget(page);
   await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('9');
   await expect(page.getByLabel('任务评测集', { exact: true })).toHaveValue('dataset');
@@ -860,12 +888,14 @@ test('cancelling uncovered-case confirmation releases the lock without a creatio
   await page.reload();
   await expect(page.getByLabel('任务评测集版本', { exact: true })).toHaveValue('2');
   await page.route('**/api/datasets/dataset/versions/2', (route) =>
-    reply(route, { cases: [...sampleCases, { id: 'uncovered', turns: [{ expectations: [] }] }] }),
+    reply(route, {
+      cases: [...sampleCases, { id: 'uncovered', turns: [{ input: { txt: '未覆盖' }, expectations: [] }] }],
+    }),
   );
   await selectFormTarget(page);
   await start(page).click();
   await expect(page.getByText('1 条用例没有匹配检查，将标为不适用。是否继续？')).toBeVisible();
-  await expect(page.getByRole('button', { name: '取消登录', exact: true })).toBeDisabled();
+  await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '返回修改', exact: true }).click();
   await expect(start(page)).toBeEnabled();
   expect(requests.some((r) => r.path === '/api/agent-platform/evaluations')).toBe(false);

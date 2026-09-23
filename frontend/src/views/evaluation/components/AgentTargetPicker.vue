@@ -20,7 +20,9 @@ export interface PlatformVersion {
   agentVersion: string;
   status?: string;
 }
-export interface AgentTargetSelection extends PlatformTeam {
+export interface AgentTargetSelection {
+  teamId: string;
+  teamName: string;
   agentId: string;
   agentName: string;
   typeGroup: AgentTypeGroup;
@@ -48,34 +50,30 @@ export interface AgentDirectory {
 import { computed, getCurrentInstance, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElOption, ElSelect } from 'element-plus';
 
-const props = withDefaults(defineProps<{ directory: AgentDirectory; disabled?: boolean }>(), {
-  disabled: false,
-});
+const props = withDefaults(
+  defineProps<{
+    directory: AgentDirectory;
+    token: string;
+    teamId: string;
+    disabled?: boolean;
+  }>(),
+  {
+    disabled: false,
+  },
+);
 const emit = defineEmits<{ 'selection-change': [selection: AgentTargetSelection | null] }>();
-type ListKey = 'team' | 'agent' | 'branch' | 'version';
-type FieldKey = ListKey | 'type';
+type ListKey = 'agent' | 'branch' | 'version';
 type LoadState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 const prefix = `agent-target-${getCurrentInstance()!.uid}`;
-const tokenDraft = ref('');
-const lockedToken = ref('');
-const loginError = ref('');
-const selected = reactive({ team: '', type: '', agent: '', branch: '', version: '' });
-const teams = ref<readonly PlatformTeam[]>([]);
+const selected = reactive({ agent: '', branch: '', version: '' });
 const agents = ref<readonly PlatformAgent[]>([]);
 const branches = ref<readonly (PlatformBranch & { depth: number })[]>([]);
 const versions = ref<readonly PlatformVersion[]>([]);
-const states = reactive<Record<ListKey, LoadState>>({
-  team: 'idle',
-  agent: 'idle',
-  branch: 'idle',
-  version: 'idle',
-});
-const errors = reactive<Record<ListKey, string>>({ team: '', agent: '', branch: '', version: '' });
-const sequence: Record<ListKey, number> = { team: 0, agent: 0, branch: 0, version: 0 };
+const states = reactive<Record<ListKey, LoadState>>({ agent: 'idle', branch: 'idle', version: 'idle' });
+const errors = reactive<Record<ListKey, string>>({ agent: '', branch: '', version: '' });
+const sequence: Record<ListKey, number> = { agent: 0, branch: 0, version: 0 };
 let session = 0;
 let disposed = false;
-const loggedIn = computed(() => !!lockedToken.value);
-const currentTeam = computed(() => teams.value.find((item) => item.teamId === selected.team));
 const currentAgent = computed(() => agents.value.find((item) => item.agentId === selected.agent));
 const currentBranch = computed(() =>
   branches.value.find((item) => item.branchId === selected.branch),
@@ -83,23 +81,13 @@ const currentBranch = computed(() =>
 const currentVersion = computed(() =>
   versions.value.find((item) => item.agentVersion === selected.version),
 );
+const selectedType = computed<AgentTypeGroup | null>(() => currentAgent.value?.typeGroup ?? null);
 const typeError = computed(() => {
   if (!currentAgent.value) return '';
-  if (!currentAgent.value.typeGroup) return '该智能体类型未知或存在冲突，暂不支持选择。';
-  return currentAgent.value.typeGroup !== selected.type
-    ? '所选类型与该智能体不一致，请调整选择。'
-    : '';
+  return selectedType.value ? '' : '该智能体类型未知或存在冲突，暂不支持选择。';
 });
-const teamAvailable = computed(
-  () => loggedIn.value && states.team === 'ready' && !!currentTeam.value,
-);
 const agentAvailable = computed(
-  () =>
-    teamAvailable.value &&
-    states.agent === 'ready' &&
-    !!currentAgent.value &&
-    !!selected.type &&
-    !typeError.value,
+  () => states.agent === 'ready' && !!currentAgent.value && !!selectedType.value && !typeError.value,
 );
 const branchAvailable = computed(
   () => agentAvailable.value && states.branch === 'ready' && !!currentBranch.value,
@@ -107,18 +95,18 @@ const branchAvailable = computed(
 const selection = computed<AgentTargetSelection | null>(() => {
   if (disposed || !agentAvailable.value || states.version !== 'ready' || !currentVersion.value)
     return null;
-  if (selected.type === 'abcclaw' && !branchAvailable.value) return null;
+  if (selectedType.value === 'abcclaw' && !branchAvailable.value) return null;
   const agent = currentAgent.value!;
   return {
-    teamId: currentTeam.value!.teamId,
-    teamName: currentTeam.value!.teamName,
+    teamId: props.teamId,
+    teamName: '',
     agentId: agent.agentId,
     agentName: agent.agentName,
-    typeGroup: agent.typeGroup!,
+    typeGroup: selectedType.value!,
     platformAgentType: agent.platformAgentType,
     platformArrangeType: agent.platformArrangeType,
-    branchId: selected.type === 'abcclaw' ? currentBranch.value!.branchId : null,
-    branchName: selected.type === 'abcclaw' ? currentBranch.value!.branchName : null,
+    branchId: selectedType.value === 'abcclaw' ? currentBranch.value!.branchId : null,
+    branchName: selectedType.value === 'abcclaw' ? currentBranch.value!.branchName : null,
     agentVersion: currentVersion.value.agentVersion,
   };
 });
@@ -132,37 +120,15 @@ function clearList(key: ListKey) {
   states[key] = 'idle';
   errors[key] = '';
   selected[key] = '';
-  if (key === 'team') teams.value = [];
   if (key === 'agent') agents.value = [];
   if (key === 'branch') branches.value = [];
   if (key === 'version') versions.value = [];
 }
-function clearAfter(key: FieldKey) {
-  if (key === 'team') selected.type = '';
-  if (key === 'team' || key === 'type') clearList('agent');
-  if (key !== 'branch' && key !== 'version') clearList('branch');
+function clearAfter(key: ListKey) {
+  if (key === 'agent') clearList('branch');
   if (key !== 'version') clearList('version');
 }
-function logout() {
-  session++;
-  lockedToken.value = '';
-  tokenDraft.value = '';
-  loginError.value = '';
-  clearList('team');
-  clearAfter('team');
-}
-function login() {
-  if (props.disabled || loggedIn.value) return;
-  const token = tokenDraft.value;
-  if (!token.trim() || token.length > 512 || /\s/.test(token) || /^Bearer\b/i.test(token)) {
-    loginError.value = '请填写不含空白、换行或 Bearer 前缀的原始 token，最多 512 个字符。';
-    return;
-  }
-  session++;
-  lockedToken.value = token;
-  loginError.value = '';
-}
-function selectField(key: FieldKey, value: string) {
+function selectField(key: ListKey, value: string) {
   if (props.disabled || fields.value.find((field) => field.key === key)?.disabled) return;
   if (selected[key] === value) return;
   clearAfter(key);
@@ -171,8 +137,8 @@ function selectField(key: FieldKey, value: string) {
 function context(key: ListKey) {
   return JSON.stringify([
     session,
-    key === 'team' ? '' : selected.team,
-    key === 'team' ? '' : selected.type,
+    props.token,
+    props.teamId,
     key === 'branch' || key === 'version' ? selected.agent : '',
     key === 'version' ? selected.branch : '',
   ]);
@@ -198,33 +164,19 @@ async function loadList<T>(
     const status = (error as { status?: unknown } | null)?.status;
     errors[key] =
       status === 401 || status === 403
-        ? 'Token 无效或无权访问，请取消登录后重新填写。'
+        ? 'Token 无效或无权访问，请重新登录。'
         : '查询失败，请重试。';
     states[key] = 'error';
   }
 }
-function loadTeams() {
-  if (!loggedIn.value) return;
-  return loadList(
-    'team',
-    () => props.directory.getTeams({ token: lockedToken.value }),
-    (items) => {
-      teams.value = items;
-      if (selected.team && !currentTeam.value) {
-        selected.team = '';
-        clearAfter('team');
-      }
-    },
-  );
-}
 function loadAgents() {
-  if (!teamAvailable.value || !selected.type) return;
+  if (!props.token) return;
   return loadList(
     'agent',
-    () => props.directory.getAgents({ token: lockedToken.value, teamId: selected.team }),
+    () => props.directory.getAgents({ token: props.token, teamId: props.teamId }),
     (items) => {
       agents.value = items;
-      if (selected.agent && (!currentAgent.value || typeError.value)) {
+      if (selected.agent && !currentAgent.value) {
         selected.agent = '';
         clearAfter('agent');
       }
@@ -241,10 +193,10 @@ function flattenBranches(
   ]);
 }
 function loadBranches() {
-  if (!agentAvailable.value || selected.type !== 'abcclaw') return;
+  if (!agentAvailable.value || selectedType.value !== 'abcclaw') return;
   return loadList(
     'branch',
-    () => props.directory.getBranches({ token: lockedToken.value, agentId: selected.agent }),
+    () => props.directory.getBranches({ token: props.token, agentId: selected.agent }),
     (items) => {
       branches.value = flattenBranches(items);
       if (selected.branch && !currentBranch.value) {
@@ -255,12 +207,12 @@ function loadBranches() {
   );
 }
 function loadVersions() {
-  if (!agentAvailable.value || (selected.type === 'abcclaw' && !branchAvailable.value)) return;
+  if (!agentAvailable.value || (selectedType.value === 'abcclaw' && !branchAvailable.value)) return;
   return loadList(
     'version',
     () => {
-      const input = { token: lockedToken.value, agentId: selected.agent };
-      return selected.type === 'abcclaw'
+      const input = { token: props.token, agentId: selected.agent };
+      return selectedType.value === 'abcclaw'
         ? props.directory.getBranchVersions({ ...input, branchId: selected.branch })
         : props.directory.getAgentVersions(input);
     },
@@ -270,33 +222,13 @@ function loadVersions() {
     },
   );
 }
-const loaders = { team: loadTeams, agent: loadAgents, branch: loadBranches, version: loadVersions };
+const loaders = { agent: loadAgents, branch: loadBranches, version: loadVersions };
 const fields = computed(() => [
-  {
-    key: 'team' as const,
-    label: '选择团队',
-    placeholder: loggedIn.value ? '请选择团队' : '请先登录',
-    disabled: !loggedIn.value,
-    options: teams.value.map((item) => ({
-      value: item.teamId,
-      label: `${item.teamName} · ${item.teamId}`,
-    })),
-  },
-  {
-    key: 'type' as const,
-    label: '智能体类型',
-    placeholder: '请选择智能体类型',
-    disabled: !teamAvailable.value,
-    options: [
-      { value: 'base/workflow', label: 'base/workflow' },
-      { value: 'abcclaw', label: 'abcclaw' },
-    ],
-  },
   {
     key: 'agent' as const,
     label: '选择智能体',
-    placeholder: selected.type ? '请选择智能体' : '请先选择团队和类型',
-    disabled: !teamAvailable.value || !selected.type,
+    placeholder: '请选择智能体',
+    disabled: !props.token,
     options: agents.value.map((item) => ({
       value: item.agentId,
       label: `${item.agentName} · ${item.agentId}`,
@@ -304,9 +236,12 @@ const fields = computed(() => [
   },
   {
     key: 'branch' as const,
-    label: 'branchId',
-    placeholder: selected.type === 'base/workflow' ? '不适用（base/workflow）' : '请选择 branchId',
-    disabled: !agentAvailable.value || selected.type !== 'abcclaw',
+    label: '分支地址',
+    placeholder:
+      selectedType.value === 'base/workflow' || !currentAgent.value
+        ? '不适用（base/workflow）'
+        : '请选择分支地址',
+    disabled: !agentAvailable.value || selectedType.value !== 'abcclaw',
     options: branches.value.map((item) => ({
       value: item.branchId,
       label: `${'↳ '.repeat(item.depth)}${item.branchName || item.branchId} · ${item.branchId}`,
@@ -316,70 +251,40 @@ const fields = computed(() => [
     key: 'version' as const,
     label: '智能体版本',
     placeholder:
-      selected.type === 'abcclaw' && !selected.branch ? '请先选择 branchId' : '请选择版本',
-    disabled: !agentAvailable.value || (selected.type === 'abcclaw' && !branchAvailable.value),
+      selectedType.value === 'abcclaw' && !selected.branch ? '请先选择分支地址' : '请选择版本',
+    disabled: !agentAvailable.value || (selectedType.value === 'abcclaw' && !branchAvailable.value),
     options: versions.value.map((item) => ({
       value: item.agentVersion,
       label: item.status ? `${item.agentVersion} · ${item.status}` : item.agentVersion,
     })),
   },
 ]);
-function openField(key: FieldKey, open: boolean) {
-  if (open && key !== 'type') void loaders[key]();
+function openField(key: ListKey, open: boolean) {
+  if (open) void loaders[key]();
 }
 function readSubmissionSelection(): { target: AgentTargetSelection; token: string } | null {
   return !disposed && selection.value
-    ? { target: { ...selection.value }, token: lockedToken.value }
+    ? { target: { ...selection.value }, token: props.token }
     : null;
 }
 defineExpose({ readSubmissionSelection });
-watch(() => props.directory, logout);
+function reset() {
+  session++;
+  clearList('agent');
+  clearAfter('agent');
+}
+watch(() => props.directory, reset);
+watch([() => props.token, () => props.teamId], reset);
 onBeforeUnmount(() => {
   disposed = true;
-  logout();
   emit('selection-change', null);
 });
 </script>
 
 <template>
   <section class="agent-target-picker" aria-label="评测对象选择">
-    <div class="token-field">
-      <label :for="`${prefix}-token`">请填写token</label>
-      <div class="token-row">
-        <textarea
-          :id="`${prefix}-token`"
-          v-model="tokenDraft"
-          maxlength="512"
-          rows="2"
-          :readonly="loggedIn"
-          :disabled="disabled"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="请填写token，最多 512 个字符"
-          :aria-describedby="`${prefix}-token-help`"
-          @input="loginError = ''"
-        />
-        <button
-          type="button"
-          :disabled="disabled || (!loggedIn && !tokenDraft.trim())"
-          @click="loggedIn ? logout() : login()"
-        >
-          {{ loggedIn ? '取消登录' : '登录' }}
-        </button>
-      </div>
-      <div :id="`${prefix}-token-help`" class="token-help">
-        <span>{{ loggedIn ? '已登录 · Token 已锁定' : '未登录' }}</span>
-        <span>{{ tokenDraft.length }} / 512</span>
-      </div>
-      <p v-if="loginError" role="alert" class="field-error">{{ loginError }}</p>
-    </div>
     <div class="target-fields">
-      <div
-        v-for="field in fields"
-        :key="field.key"
-        class="target-field"
-        :class="{ wide: field.key === 'agent' }"
-      >
+      <div v-for="field in fields" :key="field.key" class="target-field">
         <label :id="`${prefix}-${field.key}-label`" :for="`${prefix}-${field.key}`">{{
           field.label
         }}</label>
@@ -393,7 +298,7 @@ onBeforeUnmount(() => {
           :aria-expanded="disabled || field.disabled ? false : undefined"
           :placeholder="field.placeholder"
           :disabled="disabled || field.disabled"
-          :loading="field.key !== 'type' && states[field.key] === 'loading'"
+          :loading="states[field.key] === 'loading'"
           loading-text="正在加载…"
           no-data-text="暂无可选项"
           :teleported="false"
@@ -405,28 +310,26 @@ onBeforeUnmount(() => {
             :key="option.value"
             :label="option.label"
             :value="option.value"
-            :disabled="field.key !== 'type' && states[field.key] !== 'ready'"
+            :disabled="states[field.key] !== 'ready'"
           />
         </ElSelect>
-        <template v-if="field.key !== 'type'">
-          <p v-if="states[field.key] === 'loading'" role="status">
-            正在加载{{ field.label.replace('选择', '') }}…
-          </p>
-          <p v-if="states[field.key] === 'empty'" role="status">
-            暂无可选{{ field.label.replace('选择', '') }}。
-          </p>
-          <div v-if="states[field.key] === 'error'" class="field-error">
-            <span role="alert">{{ errors[field.key] }}</span>
-            <button
-              type="button"
-              :aria-label="`重试${field.label}`"
-              :disabled="disabled || field.disabled"
-              @click="loaders[field.key]()"
-            >
-              重试
-            </button>
-          </div>
-        </template>
+        <p v-if="states[field.key] === 'loading'" role="status">
+          正在加载{{ field.label.replace('选择', '') }}…
+        </p>
+        <p v-if="states[field.key] === 'empty'" role="status">
+          暂无可选{{ field.label.replace('选择', '') }}。
+        </p>
+        <div v-if="states[field.key] === 'error'" class="field-error">
+          <span role="alert">{{ errors[field.key] }}</span>
+          <button
+            type="button"
+            :aria-label="`重试${field.label}`"
+            :disabled="disabled || field.disabled"
+            @click="loaders[field.key]()"
+          >
+            重试
+          </button>
+        </div>
         <p v-if="field.key === 'agent' && typeError" role="alert" class="field-error">
           {{ typeError }}
         </p>
@@ -449,32 +352,11 @@ onBeforeUnmount(() => {
 .agent-target-picker * {
   box-sizing: border-box;
 }
-.token-field,
 .target-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-}
-.token-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-textarea {
-  width: 100%;
-  min-width: 0;
-  resize: vertical;
-  font: inherit;
-  padding: 10px 12px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 6px;
-  color: inherit;
-  background: var(--el-bg-color);
-}
-textarea[readonly],
-textarea:disabled {
-  background: var(--el-fill-color-light);
 }
 button {
   padding: 9px 14px;
@@ -490,21 +372,10 @@ button:disabled {
   color: var(--el-text-color-disabled);
   cursor: not-allowed;
 }
-.token-help {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
 .target-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
-  margin-top: 20px;
-}
-.target-field.wide {
-  grid-column: 1 / -1;
 }
 .target-field :deep(.el-select) {
   width: 100%;
@@ -528,14 +399,11 @@ button:disabled {
   background: var(--el-fill-color-light);
   border-radius: 6px;
   overflow-wrap: anywhere;
+  margin: 16px 0 0;
 }
-@media (max-width: 520px) {
+@media (max-width: 900px) {
   .target-fields {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .token-row {
-    align-items: stretch;
-    flex-direction: column;
   }
 }
 </style>

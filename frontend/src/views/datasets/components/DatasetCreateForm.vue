@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { request, type TargetDescriptor } from '../../../api/evaluations';
 import type { EvaluationRun } from '../../evaluation/types/run';
 import type { Trace } from '../../../api/client';
@@ -231,8 +231,7 @@ function autoDescription() {
 }
 function validate() {
   error.value = '';
-  if (!pinned.value) error.value = '请先确认智能体，读取版本定义。';
-  else if (!name.value.trim()) error.value = '请输入数据集名称。';
+  if (!name.value.trim()) error.value = '请输入数据集名称。';
   else if (!description.value.trim()) error.value = '请输入数据集描述。';
   else if (!tags.value.length) error.value = '请至少选择或输入一个场景标签。';
   return !error.value;
@@ -258,7 +257,7 @@ function close() {
     return;
   emit('close');
 }
-onMounted(loadTargets);
+// 关联智能体配置待实现：不自动读取目录，控件已整体禁用。
 </script>
 
 <template>
@@ -274,7 +273,10 @@ onMounted(loadTargets);
     :close-on-press-escape="!saving"
   >
     <template v-if="true">
-      <h3><span class="step-number">01</span>关联智能体</h3>
+      <h3 class="pending-heading">
+        <span class="step-number">01</span>关联智能体<small>待实现</small>
+      </h3>
+      <fieldset class="pending-section" disabled aria-label="关联智能体（待实现，已禁用）">
       <div class="target-fields" :class="{ cloud: mode === 'cloudshrimp' }">
         <label
           >智能体模式 <em>*</em
@@ -338,6 +340,8 @@ onMounted(loadTargets);
           }}
         </button>
       </div>
+      </fieldset>
+      <p class="pending-note">关联智能体配置待实现；当前创建数据集不依赖该配置。</p>
       <section v-if="descriptor" class="definition" aria-label="关联智能体只读信息">
         <div class="definition-title">
           <b>{{ descriptor.display_name }} · {{ descriptor.ref.external_version_id }}</b
@@ -537,6 +541,30 @@ onMounted(loadTargets);
 </template>
 
 <style scoped>
+.pending-heading {
+  color: var(--el-text-color-secondary);
+}
+.pending-heading small {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--el-color-info);
+}
+.pending-section {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  opacity: 0.6;
+}
+.pending-section:disabled {
+  opacity: 0.6;
+}
+.pending-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 label {
   display: block !important;
 }

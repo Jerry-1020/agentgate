@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import TaskEvaluatorPicker from './TaskEvaluatorPicker.vue';
 import AgentTargetPicker, { type AgentTargetSelection } from './AgentTargetPicker.vue';
-import { agentDirectory } from '../../../api/agent-platform';
+import { agentDirectory, localAgentDirectory } from '../../../api/agent-platform';
+import { useAuthStore } from '../../../stores/modules/auth';
 import { ApiError, httpRequest } from '../../../utils/request';
 import { assertLocallyEnabled } from '../utils/evaluator-preferences';
 import TargetStructure from './TargetStructure.vue';
@@ -32,6 +33,12 @@ const taskKind = ref<'single' | 'ab'>('single'),
   includeStatic = ref(false);
 const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
 const platformSelection = ref<AgentTargetSelection | null>(null);
+const auth = useAuthStore();
+const platformDirectory = computed(() =>
+  auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
+);
+const platformToken = computed(() => (auth.loginMode === 'bank' ? auth.token : 'local'));
+const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId : ''));
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   platformSelection.value = selection;
 }
@@ -367,7 +374,7 @@ async function submit() {
   const platform =
     taskKind.value === 'single' ? platformPicker.value?.readSubmissionSelection() : null;
   if (taskKind.value === 'single' && !platform) {
-    formError.value = '请登录并完整选择被测智能体及版本。';
+    formError.value = '请完整选择被测智能体及版本。';
     return;
   }
   formError.value = '';
@@ -470,6 +477,23 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
+    if (platform) {
+      const incompatible = exact.cases.filter(
+        (c) =>
+          Object.keys(c.initial_state ?? {}).length > 0 ||
+          c.turns.some(
+            (t: { input?: Record<string, unknown> }) =>
+              !t.input ||
+              Object.keys(t.input).length !== 1 ||
+              typeof t.input.txt !== 'string' ||
+              !t.input.txt.trim(),
+          ),
+      );
+      if (incompatible.length)
+        invalid(
+          `所选评测集有 ${incompatible.length} 条用例包含业务初始状态或非纯文本输入，平台目标仅支持纯文本（txt）用例；请选择如“平台模拟验收”类评测集。`,
+        );
+    }
     const chosen = snapshot.chosen;
     if (chosen.length !== snapshot.evaluatorIds.length) invalid('所选评估器已不可用，请重新选择。');
     try {
@@ -496,7 +520,7 @@ async function submit() {
         headers: { 'X-Agent-Platform-Token': platform.token },
         data: {
           target: {
-            team_id: target.teamId,
+            ...(target.teamId ? { team_id: target.teamId } : {}),
             agent_id: target.agentId,
             type_group: target.typeGroup,
             agent_version: target.agentVersion,
@@ -676,7 +700,9 @@ onMounted(() => void openCreate(props.source));
         v-if="taskKind === 'single'"
         ref="platformPicker"
         class="full"
-        :directory="agentDirectory"
+        :directory="platformDirectory"
+        :token="platformToken"
+        :team-id="platformTeamId"
         :disabled="submitting || formLoading"
         @selection-change="receivePlatformSelection"
       />

@@ -141,14 +141,18 @@ def resolve_platform_target(
     client, token, *, team_id, agent_id, type_group, agent_version, branch_id
 ):
     client.require_mock(token)
-    teams = client.pages("/web/ops/team/getTeamRole", token, wrapped=True)
-    if not any(row.get("teamId") == team_id for row in teams):
-        raise PermissionError("selected team is unavailable")
+    if team_id is not None:
+        teams = client.pages("/web/ops/team/getTeamRole", token, wrapped=True)
+        if not any(row.get("teamId") == team_id for row in teams):
+            raise PermissionError("selected team is unavailable")
+    agent_parameters = {"name": ""}
+    if team_id is not None:
+        agent_parameters["teamId"] = team_id
     agents = client.pages(
         "/web/agent/agents",
         token,
         wrapped=False,
-        parameters={"teamId": team_id, "name": ""},
+        parameters=agent_parameters,
         limit=1000,
     )
     agent = _one(agents, "id", agent_id)
