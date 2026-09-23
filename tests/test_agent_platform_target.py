@@ -62,7 +62,11 @@ def submission(dataset, mode, repetitions=1):
             "agent_id": "agent-" + mode,
             "type_group": "abcclaw" if mode == "claw" else "base/workflow",
             "agent_version": "2.0",
-            **({"branch_id": "branch-review"} if mode == "claw" else {}),
+            **(
+                {"branch_id": "branch-review"}
+                if mode == "claw"
+                else {"arrange_type": mode}
+            ),
         },
         "dataset_id": dataset,
         "dataset_version": 1,
@@ -125,6 +129,48 @@ def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch,
         if mode != "claw":
             assert len([e for e in peer.state.events if e["operation"] == "init"]) == repetitions
     assert b"test-private-token" not in path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "mode,expected_adapter,expected_config",
+    [
+        (
+            "base",
+            "inbank_chatabc",
+            {"arrange_type": "base", "agent_version": "2.0"},
+        ),
+        (
+            "workflow",
+            "inbank_chatabc",
+            {"arrange_type": "workflow", "agent_version": "2.0"},
+        ),
+        (
+            "claw",
+            "inbank_yunxia",
+            {"branch_id": "branch-review", "agent_version": "2.0"},
+        ),
+    ],
+)
+def test_inbank_submission_pins_real_adapter(
+    mode, expected_adapter, expected_config, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / "inbank.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    body = submission(seed(deps), mode)
+    body["max_parallel_cases"] = 1
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-platform/evaluations",
+            json=body,
+            headers={"X-Agent-Platform-Token": "inbank-private-token"},
+        )
+    assert response.status_code == 202, response.text
+    run = deps.repository.get_run(response.json()["data"]["run_ids"][0])
+    assert run.manifest.target.adapter_type == expected_adapter
+    assert run.manifest.target.invocation_config.to_dict() == expected_config
+    assert run.manifest.target.credential_ref
 
 
 def test_invalid_selection_and_dispatch_failure_preserve_truth(mock_peer, monkeypatch, tmp_path):
