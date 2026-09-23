@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from datetime import datetime
 from typing import Literal
 from uuid import uuid4
@@ -9,11 +12,56 @@ from uuid import uuid4
 from agentgate.application.credential_management import ApiKeyManagement
 from agentgate.application.evaluator_management import EvaluatorManagement
 from agentgate.application.run_management import RunManagement
-from agentgate.domain import EvaluationRun, TargetSnapshot, utcnow
+from agentgate.domain import EvaluationRun, TargetDescriptor, TargetRef, TargetSnapshot, utcnow
 from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.integrations.targets.agent_platform import PlatformClient, resolve_platform_target
 from agentgate.storage.repository import AgentGateRepository
+
+
+def _build_inbank_descriptor(
+    *,
+    team_id: str,
+    agent_id: str,
+    type_group: Literal["base/workflow", "abcclaw"],
+    agent_version: str,
+    arrange_type: Literal["base", "workflow"] | None,
+    branch_id: str | None,
+) -> TargetDescriptor:
+    identity = {
+        "team_id": team_id,
+        "agent_id": agent_id,
+        "type_group": type_group,
+        "branch_id": branch_id,
+    }
+    source_id = (
+        "inbank-platform-"
+        + hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:24]
+    )
+    metadata = {
+        **identity,
+        "arrange_type": arrange_type,
+        "runtime_type": "abcclaw" if type_group == "abcclaw" else arrange_type,
+        "simulated": False,
+    }
+    return TargetDescriptor(
+        ref=TargetRef(
+            source_id=source_id,
+            target_type="agent",
+            external_target_id=agent_id,
+            external_version_id=agent_version,
+        ),
+        display_name=agent_id,
+        metadata=metadata,
+        input_schema={
+            "type": "object",
+            "required": ["txt"],
+            "properties": {"txt": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
 
 
 def submit_platform_evaluation(
@@ -26,6 +74,7 @@ def submit_platform_evaluation(
     agent_id: str,
     type_group: Literal["base/workflow", "abcclaw"],
     agent_version: str,
+    arrange_type: Literal["base", "workflow"] | None,
     branch_id: str | None,
     dataset_id: str,
     dataset_version: int,
@@ -49,21 +98,54 @@ def submit_platform_evaluation(
         raise ValueError("invalid repetitions")
     if repository.get_dataset(dataset_id, user_team_id=user_team_id) is None:
         raise LookupError("dataset unavailable to caller")
-    client = PlatformClient.from_environment()
-    descriptor = resolve_platform_target(
-        client,
-        token,
-        team_id=team_id,
-        agent_id=agent_id,
-        type_group=type_group,
-        agent_version=agent_version,
-        branch_id=branch_id,
-    )
+    platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
+    if platform_mode == "mock":
+        client = PlatformClient.from_environment()
+        descriptor = resolve_platform_target(
+            client,
+            token,
+            team_id=team_id,
+            agent_id=agent_id,
+            type_group=type_group,
+            agent_version=agent_version,
+            branch_id=branch_id,
+        )
+        adapter_type = "agent_platform_mock"
+        invocation_config = descriptor.metadata
+    elif platform_mode == "inbank":
+        if max_parallel_cases != 1 or max_retries != 0:
+            raise ValueError("inbank execution requires concurrency 1 and retries 0")
+        if type_group == "abcclaw":
+            if branch_id is None or arrange_type is not None:
+                raise ValueError("invalid inbank abcclaw target")
+            adapter_type = "inbank_yunxia"
+            invocation_config = {
+                "branch_id": branch_id,
+                "agent_version": agent_version,
+            }
+        else:
+            if arrange_type not in {"base", "workflow"} or branch_id is not None:
+                raise ValueError("invalid inbank ChatABC target")
+            adapter_type = "inbank_chatabc"
+            invocation_config = {
+                "arrange_type": arrange_type,
+                "agent_version": agent_version,
+            }
+        descriptor = _build_inbank_descriptor(
+            team_id=team_id,
+            agent_id=agent_id,
+            type_group=type_group,
+            agent_version=agent_version,
+            arrange_type=arrange_type,
+            branch_id=branch_id,
+        )
+    else:
+        raise ConnectionError("agent platform mode must be mock or inbank")
     repository.save_target_descriptor(descriptor)
     task_id = str(uuid4())
     metadata = credentials.create_api_key(
         name="Platform task " + task_id,
-        provider_id="agent-platform-mock",
+        provider_id="agent-platform-" + platform_mode,
         scope="private",
         plaintext=token,
     )
@@ -72,9 +154,9 @@ def submit_platform_evaluation(
             ref=descriptor.ref,
             display_name=descriptor.display_name,
             descriptor_sha256=descriptor.content_sha256,
-            adapter_type="agent_platform_mock",
+            adapter_type=adapter_type,
             adapter_version="1",
-            invocation_config=descriptor.metadata,
+            invocation_config=invocation_config,
             credential_ref=metadata.id,
         )
         management = RunManagement(repository, evaluators)
@@ -90,16 +172,19 @@ def submit_platform_evaluation(
             scheduled_for=scheduled_for,
             persist=False,
         )
-        for case in run.manifest.execution_cases:
-            if case.initial_state:
-                raise ValueError("platform mock has no mutable initial business state")
-            for turn in case.turns:
-                if (
-                    set(turn.input) != {"txt"}
-                    or not isinstance(turn.input["txt"], str)
-                    or not turn.input["txt"].strip()
-                ):
-                    raise ValueError("platform case input requires nonblank txt only")
+        if platform_mode == "mock":
+            for case in run.manifest.execution_cases:
+                if case.initial_state:
+                    raise ValueError("platform mock has no mutable initial business state")
+                for turn in case.turns:
+                    if (
+                        set(turn.input) != {"txt"}
+                        or not isinstance(turn.input["txt"], str)
+                        or not turn.input["txt"].strip()
+                    ):
+                        raise ValueError(
+                            "platform case input requires nonblank txt only"
+                        )
         runs = [
             EvaluationRun(
                 id=task_id if index == 0 else str(uuid4()),
