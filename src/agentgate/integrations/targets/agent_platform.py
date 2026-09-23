@@ -156,14 +156,15 @@ def resolve_platform_target(
         limit=1000,
     )
     agent = _one(agents, "id", agent_id)
-    types = [agent.get(key) for key in ("agentType", "arrangeType") if agent.get(key)]
     groups = {
         "base": "base/workflow",
         "workflow": "base/workflow",
         "abcclaw": "abcclaw",
         "abcclaw2": "abcclaw",
     }
-    if not types or any(groups.get(value) != type_group for value in types):
+    # 与前端目录归一化一致：arrangeType 为权威分类，缺失时回退 agentType。
+    authoritative = agent.get("arrangeType") or agent.get("agentType")
+    if not authoritative or groups.get(authoritative) != type_group:
         raise ValueError("agent type does not match selection")
     if type_group == "base/workflow":
         if branch_id is not None:

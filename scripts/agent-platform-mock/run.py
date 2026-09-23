@@ -92,7 +92,7 @@ def main():
     python = str(ROOT / ".venv/bin/python")
     subprocess.run([python, str(Path(__file__).resolve()), "--seed"], env=env, cwd=ROOT, check=True)
     commands = {
-        "peer": [python, str(ROOT / "script/agent-platform-mock/server.py")],
+        "peer": [python, str(ROOT / "scripts/agent-platform-mock/server.py")],
         "redis": [
             "redis-server",
             "--bind",

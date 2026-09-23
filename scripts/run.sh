@@ -43,7 +43,7 @@ if [[ -z "${AGENTGATE_API_KEY_ENCRYPTION_KEY:-}" ]]; then
   key_file="$revision_root/runtime/credential.key"
   if [[ ! -f "$key_file" ]]; then
     umask 077
-    printf '%s' "$(.venv/bin/python -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" > "$key_file"
+    printf '%s' "$("$revision_root/.venv/bin/python" -c 'import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" > "$key_file"
   fi
   export AGENTGATE_API_KEY_ENCRYPTION_KEY="$(cat "$key_file")"
 fi

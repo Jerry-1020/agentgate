@@ -147,7 +147,7 @@ test('complete paginated team membership uses teamId, deduplicates identical row
   );
 });
 
-test('direct agent pages encode IDs and normalize known, missing, conflicting and unknown type fields', async ({
+test('direct agent pages encode IDs and prefer arrangeType when normalizing type fields', async ({
   page,
 }) => {
   const types = [
@@ -186,8 +186,8 @@ test('direct agent pages encode IDs and normalize known, missing, conflicting an
     'base/workflow',
     'abcclaw',
     'base/workflow',
-    null,
-    null,
+    'abcclaw',
+    'base/workflow',
     null,
   ]);
   expect(result.value[2]).toMatchObject({
@@ -697,6 +697,7 @@ test('personal space submits without a team_id field', async ({ page }) => {
     agent_id: 'workflow',
     type_group: 'base/workflow',
     agent_version: 'v1',
+    arrange_type: 'workflow',
   });
   expect('team_id' in submission.body.target).toBe(false);
 });
