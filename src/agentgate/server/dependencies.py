@@ -44,6 +44,7 @@ from agentgate.domain import (
     SkillAnalysisReport,
     TargetSnapshot,
 )
+from agentgate.evaluator.judge import JudgeModelClient
 from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.credentials.environment import (
     API_KEY_ENCRYPTION_KEY_ENV,
@@ -53,9 +54,6 @@ from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.integrations.job_dispatchers.configuration import create_dispatcher
 from agentgate.integrations.model_providers.environment import (
     load_judge_model_from_environment,
-)
-from agentgate.integrations.model_providers.openai_compatible import (
-    OpenAICompatibleModelClient,
 )
 from agentgate.integrations.observability import (
     InMemoryTraceCapture,
@@ -84,7 +82,7 @@ class ServerDependencies:
     api_keys: ApiKeyManagement | None
     dispatcher: JobDispatcher
     demo_state: dict[str, dict]
-    _judge_client: OpenAICompatibleModelClient | None = field(
+    _judge_client: JudgeModelClient | None = field(
         default=None,
         repr=False,
     )
