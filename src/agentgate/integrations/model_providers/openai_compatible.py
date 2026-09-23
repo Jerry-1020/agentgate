@@ -18,7 +18,6 @@ from agentgate.evaluator.judge import (
     JudgeResponse,
 )
 
-
 OutputTokenField = Literal["max_completion_tokens", "max_tokens"]
 RETRYABLE_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504})
 _OUTPUT_TOKEN_FIELDS = frozenset({"max_completion_tokens", "max_tokens"})
@@ -99,7 +98,7 @@ class OpenAICompatibleModelClient:
             f"base_url={self.base_url!r})"
         )
 
-    def __enter__(self) -> "OpenAICompatibleModelClient":
+    def __enter__(self) -> OpenAICompatibleModelClient:
         return self
 
     def __exit__(self, *_exc_info: object) -> None:
@@ -239,7 +238,7 @@ class OpenAICompatibleModelClient:
 
 
 __all__ = [
+    "RETRYABLE_STATUSES",
     "OpenAICompatibleModelClient",
     "OutputTokenField",
-    "RETRYABLE_STATUSES",
 ]
