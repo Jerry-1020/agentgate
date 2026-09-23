@@ -121,7 +121,7 @@ def test_api_to_real_worker_and_mysql(mysql_repository, mysql_config, monkeypatc
                     },
                 )
                 assert response.status_code == 202, response.text
-                run_id = response.json()["run_id"]
+                run_id = response.json()["data"]["run_id"]
                 deadline = time.monotonic() + 30
                 while True:
                     run = mysql_repository.get_run(run_id)

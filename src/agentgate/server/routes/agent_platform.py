@@ -26,6 +26,7 @@ def nonblank(value: str) -> str:
 
 Identifier = Annotated[str, Field(strict=True), AfterValidator(nonblank)]
 TypeGroup = Literal["base/workflow", "abcclaw"]
+ArrangeType = Literal["base", "workflow"]
 
 
 class PlatformTargetInput(BaseModel):
@@ -35,6 +36,7 @@ class PlatformTargetInput(BaseModel):
     agent_id: Identifier
     type_group: TypeGroup
     agent_version: Identifier
+    arrange_type: ArrangeType | None = None
     branch_id: Identifier | None = None
 
     @model_validator(mode="after")
@@ -42,8 +44,13 @@ class PlatformTargetInput(BaseModel):
         if self.type_group == "abcclaw":
             if self.branch_id is None:
                 raise ValueError("abcclaw requires branch_id")
-        elif "branch_id" in self.model_fields_set:
-            raise ValueError("base/workflow must omit branch_id")
+            if "arrange_type" in self.model_fields_set:
+                raise ValueError("abcclaw must omit arrange_type")
+        else:
+            if self.arrange_type is None:
+                raise ValueError("base/workflow requires arrange_type")
+            if "branch_id" in self.model_fields_set:
+                raise ValueError("base/workflow must omit branch_id")
         return self
 
 
@@ -103,6 +110,7 @@ class SubmitPlatformEvaluation(Protocol):
         agent_id: str,
         type_group: TypeGroup,
         agent_version: str,
+        arrange_type: ArrangeType | None,
         branch_id: str | None,
         dataset_id: str,
         dataset_version: int,
@@ -182,6 +190,7 @@ async def launch_platform_evaluation(request: Request) -> JSONResponse:
             agent_id=inputs.target.agent_id,
             type_group=inputs.target.type_group,
             agent_version=inputs.target.agent_version,
+            arrange_type=inputs.target.arrange_type,
             branch_id=inputs.target.branch_id,
             dataset_id=inputs.dataset_id,
             dataset_version=inputs.dataset_version,

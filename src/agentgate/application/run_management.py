@@ -22,11 +22,12 @@ from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.run.engine import RunEngine, TraceResolver
 from agentgate.run.retry import retry_delay_seconds
 from agentgate.run.target_protocol import TargetAdapterProtocol
-from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
+from agentgate.storage.repository import AgentGateRepository
 
 from .dataset_management import DatasetManagement
 from .evaluator_management import EvaluatorManagement
+from .run_scheduling import MAX_CONCURRENT_RUNS_PER_API_KEY, MAX_DISPATCH_ATTEMPTS
 from .target_catalog import TargetCatalog
 
 
@@ -120,6 +121,16 @@ class RunManagement:
         )
         if persist:
             self.repository.save_run(run)
+        key_display = "None" if run.api_key is None else "***"
+        LOGGER.info(
+            "Run created: run_id=%s status=%s dataset_id=%s case_count=%d user_id=%s api_key=%s",
+            run.id,
+            run.status.value,
+            dataset.dataset_id,
+            len(run.manifest.execution_cases),
+            user_id,
+            key_display,
+        )
         return run
 
     def create_rerun(self, source_run_id: str, *, persist: bool = True) -> EvaluationRun:
@@ -135,6 +146,7 @@ class RunManagement:
         if source.status in {
             RunStatus.SCHEDULED,
             RunStatus.PENDING,
+            RunStatus.WAITING,
             RunStatus.RUNNING,
         }:
             raise ValueError(
@@ -184,13 +196,35 @@ class RunManagement:
             raise ValueError(f"unknown EvaluationRun: {run_id}")
         if run.status is not RunStatus.PENDING:
             raise ValueError("only a pending EvaluationRun can be dispatched")
+
+        active = self.repository.count_active_runs_by_api_key(run.api_key)
+        if active > MAX_CONCURRENT_RUNS_PER_API_KEY:
+            waiting = transition_run(run, RunStatus.WAITING)
+            self.repository.save_run(waiting)
+            key_display = "None" if run.api_key is None else "***"
+            LOGGER.warning(
+                "Run throttled to waiting: run_id=%s active_count=%d max=%d api_key=%s",
+                run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY, key_display,
+            )
+            return waiting
+
         try:
             dispatcher.submit(run.id)
         except Exception as exc:
+            attempts = run.dispatch_attempts + 1
+            if attempts < MAX_DISPATCH_ATTEMPTS:
+                waiting = transition_run(run, RunStatus.WAITING)
+                waiting = waiting.model_copy(update={"dispatch_attempts": attempts})
+                self.repository.save_run(waiting)
+                LOGGER.warning(
+                    "Run dispatch failed, retrying: run_id=%s attempt=%d/%d error=%s",
+                    run.id, attempts, MAX_DISPATCH_ATTEMPTS, type(exc).__name__,
+                )
+                return waiting
             failed = transition_run(
                 run,
                 RunStatus.FAILED,
-                error=f"Run dispatch failed: {type(exc).__name__}",
+                error=f"Run dispatch failed after {attempts} attempts: {type(exc).__name__}",
             )
             try:
                 self.repository.save_run(failed)
@@ -198,7 +232,15 @@ class RunManagement:
                 current = self.repository.get_run(run.id)
                 if current is None or current.status is RunStatus.PENDING:
                     raise
+            LOGGER.error(
+                "Run dispatch exhausted retries: run_id=%s attempts=%d status=failed",
+                run.id, attempts,
+            )
             raise RuntimeError("Run dispatch failed") from exc
+        LOGGER.info(
+            "Run dispatched: run_id=%s active_count=%d max=%d",
+            run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY,
+        )
         return run
 
     def cancel_run(
@@ -236,6 +278,10 @@ class RunManagement:
 
         if not was_dispatched:
             return cancelled
+        LOGGER.info(
+            "Run cancelled: run_id=%s user_id=%s",
+            cancelled.id, info.user_id if info else "",
+        )
         try:
             dispatcher.cancel(cancelled.id)
         except Exception as exc:

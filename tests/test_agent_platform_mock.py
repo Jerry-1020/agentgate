@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def load_peer():
-    path = Path(__file__).resolve().parents[1] / "script/agent-platform-mock/server.py"
+    path = Path(__file__).resolve().parents[1] / "scripts/agent-platform-mock/server.py"
     spec = importlib.util.spec_from_file_location("platform_mock_peer", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

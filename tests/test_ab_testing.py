@@ -167,8 +167,8 @@ def test_create_ab_runs_dispatches_candidate_after_baseline_failure(tmp_path) ->
         pair.baseline_run.id,
         pair.candidate_run.id,
     ]
-    assert pair.baseline_run.status is RunStatus.FAILED
-    assert pair.baseline_run.error == "Run dispatch failed: ConnectionError"
+    assert pair.baseline_run.status is RunStatus.WAITING
+    assert pair.baseline_run.dispatch_attempts == 1
     assert pair.candidate_run.status is RunStatus.PENDING
 
 

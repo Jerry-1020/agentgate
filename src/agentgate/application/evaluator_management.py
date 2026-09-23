@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -78,6 +79,9 @@ class EvaluatorCatalogConflict(ValueError):
 
 class BuiltinEvaluatorMutation(ValueError):
     """A caller attempted to mutate a source-controlled Evaluator."""
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class EvaluatorManagement:
@@ -500,12 +504,23 @@ class EvaluatorManagement:
         trace: Trace,
         evaluator_specs: tuple[EvaluatorSpec, ...],
     ) -> tuple[EvaluationResult, ...]:
-        return execute_evaluators(
+        spec_ids = ",".join(spec.id for spec in evaluator_specs)
+        LOGGER.info(
+            "Evaluate case: run_id=%s case_id=%s evaluator_count=%d specs=[%s]",
+            trace.run_id, case.id, len(evaluator_specs), spec_ids,
+        )
+        results = execute_evaluators(
             case,
             trace,
             evaluator_specs,
             self._implementations,
         )
+        outcomes = ",".join(result.outcome.value for result in results)
+        LOGGER.info(
+            "Evaluate case done: run_id=%s case_id=%s results=%d outcomes=[%s]",
+            trace.run_id, case.id, len(results), outcomes,
+        )
+        return results
 
     def _user_evaluator(self, evaluator_id: str) -> Evaluator:
         if evaluator_id in self._builtin_evaluators:

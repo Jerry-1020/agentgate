@@ -248,12 +248,7 @@ function normalizeAgent(value: unknown, status: number): PlatformAgent {
   const row = object(value, status);
   const agentType = optionalText(row.agentType, status);
   const arrangeType = optionalText(row.arrangeType, status);
-  const present = [agentType, arrangeType].filter((value): value is string => !!value);
-  const groups = present.map(group);
-  const typeGroup =
-    groups.length && groups.every((value) => value !== null && value === groups[0])
-      ? groups[0]
-      : null;
+  const typeGroup = arrangeType ? group(arrangeType) : group(agentType);
   return {
     agentId: text(row.id, status),
     agentName: text(row.name, status),

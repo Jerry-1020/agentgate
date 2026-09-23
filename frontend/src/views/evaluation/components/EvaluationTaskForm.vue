@@ -219,7 +219,7 @@ watch(repetitions, (v) => {
 });
 const datasetVersions = ref<{ version: number; cases: any[] }[]>([]),
   selectedDatasetVersion = ref<number | null>(null);
-const concurrency = ref(2),
+const concurrency = ref(1),
   timeout = ref(300),
   retries = ref(0),
   formError = ref('');
@@ -247,7 +247,7 @@ async function openCreate(source?: {
   scope.value = source?.caseIds ? 'selected' : 'all';
   selectedCaseIds.value = source?.caseIds ?? [];
   repetitions.value = 1;
-  concurrency.value = 2;
+  concurrency.value = 1;
   timeout.value = 300;
   retries.value = 0;
   launchMode.value = 'now';
@@ -524,7 +524,11 @@ async function submit() {
             agent_id: target.agentId,
             type_group: target.typeGroup,
             agent_version: target.agentVersion,
-            ...(target.typeGroup === 'abcclaw' ? { branch_id: target.branchId } : {}),
+            ...(target.typeGroup === 'abcclaw'
+              ? { branch_id: target.branchId }
+              : {
+                  arrange_type: target.platformArrangeType ?? target.platformAgentType,
+                }),
           },
           dataset_id: snapshot.datasetId,
           dataset_version: snapshot.datasetVersion,

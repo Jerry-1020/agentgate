@@ -1,0 +1,132 @@
+  name: PR Tests
+
+  on:
+    pull_request:
+      branches: [refactor-1]
+    workflow_dispatch:
+
+  permissions:
+    contents: read
+
+  concurrency:
+    group: pr-tests-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+  jobs:
+    backend:
+      name: backend-tests
+      runs-on: ubuntu-24.04
+      timeout-minutes: 30
+
+      services:
+        mysql:
+          image: mysql:8.0
+          env:
+            MYSQL_ROOT_PASSWORD: ci-root-password
+            MYSQL_DATABASE: eric_agentgate_test
+            MYSQL_USER: agentgate_ci
+            MYSQL_PASSWORD: ci-test-password
+          ports:
+            - 3306:3306
+          options: >-
+            --health-cmd="mysqladmin ping -h 127.0.0.1"
+            --health-interval=5s
+            --health-timeout=5s
+            --health-retries=30
+
+      env:
+        AGENT_TASK_DISPATCHER_TYPE: celery
+        AGENTGATE_DB_TYPE: sqlite
+        AGENTGATE_DB: ${{ runner.temp }}/agentgate.db
+        AGENTGATE_LOG_PATH: ${{ runner.temp }}/agentgate-logs
+
+        AGENTGATE_REDIS_MODE: single
+        AGENTGATE_REDIS_URL: redis://127.0.0.1:6379/0
+        AGENTGATE_REDIS_CLUSTER_TEST_URL: redis://127.0.0.1:7000/0
+
+        AGENTGATE_TEST_MYSQL_URL: mysql+pymysql://127.0.0.1:3306/eric_agentgate_test
+        AGENTGATE_TEST_MYSQL_USER: agentgate_ci
+        AGENTGATE_TEST_MYSQL_PASSWORD: ci-test-password
+
+      steps:
+        - uses: actions/checkout@v4
+
+        - name: Install uv and Python
+          uses: astral-sh/setup-uv@v6
+          with:
+            python-version: "3.12"
+
+        - name: Install dependencies
+          run: uv sync --locked --extra test --dev
+
+        - name: Install Redis and MySQL client
+          run: |
+            sudo apt-get update
+            sudo apt-get install -y redis-server default-mysql-client
+
+        - name: Start standalone Redis
+          run: |
+            if ! redis-cli -p 6379 ping; then
+              redis-server --port 6379 --daemonize yes \
+                --save "" --appendonly no \
+                --dir "$RUNNER_TEMP"
+            fi
+            redis-cli -p 6379 ping
+
+        - name: Start isolated Redis Cluster
+          run: |
+            for port in 7000 7001 7002; do
+              node_dir="$RUNNER_TEMP/redis-cluster-$port"
+              mkdir -p "$node_dir"
+              redis-server \
+                --port "$port" \
+                --bind 127.0.0.1 \
+                --cluster-enabled yes \
+                --cluster-config-file nodes.conf \
+                --cluster-node-timeout 5000 \
+                --daemonize yes \
+                --save "" \
+                --appendonly no \
+                --dir "$node_dir"
+            done
+
+            redis-cli --cluster create \
+              127.0.0.1:7000 \
+              127.0.0.1:7001 \
+              127.0.0.1:7002 \
+              --cluster-replicas 0 \
+              --cluster-yes
+
+            for attempt in $(seq 1 30); do
+              if redis-cli -p 7000 cluster info |
+                grep -q 'cluster_state:ok'; then
+                exit 0
+              fi
+              sleep 1
+            done
+            exit 1
+
+        - name: Initialize MySQL test schema
+          env:
+            MYSQL_PWD: ci-test-password
+          run: |
+            mysql \
+              --host=127.0.0.1 \
+              --port=3306 \
+              --user=agentgate_ci \
+              eric_agentgate_test < scripts/init.sql
+
+        - name: Run complete backend suite
+          run: |
+            mkdir -p test-reports
+            uv run --no-sync pytest tests \
+              -q -ra \
+              --junitxml=test-reports/backend.xml
+
+        - name: Upload test report
+          if: always()
+          uses: actions/upload-artifact@v4
+          with:
+            name: backend-test-report
+            path: test-reports/
+            if-no-files-found: ignore

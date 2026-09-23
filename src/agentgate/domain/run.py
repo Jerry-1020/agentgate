@@ -29,6 +29,7 @@ class RunStatus(StrEnum):
 
     SCHEDULED = "scheduled"
     PENDING = "pending"
+    WAITING = "waiting"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -157,7 +158,8 @@ class EvaluationRun(DomainModel):
     user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
     user_id: str = ""  # 用户 ID（创建者标识）
     user_name: str = ""  # 用户姓名（创建者显示名）
-    api_key: None = None  # Per-run raw credentials are not supported by the executor.
+    api_key: str | None = None
+    dispatch_attempts: int = Field(default=0, ge=0)
 
     @field_validator("id")
     @classmethod
@@ -201,6 +203,9 @@ class EvaluationRun(DomainModel):
         elif self.status == RunStatus.PENDING:
             if self.started_at is not None or self.completed_at is not None or self.error:
                 raise ValueError("pending EvaluationRun cannot contain execution outcome")
+        elif self.status == RunStatus.WAITING:
+            if self.started_at is not None or self.completed_at is not None or self.error:
+                raise ValueError("waiting EvaluationRun cannot contain execution outcome")
         elif self.status == RunStatus.RUNNING:
             if self.started_at is None or self.completed_at is not None or self.error:
                 raise ValueError("running EvaluationRun requires only started_at")
@@ -220,7 +225,8 @@ class EvaluationRun(DomainModel):
 
 _ALLOWED_TRANSITIONS = {
     RunStatus.SCHEDULED: {RunStatus.PENDING, RunStatus.CANCELLED},
-    RunStatus.PENDING: {RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED},
+    RunStatus.PENDING: {RunStatus.WAITING, RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED},
+    RunStatus.WAITING: {RunStatus.PENDING, RunStatus.FAILED, RunStatus.CANCELLED},
     RunStatus.RUNNING: {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
 }
 
@@ -240,8 +246,12 @@ def transition_run(
         raise ValueError("transition occurred_at must not precede Run activity")
 
     updates: dict[str, object] = {"status": new_status, "error": None}
-    if new_status == RunStatus.PENDING:
-        if run.scheduled_for is None or timestamp < run.scheduled_for:
+    if new_status == RunStatus.WAITING:
+        pass
+    elif new_status == RunStatus.PENDING:
+        if run.status == RunStatus.SCHEDULED and (
+            run.scheduled_for is None or timestamp < run.scheduled_for
+        ):
             raise ValueError("scheduled EvaluationRun cannot be released before scheduled_for")
     elif new_status == RunStatus.RUNNING:
         if error is not None:

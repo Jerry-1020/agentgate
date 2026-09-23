@@ -132,7 +132,12 @@ def _models(db: Connection, table: Table, model_type: type[M], *, lock=False, **
     models = []
     for row in _rows(db, table, lock=lock, **filters):
         model = model_type.model_validate_json(row["payload"])
-        if any(row[name] != value for name, value in _values(table, model).items()):
+        indexed = {
+            name: value
+            for name, value in _values(table, model).items()
+            if name not in ("payload", "metadata_payload")
+        }
+        if any(row[name] != value for name, value in indexed.items()):
             raise ValueError("stored indexed columns do not match payload")
         models.append(model)
     return models
@@ -772,6 +777,24 @@ class MySQLRepository:
                 counts[run.status] += 1
         return counts
 
+    def count_active_runs_by_api_key(self, api_key: str | None) -> int:
+        with self._transaction() as db:
+            active: list[EvaluationRun] = []
+            for status in (RunStatus.PENDING, RunStatus.RUNNING):
+                active.extend(_models(db, s.runs, EvaluationRun, status=status))
+        return sum(1 for run in active if run.api_key == api_key)
+
+    def claim_waiting_run(
+        self, run_id: str, claimed_at: datetime
+    ) -> EvaluationRun | None:
+        with self._transaction() as db:
+            run = _one(db, s.runs, EvaluationRun, id=run_id, lock=True)
+            if run is None or run.status != RunStatus.WAITING:
+                return None
+            pending = transition_run(run, RunStatus.PENDING, occurred_at=claimed_at)
+            _update(db, s.runs, pending)
+            return pending
+
     def claim_pending_run(self, run_id: str, started_at: datetime) -> EvaluationRun | None:
         with self._transaction() as db:
             run = _one(db, s.runs, EvaluationRun, id=run_id, lock=True)
@@ -804,6 +827,7 @@ class MySQLRepository:
             if run is None or run.status not in {
                 RunStatus.PENDING,
                 RunStatus.SCHEDULED,
+                RunStatus.WAITING,
                 RunStatus.RUNNING,
             }:
                 return None
