@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS agentgate_runs (
     INDEX ix_runs_status_created (status, created_at),
     INDEX ix_runs_team_created (user_team_key, created_at),
     INDEX ix_runs_team_status (user_team_key, status, created_at),
-    INDEX ix_runs_apikey_status (api_key, status)
+    INDEX ix_runs_apikey_status (api_key(191), status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE IF NOT EXISTS agentgate_skill_analysis_reports (

@@ -56,7 +56,7 @@ def test_api_cli_and_worker_share_mysql_without_automatic_seed(
             },
         )
         assert response.status_code == 202, response.text
-        run_id = response.json()["run_id"]
+        run_id = response.json()["data"]["run_id"]
         assert dispatcher.run_ids == [run_id]
         assert jobs.execute_evaluation_run.run(run_id) == "completed"
         assert client.get(f"/api/runs/{run_id}").status_code == 200
