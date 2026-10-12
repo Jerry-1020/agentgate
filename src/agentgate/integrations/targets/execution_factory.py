@@ -1,9 +1,11 @@
 """Compose Target execution components with caller-owned resource cleanup."""
 
+import os
 from contextlib import ExitStack
 
 from agentgate.domain import TargetSnapshot
 from agentgate.integrations.observability import InMemoryTraceCapture
+from agentgate.integrations.observability.trace_server import BASE_URL_ENV, TraceServerClient
 from agentgate.integrations.targets.demo_loan import DemoLoanTargetAdapter
 from agentgate.integrations.targets.inbank.chatabc import (
     InbankChatABCTargetAdapter,
@@ -27,9 +29,25 @@ class TargetExecutionFactory:
     def create(
         target: TargetSnapshot,
         resources: ExitStack,
+        *,
+        trace_token: str | None = None,
     ) -> tuple[TargetAdapterProtocol, TraceResolver]:
         adapter: TargetAdapterProtocol
         resolver: TraceResolver
+        trace_client = None
+        if target.adapter_type in {
+            InbankChatABCTargetAdapter.adapter_type,
+            InbankYunxiaTargetAdapter.adapter_type,
+        }:
+            base_url = os.getenv(BASE_URL_ENV, "").strip()
+            if not base_url:
+                raise ValueError(f"{BASE_URL_ENV} is required for in-bank execution")
+            trace_client = TraceServerClient(
+                base_url,
+                mode="inbank",
+                token=trace_token,
+                source_timezone=os.getenv("AGENTGATE_TRACE_SERVER_SOURCE_TIMEZONE", "").strip() or None,
+            )
         if target.adapter_type == DemoLoanTargetAdapter.adapter_type:
             capture = InMemoryTraceCapture()
             resources.callback(capture.shutdown)
@@ -39,12 +57,12 @@ class TargetExecutionFactory:
             adapter = LocalBankAdapter()
             resolver = resolve_local_bank_trace
         elif target.adapter_type == InbankChatABCTargetAdapter.adapter_type:
-            chatabc = InbankChatABCTargetAdapter(load_chatabc_settings())
+            chatabc = InbankChatABCTargetAdapter(load_chatabc_settings(), trace_client=trace_client)
             resources.callback(chatabc.close)
             adapter = chatabc
             resolver = resolve_chatabc_trace
         elif target.adapter_type == InbankYunxiaTargetAdapter.adapter_type:
-            yunxia = InbankYunxiaTargetAdapter(load_yunxia_settings())
+            yunxia = InbankYunxiaTargetAdapter(load_yunxia_settings(), trace_client=trace_client)
             resources.callback(yunxia.close)
             adapter = yunxia
             resolver = resolve_yunxia_trace

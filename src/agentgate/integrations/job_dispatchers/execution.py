@@ -18,7 +18,6 @@ from agentgate.integrations.targets.execution_factory import TargetExecutionFact
 from agentgate.storage.configuration import create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -43,7 +42,37 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
         raise ValueError(f"{target.adapter_type} execution requires no retries and serial cases")
 
     with ExitStack() as resources:
-        if target.adapter_type != PlatformAdapter.adapter_type:
+        if target.adapter_type in {
+            PlatformAdapter.adapter_type, "inbank_chatabc", "inbank_yunxia",
+        }:
+            token = ""
+            label = "Platform" if target.adapter_type == PlatformAdapter.adapter_type else "In-bank"
+            try:
+                reference = target.credential_ref
+                if reference is None:
+                    raise ValueError("task credential reference is missing")
+                credentials = ApiKeyManagement(repository, load_api_key_encryptor())
+                token = credentials.resolve_api_key(reference)
+                if target.adapter_type == PlatformAdapter.adapter_type:
+                    adapter = PlatformAdapter(PlatformClient.from_environment(), token)
+                    trace_resolver = resolve_platform_trace
+                    resources.callback(setattr, adapter, "token", "")
+                else:
+                    adapter, trace_resolver = TargetExecutionFactory.create(
+                        target, resources, trace_token=token,
+                    )
+            except (ValueError, LookupError, ConnectionError):
+                LOGGER.error("%s credential or configuration unavailable: run_id=%s", label, run.id)
+                failed = transition_run(
+                    run,
+                    RunStatus.FAILED,
+                    error=f"{label} execution configuration or credential is unavailable",
+                )
+                repository.save_run(failed)
+                return failed.status.value
+            finally:
+                token = ""
+        else:
             adapter, trace_resolver = TargetExecutionFactory.create(target, resources)
         configured_judge = load_judge_model_from_environment()
         if configured_judge is not None:
@@ -58,37 +87,6 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                 judge_credential_ref=configured_judge.credential_ref,
             )
         )
-        if target.adapter_type == PlatformAdapter.adapter_type:
-            try:
-                reference = target.credential_ref
-                if reference is None:
-                    raise ValueError("platform credential reference is missing")
-                credentials = ApiKeyManagement(repository, load_api_key_encryptor())
-                token = credentials.resolve_api_key(reference)
-                adapter = PlatformAdapter(PlatformClient.from_environment(), token)
-            except (ValueError, LookupError, ConnectionError):
-                LOGGER.error(
-                    "Platform credential or configuration unavailable: run_id=%s",
-                    run.id,
-                )
-                failed = transition_run(
-                    run,
-                    RunStatus.FAILED,
-                    error="Platform execution configuration or credential is unavailable",
-                )
-                repository.save_run(failed)
-                return failed.status.value
-            try:
-                completed = RunManagement(repository, evaluator_management).execute_run(
-                    run.id,
-                    adapter,
-                    resolve_platform_trace,
-                )
-                return completed.status.value
-            finally:
-                adapter.token = ""
-                token = ""
-
         completed = RunManagement(repository, evaluator_management).execute_run(
             run.id,
             adapter,

@@ -3,7 +3,6 @@
 from unittest.mock import Mock
 
 import pytest
-from test_target_execution import trace_detail
 from test_target_execution_factory import target_snapshot
 
 from agentgate.domain import Case, CaseTurn
@@ -15,6 +14,25 @@ from agentgate.integrations.targets.inbank.evidence import (
     fetch_turn_evidence,
 )
 from agentgate.run.target_protocol import CaseExecutionRequest, TargetExecutionError
+
+
+def trace_detail(source, session, text):
+    start = "2026-10-08T00:00:00Z"
+    root = {"id": source, "projectId": "inbank-tests", "sessionId": session,
+            "name": "agent", "agentName": "test-pod", "input": {"txt": text},
+            "output": "answer", "status": "success", "spanCount": 4,
+            "durationMs": 5, "startedAt": start}
+    spans = []
+    for sid, parent, kind, name in [("root", None, "agent", "agent"),
+                                   ("skill", "root", "chain", "skill.review"),
+                                   ("llm", "skill", "llm", "model"),
+                                   ("tool", "skill", "tool", "credit_inquiry")]:
+        spans.append({"id": sid, "traceId": source, "eventId": sid,
+                      "parentSpanId": parent, "spanType": kind, "name": name,
+                      "toolName": name if kind == "tool" else None,
+                      "status": "success", "durationMs": 1, "startedAt": start,
+                      "input": {"txt": text}, "output": "answer"})
+    return {"trace": root, "spans": spans, "observations": []}
 
 
 def chat(reference=None):

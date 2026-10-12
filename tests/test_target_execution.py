@@ -1,50 +1,65 @@
 """Real in-bank adapters execute persisted Runs through the shared engine."""
 
+import base64
 import json
 import logging
-import threading
 from contextlib import closing
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from copy import deepcopy
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import Mock
-from urllib.parse import unquote
 
 import pytest
+from fastapi.testclient import TestClient
+from test_agent_platform_target import RecordingDispatcher, submission
+from test_inbank_trace_server_adapters import _TraceServer, _Transport
 from test_run_engine import pending_run
 from test_target_execution_factory import configure_inbank, target_snapshot
+from test_trace_server_client import DETAIL, Response, sparse_inbank_detail
 
+from agentgate.application import ResultReader
+from agentgate.application.credential_management import ApiKeyManagement
 from agentgate.domain import (
     Case,
     CaseTurn,
     EvaluationRun,
+    EvaluatorSpec,
     RunStatus,
     TargetSnapshot,
     transition_run,
 )
+from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
 from agentgate.integrations.job_dispatchers import execution
 from agentgate.integrations.job_dispatchers.celery import execute_evaluation_run
+from agentgate.integrations.observability.trace_server import TraceServerClient
+from agentgate.integrations.targets import execution_factory
 from agentgate.integrations.targets.inbank import chatabc, yunxia
-from agentgate.run.target_protocol import TargetExecutionError
+from agentgate.run.target_protocol import (
+    CaseExecutionRequest,
+    CaseExecutionStatus,
+    TargetExecutionError,
+)
+from agentgate.server.app import create_app
 from agentgate.storage.sqlite import SQLiteRepository
 
 
-class RecordingTransport:
+class RecordingTransport(_Transport):
     """Return current adapter-contract fixtures without connecting to a bank."""
 
     def __init__(self):
-        self.evidence = {}
-        self.trace_fault = None
-        self.query_count = 0
         self.created = 0
         self.create_requests = []
         self.deleted = 0
         self.delete_requests = []
         self.sessions = []
         self.messages = []
+        self.request_ids = []
         self.fail_chat = False
         self.chat_error_event = False
         self.yunxia_auxiliary_events = False
         self.yunxia_error_event = False
+        self.arrange_type = "base"
+        self.missing_trace = False
 
     def request_json(self, method, url, *, payload=None, **kwargs):
         if "createAgent" in url:
@@ -72,16 +87,21 @@ class RecordingTransport:
     def request_bytes(self, method, url, *, payload, headers, **kwargs):
         if self.fail_chat:
             raise TargetExecutionError("rejected", "test chat failed")
+        self.request_ids.append(headers["X-Request-ID"])
         if url.endswith("/chat"):
+            assert payload["requestId"] == headers["X-Request-ID"]
             self.messages.append(payload["data"])
             if self.chat_error_event:
                 return (
-                    "event: error\n"
-                    'data: {"errorCode": "BASE-001", '
-                    '"message": "customer base failed"}\n\n'
-                ).encode()
-            events = [("message", {"content": "answer", "node_id": "end",
-                "additional_kwargs": {"node_id": "end", "node_output": "answer"}})]
+                    b"event: error\n"
+                    b'data: {"errorCode": "BASE-001", '
+                    b'"message": "customer base failed"}\n\n'
+                )
+            message = (
+                {"node_id": "end", "additional_kwargs": {"node_output": {"output": "answer"}}}
+                if self.arrange_type == "workflow" else {"content": "answer"}
+            )
+            events = [("message", message)]
         else:
             assert url.endswith("/api/v1/message")
             self.messages.append(payload)
@@ -104,117 +124,37 @@ class RecordingTransport:
                         },
                     ),
                     ("message", {"status": "completed", "output": "answer"}),
-                    ("done", "[DONE]"),
                 ]
-            reference = self.trace_reference(payload, headers)
-            events.insert(-1 if events[-1][0] == "done" else len(events), ("trace", reference))
-            return "".join(
-                f"event: {name}\ndata: "
-                f"{data if data == '[DONE]' else json.dumps(data)}\n\n"
-                for name, data in events
-            ).encode()
-        events.append(("trace", self.trace_reference(payload["data"], headers)))
+        if not self.missing_trace:
+            events.append(("trace", {
+                "project_id": "customer-project",
+                "trace_id": headers["X-Request-ID"],
+            }))
         return (
             "".join(
                 f"event: {name}\ndata: {json.dumps(data)}\n\n"
                 for name, data in events
             )
-            + "event: done\ndata: [DONE]\n\n"
+            + ("" if self.yunxia_auxiliary_events else "event: done\ndata: [DONE]\n\n")
         ).encode()
 
 
-    def trace_reference(self, payload, headers):
-        source = f"source-{len(self.messages)}"
-        session = payload.get("session_id", payload.get("sessionId"))
-        reference = {"project_id": "inbank-tests", "trace_id": source,
-                     "session_id": session, "request_id": headers["X-Request-ID"]}
-        detail = trace_detail(source, session, payload["txt"])
-        if self.trace_fault == "session":
-            detail["trace"]["sessionId"] = "different-session"
-        elif self.trace_fault == "input":
-            detail["trace"]["input"] = {"txt": "wrong turn"}
-        elif self.trace_fault == "output":
-            detail["trace"]["output"] = "wrong answer"
-        elif self.trace_fault == "project":
-            reference["project_id"] = "another-project"
-        elif self.trace_fault == "missing":
-            reference = {}
-        elif self.trace_fault == "incomplete":
-            detail["spans"].pop()
-        self.evidence[source] = detail
-        return reference
-
-
-def trace_detail(source, session, text):
-    start = "2026-10-08T00:00:00Z"
-    root = {"id": source, "projectId": "inbank-tests", "sessionId": session,
-            "name": "agent", "agentName": "test-pod", "input": {"txt": text},
-            "output": "answer", "status": "success", "spanCount": 4,
-            "durationMs": 5, "startedAt": start}
-    spans = []
-    for sid, parent, kind, name in [("root", None, "agent", "agent"),
-                                   ("skill", "root", "chain", "skill.review"),
-                                   ("llm", "skill", "llm", "model"),
-                                   ("tool", "skill", "tool", "credit_inquiry")]:
-        spans.append({"id": sid, "traceId": source, "eventId": sid,
-                      "parentSpanId": parent, "spanType": kind, "name": name,
-                      "toolName": name if kind == "tool" else None,
-                      "status": "success", "durationMs": 1, "startedAt": start,
-                      "input": {"txt": text}, "output": "answer"})
-    return {"trace": root, "spans": spans, "observations": []}
-
-
-@pytest.fixture
-def trace_endpoint(monkeypatch):
-    transport = RecordingTransport()
-    monkeypatch.setenv("AGENTGATE_INBANK_TRACE_PROJECT_ID", "inbank-tests")
-    monkeypatch.setenv("AGENTGATE_TRACE_SERVER_TOKEN", "trace-service-test-credential")
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            assert self.headers.get("Authorization") == "Bearer trace-service-test-credential"
-            transport.query_count += 1
-            parts = self.path.split("/")
-            assert parts[4] == "inbank-tests"
-            source = unquote(parts[6])
-            if transport.trace_fault == "unavailable":
-                self.send_response(503)
-                self.end_headers()
-                return
-            detail = transport.evidence[source]
-            value = {"items": [{"eventId": "llm-request", "spanId": "llm",
-                                "model": "test-model", "input": {"messages": []},
-                                "output": "answer", "startedAt": "2026-10-08T00:00:00Z",
-                                "status": "success"}]} if self.path.endswith("/llm_requests") else detail
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(json.dumps(value).encode())
-
-        def log_message(self, *_args):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    monkeypatch.setenv("AGENTGATE_TRACE_SERVER_URL", f"http://127.0.0.1:{server.server_port}")
-    try:
-        yield transport
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-@pytest.fixture(params=["inbank_chatabc", "inbank_workflow", "inbank_yunxia"])
-def persisted_target(request, tmp_path, monkeypatch, trace_endpoint):
-    adapter_type = "inbank_chatabc" if request.param == "inbank_workflow" else request.param
+@pytest.fixture(params=["base", "workflow", "yunxia"])
+def persisted_target(request, tmp_path, monkeypatch):
+    adapter_type = "inbank_yunxia" if request.param == "yunxia" else "inbank_chatabc"
     configure_inbank(monkeypatch, adapter_type)
     monkeypatch.setenv("AGENTGATE_DB_TYPE", "sqlite")
     monkeypatch.setenv("AGENTGATE_DB", str(tmp_path / "execution.db"))
+    monkeypatch.setenv("AGENTGATE_API_KEY_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"k" * 32).decode())
     monkeypatch.setattr(execution, "load_judge_model_from_environment", lambda: None)
-    transport = trace_endpoint
+    transport = RecordingTransport()
+    transport.arrange_type = request.param
     module = chatabc if adapter_type == "inbank_chatabc" else yunxia
-    monkeypatch.setattr(module, "_UrlLibTransport", lambda: transport)
+    for method in ("request", "post", "get"):
+        monkeypatch.setattr(module.requests, method, getattr(transport, method))
+    trace_server = _TraceServer()
+    trace_client_factory = Mock(return_value=trace_server)
+    monkeypatch.setattr(execution_factory, "TraceServerClient", trace_client_factory)
     cases = tuple(
         Case(
             id=f"case-{index}",
@@ -227,18 +167,24 @@ def persisted_target(request, tmp_path, monkeypatch, trace_endpoint):
         for index in range(2)
     )
     target = target_snapshot(adapter_type)
-    if request.param == "inbank_workflow":
+    if request.param == "workflow":
         values = target.model_dump(exclude={"content_sha256"})
         values["invocation_config"] = {"arrange_type": "workflow"}
         target = TargetSnapshot(**values)
-    original = pending_run(cases=cases, target=target)
-    run = EvaluationRun(
-        id="12345678-1234-1234-1234-abcdef987654",
-        manifest=original.manifest,
-    )
     with closing(SQLiteRepository(tmp_path / "execution.db")) as repository:
+        credentials = ApiKeyManagement(repository, execution.load_api_key_encryptor())
+        metadata = credentials.create_api_key(name="Bank task", provider_id="agent-platform-inbank",
+                                              scope="private", plaintext="bank-task-secret")
+        target = TargetSnapshot(**{
+            **target.model_dump(exclude={"content_sha256"}), "credential_ref": metadata.id,
+        })
+        original = pending_run(cases=cases, target=target)
+        run = EvaluationRun(id="12345678-1234-1234-1234-abcdef987654", manifest=original.manifest)
         repository.save_run(run)
-        yield SimpleNamespace(repository=repository, run=run, transport=transport)
+        yield SimpleNamespace(
+            repository=repository, run=run, transport=transport, trace_server=trace_server,
+            trace_client_factory=trace_client_factory,
+        )
 
 
 @pytest.mark.parametrize("entry", [execution.execute_persisted_run, execute_evaluation_run.run])
@@ -251,11 +197,19 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
     assert len(traces) == len(results) == 2
     assert all(trace.final_output["output"] == "answer" for trace in traces)
     assert all(len(trace.turn_outcomes) == 2 for trace in traces)
-    assert all(len(trace.spans) == 10 for trace in traces)
-    assert all({s.operation_type for s in t.spans} >= {"llm", "tool", "chain", "turn"} for t in traces)
-    assert all(any(s.events for s in t.spans if s.operation_type == "llm") for t in traces)
-    assert all(s.attributes["inbank.evidence_mode"] == "trace_server" for t in traces for s in t.spans)
-    assert context.transport.query_count == 8
+    assert all(sum(span.operation_type == "tool" for span in trace.spans) == 2 for trace in traces)
+    assert len(context.trace_server.calls) == 4
+    assert len({trace_id for _, trace_id, _ in context.trace_server.calls}) == 4
+    assert [call[:2] for call in context.trace_server.calls] == [
+        (context.run.manifest.target.ref.external_target_id, request_id)
+        for request_id in context.transport.request_ids
+    ]
+    context.trace_client_factory.assert_called_once_with(
+        "http://trace.invalid", mode="inbank", token="bank-task-secret", source_timezone="Asia/Shanghai",
+    )
+    report = ResultReader(context.repository).get_report(context.run.id)
+    assert report.run.id == context.run.id
+    assert len(report.results) == 2
     assert context.transport.created == context.transport.deleted == 1
     assert context.transport.create_requests == [
         {
@@ -295,10 +249,65 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
     assert messages[0][session_key] == messages[1][session_key]
     assert messages[2][session_key] == messages[3][session_key]
     assert messages[0][session_key] != messages[2][session_key]
+    if context.run.manifest.target.adapter_type == "inbank_yunxia":
+        assert messages[0]["custID"] == messages[1]["custID"]
+        assert messages[2]["custID"] == messages[3]["custID"]
+        assert messages[0]["custID"] != messages[2]["custID"]
+        assert all(message["custID"].startswith("test-customer-") for message in messages)
     assert entry(context.run.id) == "completed"
     assert context.transport.created == context.transport.deleted == 1
     assert context.repository.list_traces(context.run.id) == traces
     assert context.repository.list_results(context.run.id) == results
+
+
+def test_real_tool_evidence_drives_evaluator_results(persisted_target):
+    context = persisted_target
+    case = Case(
+        id="tool-evidence-case",
+        name="Evaluate actual tool calls from Trace Server",
+        turns=tuple(
+            CaseTurn(
+                id=f"turn-{index}",
+                input={"txt": "lookup"},
+                expectations=(
+                    {"kind": "tool_call", "mode": "required", "tool": "lookup"},
+                    {"kind": "tool_call", "mode": "required", "tool": "absent_tool"},
+                ),
+            )
+            for index in range(2)
+        ),
+    )
+    run = pending_run(
+        cases=(case,),
+        target=context.run.manifest.target,
+        evaluator_specs=(EvaluatorSpec(
+            id="required-tool",
+            name="Required tools",
+            dimension="tool_use",
+            metric="tool_coverage",
+            implementation_id="required_tool",
+        ),),
+        primary_evaluator_ids=("required-tool",),
+    )
+    run = EvaluationRun(id="tool-evidence-run-12345678", manifest=run.manifest)
+    context.repository.save_run(run)
+
+    assert execution.execute_persisted_run(run.id) == "completed"
+
+    report = ResultReader(context.repository).get_report(run.id)
+    assert len(report.results) == 1
+    checks = report.results[0].checks
+    assert [check.outcome.value for check in checks] == ["pass", "fail", "pass", "fail"]
+    trace = context.repository.list_traces(run.id)[0]
+    for index, turn in enumerate(case.turns):
+        check = checks[index * 2]
+        assert check.turn_id == turn.id
+        assert set(check.span_ids) == {
+            span.span_id for span in trace.for_turn(turn.id).spans
+            if span.operation_type == "tool"
+        }
+    assert checks[0].span_ids != checks[2].span_ids
+    assert context.transport.created == context.transport.deleted == 1
 
 
 def test_execution_failure_cleans_pod_and_records_failed_run(persisted_target):
@@ -308,6 +317,205 @@ def test_execution_failure_cleans_pod_and_records_failed_run(persisted_target):
         execution.execute_persisted_run(context.run.id)
     assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
     assert context.transport.created == context.transport.deleted == 1
+
+
+def test_missing_sse_reference_still_fetches_real_trace(persisted_target):
+    context = persisted_target
+    context.transport.missing_trace = True
+    assert execution.execute_persisted_run(context.run.id) == "completed"
+    assert context.repository.get_run(context.run.id).status is RunStatus.COMPLETED
+    traces = context.repository.list_traces(context.run.id)
+    assert len(traces) == len(context.repository.list_results(context.run.id)) == 2
+    assert all(trace.final_output["output"] == "answer" for trace in traces)
+    assert all(len(trace.turn_outcomes) == 2 and len(trace.spans) == 4 for trace in traces)
+    assert all(
+        span.attributes["inbank.evidence_mode"] == "trace_server"
+        for trace in traces for span in trace.spans if span.operation_type == "turn"
+    )
+    report = ResultReader(context.repository).get_report(context.run.id)
+    assert len(report.results) == 2
+    assert len(context.transport.messages) == 4
+    assert context.transport.created == context.transport.deleted == 1
+
+
+def test_trace_unavailable_completes_output_evaluation_and_cleans_pod(persisted_target, monkeypatch):
+    context = persisted_target
+    monkeypatch.setenv("AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", "0.01")
+    monkeypatch.setattr(context.trace_server, "fetch_events", Mock(
+        side_effect=TargetExecutionError("unavailable", "trace server request failed")
+    ))
+    assert execution.execute_persisted_run(context.run.id) == "completed"
+    assert context.repository.get_run(context.run.id).status is RunStatus.COMPLETED
+    traces = context.repository.list_traces(context.run.id)
+    assert len(traces) == len(context.repository.list_results(context.run.id)) == 2
+    assert all(trace.final_output["output"] == "answer" for trace in traces)
+    assert all(len(trace.spans) == 2 for trace in traces)
+    assert all(s.operation_type == "turn" and s.attributes["inbank.evidence_mode"] == "output_only"
+               for trace in traces for s in trace.spans)
+    assert len(ResultReader(context.repository).get_report(context.run.id).results) == 2
+    assert len(context.transport.messages) == 4
+    assert context.transport.created == context.transport.deleted == 1
+
+
+@pytest.mark.parametrize("problem", ["missing-ref", "deleted-key", "missing-key", "wrong-key"])
+def test_worker_credential_failure_is_sanitized_before_pod_creation(
+    persisted_target, monkeypatch, caplog, problem,
+):
+    context = persisted_target
+    run = context.run
+    if problem == "missing-ref":
+        target = TargetSnapshot(**{
+            **run.manifest.target.model_dump(exclude={"content_sha256"}), "credential_ref": None,
+        })
+        run = pending_run(target=target)
+        context.repository.save_run(run)
+    elif problem == "deleted-key":
+        context.repository.delete_api_key(run.manifest.target.credential_ref)
+    elif problem == "missing-key":
+        monkeypatch.delenv("AGENTGATE_API_KEY_ENCRYPTION_KEY")
+    else:
+        monkeypatch.setenv(
+            "AGENTGATE_API_KEY_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode(),
+        )
+    with caplog.at_level(logging.ERROR):
+        assert execution.execute_persisted_run(run.id) == "failed"
+    failed = context.repository.get_run(run.id)
+    assert failed.error == "In-bank execution configuration or credential is unavailable"
+    assert context.transport.created == context.transport.deleted == 0
+    context.trace_client_factory.assert_not_called()
+    assert "bank-task-secret" not in caplog.text + failed.model_dump_json()
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+@pytest.mark.parametrize("sparse_root", [False, True])
+def test_bank_submission_to_worker_evaluation_and_report(mode, sparse_root, tmp_path, monkeypatch):
+    """Exercise the real API, credential store, query client, normalizer and evaluators.
+
+    Only the bank network is replaced; the response shape is a synthetic fixture
+    patterned after the customer screenshots, not a captured customer response.
+    """
+    adapter_type = "inbank_yunxia" if mode == "claw" else "inbank_chatabc"
+    configure_inbank(monkeypatch, adapter_type)
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    monkeypatch.setenv("AGENTGATE_API_KEY_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"k" * 32).decode())
+    monkeypatch.setenv("AGENTGATE_TRACE_SERVER_TOKEN", "must-not-use-process-token")
+    monkeypatch.setattr(execution, "load_judge_model_from_environment", lambda: None)
+    transport = RecordingTransport()
+    transport.arrange_type = mode
+    transport.missing_trace = True
+    module = yunxia if mode == "claw" else chatabc
+    for method in ("request", "post", "get"):
+        monkeypatch.setattr(module.requests, method, getattr(transport, method))
+    queries = []
+
+    def opener(request, *, timeout):
+        request_id = transport.request_ids[-1]
+        assert request.full_url == (
+            f"http://trace.invalid/web/agent_trace_otel/projects/agent-{mode}/traces/{request_id}"
+        )
+        assert request.get_header("Authorization") == "Bearer task-login-token"
+        queries.append(request_id)
+        detail = deepcopy(DETAIL)
+        detail.pop("observations")
+        detail["trace"].update({
+            "id": request_id, "projectId": f"agent-{mode}", "spanCount": 2, "toolCount": 1,
+            "startedAt": "2026-10-10T10:29:00", "durationMs": 5.5,
+            "output": {"messages": [{"type": "ai", "content": "trace response"}]},
+        })
+        tool = detail["spans"][0]
+        tool.update({
+            "traceId": request_id, "spanType": "tool", "toolName": "lookup", "name": "lookup",
+            "startedAt": "2026-10-10T10:29:00", "durationMs": 5.5,
+        })
+        detail["spans"].append({
+            **tool, "id": "context-1", "eventId": "context-event", "spanType": "context",
+            "name": "router.context.window", "toolName": None,
+        })
+        if sparse_root:
+            detail = sparse_inbank_detail(detail, module._task_id_from_run_id(run_id))
+            detail["spans"][0].update(
+                name="read_file", toolName="read_file",
+                input={"file_path": "/mnt/oneagent-skills/skills/hello-ces-skills/SKILL.md", "limit": 1000},
+            )
+        return Response({"code": "0", "message": "success", "data": detail})
+
+    monkeypatch.setattr(execution_factory, "TraceServerClient", partial(TraceServerClient, opener=opener))
+    dispatcher = RecordingDispatcher()
+    path = tmp_path / "bank-api.db"
+    monkeypatch.setenv("AGENTGATE_DB_TYPE", "sqlite")
+    monkeypatch.setenv("AGENTGATE_DB", str(path))
+    app = create_app(path, dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    with TestClient(app) as client:
+        dataset = deps.datasets.create_dataset("Bank trace and answer", "Two cases, two turns")
+        deps.datasets.create_draft(dataset.id)
+        for index in range(2):
+            deps.datasets.save_case(dataset.id, Case(
+                name=f"case-{index}",
+                turns=tuple(CaseTurn(
+                    input={"txt": "hello"},
+                    expectations=(
+                        {"kind": "tool_call", "mode": "required", "tool": "read_file" if sparse_root else "lookup"},
+                        {"kind": "output", "path": "output",
+                         "condition": {"kind": "matches_pattern", "pattern": "^answer$"}},
+                    ) + ((
+                        {"kind": "tool_argument", "tool": "read_file", "path": "arguments.file_path",
+                         "condition": {"kind": "matches_pattern", "pattern": "/skills/hello-ces-skills/SKILL[.]md$"}},
+                        {"kind": "tool_call", "mode": "forbidden", "tool": "delete"},
+                        {"kind": "skill_route", "condition": {"kind": "equals", "expected": "hello-ces-skills"}},
+                    ) if sparse_root else ()),
+                ) for _ in range(2)),
+            ))
+        deps.datasets.publish_draft(dataset.id)
+        body = {**submission(dataset.id, mode), "max_parallel_cases": 1,
+                "evaluator_ids": ["final-output", "required-tool"] + (
+                    ["tool-arguments", "forbidden-tool", "skill-routing"] if sparse_root else []
+                )}
+        response = client.post("/api/agent-platform/evaluations", json=body,
+                               headers={"X-Agent-Platform-Token": "task-login-token"})
+        assert response.status_code == 202, response.text
+        run_id = response.json()["data"]["run_ids"][0]
+        assert dispatcher.ids == [run_id]
+        stored = deps.repository.get_run(run_id)
+        assert stored.manifest.target.credential_ref
+        assert "task-login-token" not in stored.model_dump_json()
+        assert execution.execute_persisted_run(run_id) == "completed"
+        report_response = client.get(f"/api/runs/{run_id}")
+        assert report_response.status_code == 200
+        report = report_response.json()["data"]
+        assert report["run"]["status"] == "completed"
+        assert len(report["results"]) == (10 if sparse_root else 4)
+        for result in report["results"]:
+            if result["evaluator_id"] == "skill-routing":
+                # Reading SKILL.md is not an explicit routing decision.
+                assert result["outcome"] == "fail"
+                assert all(check["actual_missing"] for check in result["checks"])
+            else:
+                assert result["outcome"] == "pass"
+        assert "task-login-token" not in report_response.text
+        traces = deps.repository.list_traces(run_id)
+        assert len(traces) == 2
+        assert all(trace.final_output["output"] == "answer" for trace in traces)
+        assert all(len(trace.turn_outcomes) == 2 for trace in traces)
+        assert all(sum(span.operation_type == "tool" for span in trace.spans) == 2 for trace in traces)
+        assert all(
+            span.attributes["inbank.evidence_mode"] == "trace_server"
+            for trace in traces for span in trace.spans if span.operation_type == "turn"
+        )
+        if sparse_root:
+            for trace in traces:
+                assert not any(span.operation_type == "routing" for span in trace.spans)
+                for span in trace.spans:
+                    if span.operation_type == "turn":
+                        source = span.attributes["inbank.trace_source"]
+                        assert source["response_project_id"] == module._task_id_from_run_id(run_id)
+                        assert source["raw_trace"]["output"] is None
+                        assert source["raw_trace"]["spanCount"] == 0
+                        assert source["derived_fields"]["output"] == "dialogue"
+        assert queries == transport.request_ids and len(set(queries)) == 4
+        assert transport.created == transport.deleted == 1
+        assert len(transport.messages) == 4
+    assert b"task-login-token" not in path.read_bytes()
 
 
 def test_yunxia_accepts_auxiliary_events_without_start_or_done(persisted_target):
@@ -327,7 +535,7 @@ def test_yunxia_still_rejects_failure_events(persisted_target):
         pytest.skip("Yunxia-only SSE compatibility")
     context.transport.yunxia_error_event = True
 
-    with pytest.raises(TargetExecutionError, match="returned an error event"):
+    with pytest.raises(TargetExecutionError, match="customer Yunxia failed"):
         execution.execute_persisted_run(context.run.id)
 
     assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
@@ -347,15 +555,14 @@ def test_chatabc_sse_error_diagnostics_are_opt_in(
     else:
         monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
 
-    with caplog.at_level(logging.ERROR):
-        with pytest.raises(
-            TargetExecutionError, match="customer chat returned an error event"
-        ):
-            execution.execute_persisted_run(context.run.id)
+    with caplog.at_level(logging.ERROR), pytest.raises(
+        TargetExecutionError, match="customer base failed"
+    ):
+        execution.execute_persisted_run(context.run.id)
 
     assert ("inbank_sse_failure" in caplog.text) is debug_enabled
     assert ("BASE-001" in caplog.text) is debug_enabled
-    assert ("customer base failed" in caplog.text) is debug_enabled
+    assert "customer base failed" in caplog.text
     assert context.transport.created == context.transport.deleted == 1
 
 
@@ -372,12 +579,13 @@ def test_yunxia_sse_error_diagnostics_are_opt_in(
     else:
         monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
 
-    with caplog.at_level(logging.ERROR):
-        with pytest.raises(TargetExecutionError, match="customer chat returned"):
-            execution.execute_persisted_run(context.run.id)
+    with caplog.at_level(logging.ERROR), pytest.raises(
+        TargetExecutionError, match="customer Yunxia failed"
+    ):
+        execution.execute_persisted_run(context.run.id)
 
     assert ("inbank_sse_failure" in caplog.text) is debug_enabled
-    assert ("customer Yunxia failed" in caplog.text) is debug_enabled
+    assert ("response_body=" in caplog.text) is debug_enabled
     assert context.transport.created == context.transport.deleted == 1
 
 
@@ -445,21 +653,201 @@ def test_judge_initialization_failure_closes_target(persisted_target, monkeypatc
     assert context.transport.created == 0
 
 
-@pytest.mark.parametrize("fault", ["session", "input", "output", "project", "missing", "incomplete", "unavailable"])
-def test_bad_remote_evidence_fails_without_replaying_chat(persisted_target, fault):
+@pytest.fixture
+def lifecycle_target(persisted_target):
     context = persisted_target
-    context.transport.trace_fault = fault
-    with pytest.raises(TargetExecutionError):
-        execution.execute_persisted_run(context.run.id)
-    assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
-    assert context.transport.created == context.transport.deleted == 1
-    assert not context.repository.list_traces(context.run.id)
-    assert len(context.transport.messages) == 1
+    sleep = Mock()
+    kwargs = {
+        "trace_client": context.trace_server,
+        "sleep": sleep,
+    }
+    if context.run.manifest.target.adapter_type == "inbank_yunxia":
+        adapter = yunxia.InbankYunxiaTargetAdapter(
+            yunxia.load_yunxia_settings(), http=context.transport, **kwargs)
+    else:
+        adapter = chatabc.InbankChatABCTargetAdapter(
+            chatabc.load_chatabc_settings(), http=context.transport, **kwargs)
+    request = CaseExecutionRequest(
+        execution_id="lifecycle-retry-case",
+        run_id=context.run.id,
+        case=context.run.manifest.dataset.cases[0],
+        target=context.run.manifest.target,
+        timeout_seconds=600,
+        traceparent=f"00-{'1' * 32}-{'2' * 16}-01",
+    )
+    with closing(adapter):
+        yield SimpleNamespace(
+            adapter=adapter, request=request, sleep=sleep,
+            transport=context.transport, trace_server=context.trace_server,
+        )
 
 
-def test_missing_trace_configuration_fails_before_pod(persisted_target, monkeypatch):
-    monkeypatch.delenv("AGENTGATE_INBANK_TRACE_PROJECT_ID")
+def inject_json_failures(monkeypatch, transport, endpoint, failures):
+    original = transport.request_json
+    outcomes = iter(failures)
+
+    def request_json(method, url, **kwargs):
+        if endpoint in url:
+            outcome = next(outcomes, None)
+            if isinstance(outcome, Exception):
+                raise outcome
+            if outcome is not None:
+                return outcome
+        return original(method, url, **kwargs)
+
+    calls = Mock(side_effect=request_json)
+    monkeypatch.setattr(transport, "request_json", calls)
+    return calls
+
+
+@pytest.mark.parametrize("failure_count", [0, 1, 2, 3])
+@pytest.mark.parametrize("failure,error_code", [
+    pytest.param({"code": "-1"}, "rejected", id="business-rejection"),
+    pytest.param({"code": "0", "data": {}}, "protocol_error", id="missing-agent-name"),
+    pytest.param(TargetExecutionError("timeout", "create timeout"), "timeout", id="timeout"),
+    pytest.param(
+        TargetExecutionError("unavailable", "create HTTP 502"), "unavailable", id="http-502"
+    ),
+])
+def test_create_pod_retries_only_creation(
+    lifecycle_target, monkeypatch, caplog, failure_count, failure, error_code
+):
+    context = lifecycle_target
+    calls = inject_json_failures(
+        monkeypatch, context.transport, "/createAgent", [failure] * failure_count
+    )
+
+    if failure_count == 3:
+        with pytest.raises(TargetExecutionError) as caught:
+            context.adapter.start(context.request)
+        assert caught.value.code == error_code
+        assert context.adapter.get_status(context.request.execution_id) is CaseExecutionStatus.FAILED
+        assert context.adapter.pod_lifecycle["create"] == "failed"
+        assert context.adapter.pod_lifecycle["health"] == "not_attempted"
+        assert len(calls.call_args_list) == 3
+        assert context.transport.sessions == context.transport.messages == []
+        assert context.trace_server.calls == []
+    else:
+        result = context.adapter.wait(context.adapter.start(context.request), 600)
+        assert result.inline_trace.final_output["output"] == "answer"
+        assert context.adapter.pod_lifecycle["create"] == "succeeded"
+        assert context.adapter.pod_lifecycle["health"] == "succeeded"
+        assert len(context.transport.messages) == len(context.trace_server.calls) == 2
+        health_calls = [call for call in calls.call_args_list if "/health" in call.args[1]]
+        assert len(health_calls) == 1
+
+    attempts = [call for call in calls.call_args_list if "/createAgent" in call.args[1]]
+    assert len(attempts) == min(failure_count + 1, 3)
+    assert all(call == attempts[0] for call in attempts)
+    assert attempts[0].args == (
+        "POST", "http://bank.invalid/web/agent_endpoint/createAgent?taskId=ef987654"
+    )
+    assert attempts[0].kwargs["payload"] == {
+        "agentId": "loan-agent",
+        "agentVersion": "loan-agent-v2-fixed",
+        **({"branchId": "branch-review"}
+           if context.request.target.adapter_type == "inbank_yunxia" else {}),
+    }
+    assert [call.args[0] for call in context.sleep.call_args_list] == [10] * min(failure_count, 2)
+    if failure_count:
+        assert "phase=create attempt=1 max_attempts=3 retry_delay_seconds=10" in caplog.text
+    context.adapter.close()
+    context.adapter.close()
+    assert context.transport.deleted == (0 if failure_count == 3 else 1)
+
+
+@pytest.mark.parametrize("failure_count", [0, 1, 9, 10])
+@pytest.mark.parametrize("failure,error_code", [
+    pytest.param({"resCode": "FAIAG1005"}, "rejected", id="business-rejection"),
+    pytest.param(
+        {"resCode": "FAIAG0000", "data": {}}, "protocol_error", id="missing-session-id"
+    ),
+    pytest.param(TargetExecutionError("timeout", "session timeout"), "timeout", id="timeout"),
+])
+def test_init_session_retries_without_recreating_pod_or_replaying_turns(
+    lifecycle_target, monkeypatch, caplog, failure_count, failure, error_code
+):
+    context = lifecycle_target
+    if context.request.target.adapter_type == "inbank_yunxia":
+        pytest.skip("Yunxia has no init_session endpoint")
+    calls = inject_json_failures(
+        monkeypatch, context.transport, "/init_session", [failure] * failure_count
+    )
+
+    if failure_count == 10:
+        with pytest.raises(TargetExecutionError) as caught:
+            context.adapter.start(context.request)
+        assert caught.value.code == error_code
+        assert context.adapter.get_status(context.request.execution_id) is CaseExecutionStatus.FAILED
+        assert context.transport.sessions == context.transport.messages == []
+        assert context.trace_server.calls == []
+    else:
+        result = context.adapter.wait(context.adapter.start(context.request), 600)
+        assert result.inline_trace.final_output["output"] == "answer"
+        assert len(context.transport.sessions) == 1
+        assert len(context.transport.messages) == len(context.trace_server.calls) == 2
+        assert all(message["session_id"] == "session-0" for message in context.transport.messages)
+
+    attempts = [call for call in calls.call_args_list if "/init_session" in call.args[1]]
+    assert len(attempts) == min(failure_count + 1, 10)
+    assert all(call == attempts[0] for call in attempts)
+    assert attempts[0].kwargs["payload"]["requestId"]
+    assert attempts[0].kwargs["headers"]["traceparent"] == context.request.traceparent
+    assert [call.args[0] for call in context.sleep.call_args_list] == [5] * min(failure_count, 9)
+    assert context.transport.created == 1
+    health_calls = [call for call in calls.call_args_list if "/health" in call.args[1]]
+    assert len(health_calls) == 1
+    if failure_count:
+        assert "phase=init_session attempt=1 max_attempts=10" in caplog.text
+    context.adapter.close()
+    context.adapter.close()
+    assert context.transport.deleted == 1
+    assert context.adapter.pod_lifecycle["delete"] == "succeeded"
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+@pytest.mark.parametrize("endpoint,max_attempts,delay", [
+    ("/createAgent", 3, 10),
+    ("/init_session", 10, 5),
+])
+def test_worker_persists_outcome_after_lifecycle_retries(
+    persisted_target, monkeypatch, endpoint, max_attempts, delay, exhausted
+):
     context = persisted_target
-    with pytest.raises(TargetExecutionError, match="requires Trace Server"):
-        execution.execute_persisted_run(context.run.id)
-    assert context.transport.created == 0
+    is_yunxia = context.run.manifest.target.adapter_type == "inbank_yunxia"
+    if endpoint == "/init_session" and is_yunxia:
+        pytest.skip("Yunxia has no init_session endpoint")
+    adapter_class = (
+        yunxia.InbankYunxiaTargetAdapter if is_yunxia else chatabc.InbankChatABCTargetAdapter
+    )
+    sleep = Mock()
+    constructor = Mock(side_effect=lambda settings, **kwargs: adapter_class(settings, sleep=sleep, **kwargs))
+    constructor.adapter_type = adapter_class.adapter_type
+    monkeypatch.setattr(execution_factory, adapter_class.__name__, constructor)
+    failure_count = max_attempts if exhausted else max_attempts - 1
+    calls = inject_json_failures(
+        monkeypatch, context.transport, endpoint,
+        [TargetExecutionError("unavailable", "customer endpoint temporarily unavailable")]
+        * failure_count,
+    )
+
+    if exhausted:
+        with pytest.raises(TargetExecutionError, match="customer endpoint temporarily unavailable"):
+            execution.execute_persisted_run(context.run.id)
+        assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
+        assert context.repository.list_results(context.run.id) == []
+        assert context.repository.list_traces(context.run.id) == []
+        assert context.transport.messages == []
+    else:
+        assert execution.execute_persisted_run(context.run.id) == "completed"
+        report = ResultReader(context.repository).get_report(context.run.id)
+        assert report.run.status is RunStatus.COMPLETED
+        assert len(report.results) == 2
+        assert len(context.repository.list_traces(context.run.id)) == 2
+        assert len(context.transport.messages) == 4
+
+    attempts = [call for call in calls.call_args_list if endpoint in call.args[1]]
+    expected_calls = max_attempts + (endpoint == "/init_session" and not exhausted)
+    assert len(attempts) == expected_calls
+    assert [call.args[0] for call in sleep.call_args_list] == [delay] * (max_attempts - 1)
+    assert context.transport.deleted == (0 if exhausted and endpoint == "/createAgent" else 1)
