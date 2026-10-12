@@ -20,7 +20,7 @@ function caseLink(n: any) {
     : '';
 }
 const labels: Record<string, string> = {
-  dataset: '评测集',
+  dataset: '测评集',
   case: '用例',
   evaluator: '评估器',
   agent: '智能体',

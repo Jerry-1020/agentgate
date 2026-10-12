@@ -39,7 +39,7 @@ const expanded = ref(false);
       <dd>
         {{ run.manifest.target.display_name }} · {{ run.manifest.target.ref.external_version_id }}
       </dd>
-      <dt>评测集</dt>
+      <dt>测评集</dt>
       <dd>{{ run.manifest.dataset.dataset_name }} · v{{ run.manifest.dataset.version }}</dd>
       <dt>执行用例</dt>
       <dd>{{ scope }}</dd>

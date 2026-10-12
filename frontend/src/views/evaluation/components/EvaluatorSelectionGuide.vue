@@ -177,7 +177,7 @@ function apply() {
     <header class="guide-header">
       <div>
         <span class="eyebrow">基于样本期望</span>
-        <h4>为本次评测选择检查项</h4>
+        <h4>为本次测评选择检查项</h4>
         <p>{{ cases.length }} 条用例 · 推荐 {{ recommended.length }} 个评估器</p>
       </div>
       <div class="bulk-actions">
@@ -327,7 +327,7 @@ function apply() {
             :class="{ added: modelValue.includes(active.id) }"
             @click="toggle(active.id, !modelValue.includes(active.id))"
           >
-            {{ modelValue.includes(active.id) ? '已加入 · 点击移除' : '＋ 加入本次评测' }}
+            {{ modelValue.includes(active.id) ? '已加入 · 点击移除' : '＋ 加入本次测评' }}
           </button>
         </template>
         <p v-else class="muted">选中一个检查项，查看它的用途和适用条件。</p>

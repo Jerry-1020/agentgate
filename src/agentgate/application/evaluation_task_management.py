@@ -1,5 +1,7 @@
 """Persist user-facing associations without executing or modifying referenced runs."""
 
+from datetime import timedelta, timezone
+
 from agentgate.domain.evaluation_task import EvaluationTask, EvaluationTaskKind
 from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
@@ -45,8 +47,22 @@ class EvaluationTaskManagement:
         task = self.repository.get_evaluation_task(task_id)
         if task is None or any(self.repository.get_run(run_id, user_team_id=_team_id()) is None for run_id in task.run_ids):
             raise LookupError("unknown evaluation task")
-        return task
+        return self._with_name(task)
+
+    def _with_name(self, task: EvaluationTask) -> EvaluationTask:
+        if task.name is not None:
+            return task
+        run = self.repository.get_run(task.run_ids[0], user_team_id=_team_id())
+        agent = run.manifest.target.display_name
+        if agent == "Loan Agent":
+            agent = "贷款智能体"
+        date = task.created_at.astimezone(timezone(timedelta(hours=8)))
+        suffix = f"{date.month}{date.day:02d}"
+        named = EvaluationTask.model_validate({
+            **task.model_dump(), "name": agent[:128 - len(suffix)] + suffix,
+        })
+        return self.repository.save_evaluation_task(named)
 
     def list(self) -> list[EvaluationTask]:
-        return [task for task in self.repository.list_evaluation_tasks()
+        return [self._with_name(task) for task in self.repository.list_evaluation_tasks()
                 if all(self.repository.get_run(run_id, user_team_id=_team_id()) is not None for run_id in task.run_ids)]

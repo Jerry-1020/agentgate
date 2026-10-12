@@ -39,7 +39,7 @@ onUnmounted(() => ticket++);
       实验 {{ index === 0 ? 'A · 基线' : 'B · 候选' }}</button
     ><span>分别查看两侧的问题与改进建议</span>
   </div>
-  <p v-if="busy" role="status">正在读取真实评测报告…</p>
+  <p v-if="busy" role="status">正在读取真实测评报告…</p>
   <p v-if="error" role="alert">{{ error }} <button class="link" @click="load">重试</button></p>
   <ReportEvidenceAnalysis v-if="report" :report="report" />
 </template>

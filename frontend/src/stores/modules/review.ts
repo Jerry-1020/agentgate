@@ -1,5 +1,5 @@
-import { ref, watch } from 'vue';
-import { defineStore } from 'pinia';
+import { computed, ref, watch } from 'vue';
+import { acceptHMRUpdate, defineStore } from 'pinia';
 import {
   api,
   request,
@@ -21,7 +21,13 @@ export type ScoringTemplate = {
   preview: boolean;
   evaluatorId?: string;
 };
+export type AnnotationSection = {
+  enabled: boolean;
+  criteria: Criterion[];
+  tags: string[];
+};
 export type AnnotationTemplate = {
+  v2?: { dataset: AnnotationSection; evaluator: AnnotationSection; agent?: AnnotationSection };
   id: string;
   name: string;
   description: string;
@@ -32,6 +38,47 @@ export type AnnotationTemplate = {
   min: number;
   max: number;
 };
+export type AnnotationTarget = {
+  localExecution?: { sourceId: string; adapterType: 'local_bank' | 'demo_loan' };
+  loginMode: 'bank' | 'external';
+  teamId: string;
+  agentId: string;
+  agentName: string;
+  typeGroup: 'base/workflow' | 'abcclaw';
+  branchId: string | null;
+  agentVersion: string;
+};
+export type MessageAnnotation = {
+  scores: Record<string, number | null>;
+  tags: string[];
+  note: string;
+  expected: string;
+  expectedMode?: 'equals' | 'contains' | 'matches_pattern' | 'json';
+  expectedPath?: string;
+};
+export type EvaluatorReview = {
+  scores: Record<string, number | null>;
+  tags: string[];
+  note: string;
+  optimizedPrompt?: string;
+};
+export type AnnotationObject = 'dataset' | 'evaluator' | 'agent';
+export type ObjectAnnotation = {
+  evaluators?: Record<string, EvaluatorReview>;
+  scores: Record<string, number | null>;
+  tags: string[];
+  note: string;
+  expected?: string;
+};
+export type ToolAnnotation = {
+  scores: Record<string, number | null>;
+  tags: string[];
+  note: string;
+  expectation: 'none' | 'required' | 'forbidden';
+  argumentsExpected: string;
+  argumentsPath?: string;
+  occurrence: 'first' | 'last' | 'any' | 'all';
+};
 export type AnnotationTask = {
   id: string;
   name: string;
@@ -39,12 +86,19 @@ export type AnnotationTask = {
   deletedAt?: string;
   example?: boolean;
   skippedConversations?: string[];
-  app: { source_id: string; target_type: string; external_target_id: string; name: string };
+  app: {
+    source_id: string;
+    target_type: string;
+    external_target_id: string;
+    external_version_id?: string;
+    name: string;
+  };
+  target?: AnnotationTarget;
   template: AnnotationTemplate;
-  annotations: Record<
-    string,
-    { scores: Record<string, number | null>; tags: string[]; note: string; expected: string }
-  >;
+  annotations: Record<string, MessageAnnotation>;
+  toolAnnotations?: Record<string, ToolAnnotation>;
+  v2Annotations?: Record<string, Partial<Record<AnnotationObject, ObjectAnnotation>>>;
+  exports?: Record<string, string>;
 };
 export type JudgeDraft = {
   id: string;
@@ -59,11 +113,11 @@ export const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 export const useReviewStore = defineStore('review', () => {
   const scoringDrafts = ref<ScoringTemplate[]>([]);
-  const annotationTemplates = ref<AnnotationTemplate[]>([
+  const defaultAnnotationTemplates: AnnotationTemplate[] = [
     {
       id: 'annotation-default-ux',
       name: '通用会话标注模板',
-      description: '截图默认维度的 UX 起点；不是后端已发布资产。评分范围可在复制后的模板中修改。',
+      description: '通用消息与工具评分维度，复制后可调整评分范围与标签。',
       message: [
         { key: 'accuracy', text: '准确性' },
         { key: 'completeness', text: '完整性' },
@@ -80,7 +134,7 @@ export const useReviewStore = defineStore('review', () => {
       min: 0,
       max: 5,
     },
-  ]);
+  ];
   const annotationStorageError = ref('');
   const annotationStorageKey = 'agentgate-ux-5198-annotations-v1';
   function readAnnotations(): AnnotationTask[] {
@@ -100,6 +154,23 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
   const annotationTasks = ref<AnnotationTask[]>(readAnnotations());
+  const annotationTemplates = computed<AnnotationTemplate[]>(() => {
+    const templates = new Map(
+      defaultAnnotationTemplates.map((template) => [template.id, template]),
+    );
+    for (const task of annotationTasks.value) templates.set(task.template.id, task.template);
+    return [...templates.values()];
+  });
+  function saveAnnotationTask(task: AnnotationTask): void {
+    if (annotationStorageError.value) throw Error(annotationStorageError.value);
+    const next = [copy(task), ...annotationTasks.value.filter((item) => item.id !== task.id)];
+    try {
+      localStorage.setItem(annotationStorageKey, JSON.stringify(next));
+    } catch {
+      throw Error('浏览器存储失败，标注未保存。请释放空间后重试。');
+    }
+    annotationTasks.value = next;
+  }
   watch(
     annotationTasks,
     (value) => {
@@ -172,7 +243,7 @@ export const useReviewStore = defineStore('review', () => {
         const catalog = await api.evaluators();
         const results = await Promise.all(
           catalog
-            .filter((e) => e.latest_version)
+            .filter((e) => e.latest_version || e.has_draft)
             .map(async (e) => ({ id: e.id, detail: await api.evaluator(e.id) })),
         );
         evaluatorCatalog.value = catalog;
@@ -187,9 +258,19 @@ export const useReviewStore = defineStore('review', () => {
               description:
                 detail.evaluator.description || '从已发布 LLM 评估器读取，不另存一套评分内容。',
               instruction: String(d.config.instruction ?? ''),
-              criteria: Object.entries((d.config.rubric as Record<string, string>) ?? {}).map(
-                ([key, text]) => ({ key, text: String(text) }),
-              ),
+              criteria:
+                d.implementation_id === 'answer_quality' && d.implementation_version === '2'
+                  ? (
+                      d.config.dimensions as {
+                        id: string;
+                        name: string;
+                        description: string;
+                        prompt: string;
+                      }[]
+                    ).map((row) => ({ key: row.id, text: `${row.name}：${row.prompt}` }))
+                  : Object.entries((d.config.rubric as Record<string, string>) ?? {}).map(
+                      ([key, text]) => ({ key, text: String(text) }),
+                    ),
               dimension: d.dimension,
               metric: d.metric,
               version: String(d.version ?? ''),
@@ -237,6 +318,7 @@ export const useReviewStore = defineStore('review', () => {
   return {
     scoringDrafts,
     annotationTemplates,
+    saveAnnotationTask,
     annotationStorageError,
     annotationTasks,
     judgeDrafts,
@@ -251,3 +333,7 @@ export const useReviewStore = defineStore('review', () => {
     exportUx,
   };
 });
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useReviewStore, import.meta.hot));
+}

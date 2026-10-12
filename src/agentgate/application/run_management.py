@@ -84,6 +84,12 @@ class RunManagement:
             else self.evaluator_management.select(evaluator_ids)
         )
         self.evaluator_management.validate_plan(dataset, selected)
+        if evaluator_refs is not None:
+            primary_ids = tuple(ref.evaluator_id for ref in evaluator_refs)
+        elif evaluator_ids is not None:
+            primary_ids = tuple(evaluator_ids)
+        else:
+            primary_ids = tuple(spec.id for spec in selected)
         created_at = utcnow()
         normalized_schedule = (
             normalize_utc(scheduled_for, "EvaluationRun scheduled_for")
@@ -100,7 +106,7 @@ class RunManagement:
                 selected_case_ids=tuple(case_ids) if case_ids is not None else None,
                 target=target,
                 evaluator_specs=selected,
-                primary_evaluator_ids=tuple(spec.id for spec in selected),
+                primary_evaluator_ids=primary_ids,
                 metric_plan=metric_plan or MetricPlan(),
                 gate_spec=gate_spec or ReleaseGateSpec(),
                 timeout_seconds=timeout_seconds,

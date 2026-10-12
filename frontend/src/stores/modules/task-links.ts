@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { request } from '../../api/evaluations';
 export interface TaskLink {
   id: string;
+  name?: string;
   kind: 'single' | 'ab' | 'stability';
   mockSelection?: { branch: string; credentialScope: string; credentialLabel: string };
   runIds: string[];
@@ -10,6 +11,7 @@ export interface TaskLink {
 }
 interface StoredTask {
   id: string;
+  name?: string | null;
   kind: 'single' | 'ab' | 'stability';
   run_ids: string[];
   static_report_ids: string[];
@@ -45,6 +47,7 @@ export const useTaskLinksStore = defineStore('task-links', () => {
     );
     const links = tasks.map((t) => ({
       id: t.id,
+      name: t.name ?? undefined,
       kind: t.kind,
       runIds: t.run_ids,
       staticReports: t.static_report_ids.map((id) => ({ reportId: id, ...versions.get(id)! })),
@@ -55,6 +58,7 @@ export const useTaskLinksStore = defineStore('task-links', () => {
   async function saveTaskLink(link: TaskLink): Promise<void> {
     await request('/evaluation-tasks/' + encodeURIComponent(link.id), 'PUT', {
       kind: link.kind,
+      ...(link.name ? { name: link.name } : {}),
       run_ids: link.runIds,
       static_report_ids: link.staticReports.flatMap((r) => (r.reportId ? [r.reportId] : [])),
     });

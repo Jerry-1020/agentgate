@@ -1,314 +1,88 @@
 # AgentGate
 
-AgentGate is an open-source evaluation harness for enterprise Agents and Skills. It
-runs versioned Cases, captures behavior as OpenTelemetry traces, evaluates business
-rules, calculates metrics, and makes release-gate decisions.
+AgentGate 是智能体测评工作台，支持版本化测评集、规则/LLM/复合评估、人工标注、A/B 对比与执行轨迹。工程附带基础编排、工作流和云虾三种合成贷款智能体。
 
-## Current Status
+## 新机器快速开始
 
-Refactor-1 is in progress. The Domain, SQLite, Dataset workflow, deterministic loan
-demo, core Run Engine, result calculation, modular FastAPI foundation, and asynchronous
-Redis/Celery Run workflow are implemented. Case-level LLM Judge evaluation is available
-through an optional OpenAI-compatible model connection. The Web application can submit
-Runs, show queued and running progress, stop polling after terminal state, and open
-completed reports.
-
-- [Whole-project progress and code locations](docs/project-progress.md)
-- [Current architecture](docs/architecture.md)
-- [Documentation index](docs/README.md)
-- [Product requirements](docs/product-requirements-zh.md)
-
-The current backend regression suite has 508 passing tests. The Web application remains
-partially refactored; consult the progress document for the implemented page scope.
-
-## Core Flow
-
-```text
-DatasetVersion + TargetSnapshot + EvaluatorSpec
-                     |
-                     v
-                 RunManifest
-                     |
-                     v
-EvaluationRun -> Job dispatcher -> RunEngine
-                                    |
-                                    v
-                           Target adapter -> Agent
-                                    |
-                                    v
-                         Trace -> Evaluators -> Results
-                                                |
-                                                v
-                                  Metrics -> Release Gate -> Report
-```
-
-SQLite is authoritative for POC Run state and Results. Redis and Celery provide
-asynchronous delivery only; Celery task state is not a business data source.
-
-## Target Layout
-
-```text
-src/agentgate/
-  domain/          # Immutable business models and invariants
-  dataset/         # Dataset loading, formats, export, and version mechanics
-  run/             # Case execution engine and Target protocol
-  trace/           # Trace normalization and redaction
-  evaluator/       # Rule, Judge, and Hybrid evaluation
-  result/          # Metrics, release gate, report, and future comparison
-  skill_analysis/  # Future static Agent/Skill definition analysis
-  optimizer/       # Future badcase analysis and suggestions
-  integrations/    # Targets, observability, models, and job dispatchers
-  application/     # Use cases shared by HTTP, CLI, and workers
-  storage/         # Persistence contracts and SQLite adapter
-  cli/             # Deferred command-line transport refactor
-  server/          # FastAPI transport
-
-web/               # Vue 3 and TypeScript frontend
-docs/              # Active architecture, plans, and progress
-examples/          # Example assets and future standalone demo Agents
-tests/              # Backend regression suite
-```
-
-This is the target layout. Some legacy files remain until their callers are migrated;
-the progress checklist records those differences explicitly.
-
-Top-level `case/`, `queue/`, `experiment/`, and `lineage/` packages are not part of the
-refactor architecture. Dataset/Case behavior belongs under `domain/`, `dataset/`, and
-`application/`. Asynchronous work belongs behind job-dispatch integrations. A/B testing
-will compose ordinary Runs and Result comparison when implemented.
-
-## Demo
-
-The current deterministic loan Agent demonstrates real OTel spans and business-policy
-evaluation:
-
-- high-risk loans must not be approved directly;
-- some decisions require human review;
-- Evaluators inspect routing, Tool calls, arguments, policy, and final state;
-- a risky Agent version fails while the fixed version passes.
-
-## Local Setup And Operation
-
-Install the Python package and Web dependencies:
+需要 Python 3.11、uv、Node.js 22.12 或更高版本、npm、Redis。完整启动已在 macOS ARM64 实测；Linux 尚未实测，Windows 请在 WSL 中安装这些依赖。真实模型需支持 OpenAI-compatible Chat Completions 和工具调用。
 
 ```bash
-python3 -m pip install -e '.[test]'
-cd web
-npm install
-cd ..
-```
-
-### Optional LLM Judge Configuration
-
-The POC can add the built-in `answer-quality` evaluator through one process-level,
-OpenAI-compatible model connection. Export the same four values in the API and Celery
-worker environments:
-
-```bash
-export AGENTGATE_JUDGE_PROVIDER_ID="openai-compatible"
-export AGENTGATE_JUDGE_BASE_URL="https://provider.example/v1"
-export AGENTGATE_JUDGE_API_KEY="$JUDGE_API_KEY"
-export AGENTGATE_JUDGE_MODEL_ID="your-model-id"
-```
-
-`AGENTGATE_JUDGE_PROVIDER_ID` is a stable local label. The base URL must use HTTPS and
-must exclude `/chat/completions`, which the adapter appends. All four variables absent
-keeps the Rule-only catalog; a partial or blank configuration is rejected. The API key
-is held only by the process-local model client and is never persisted in an Evaluator
-specification or Run manifest.
-
-Persistent provider administration, tenant isolation, and Web model-provider settings
-are intentionally deferred beyond this POC configuration path.
-
-### API Key Vault Configuration
-
-API Key management is enabled only when the server receives a persistent encryption
-master key:
-
-```bash
-export AGENTGATE_API_KEY_ENCRYPTION_KEY="<URL-safe Base64 for exactly 32 random bytes>"
-```
-
-Keep the same master key available across server restarts and for every process that
-must resolve the same stored API Keys. Changing or losing it makes existing encrypted
-entries unreadable. AgentGate does not generate a fallback key. Without this variable,
-the rest of the application remains available while API Key endpoints return `503`.
-
-The metadata-only management API is:
-
-- `POST /api/api-keys` creates a shared or private API Key.
-- `GET /api/api-keys` lists safe metadata.
-- `GET /api/api-keys/{api_key_id}` returns safe metadata.
-- `DELETE /api/api-keys/{api_key_id}` deletes the stored API Key.
-
-Plaintext API Keys are accepted only by the create request, encrypted before
-persistence with AES-256-GCM, and never returned by the API. This feature provides the
-vault management and internal resolution boundary. Selecting a stored API Key in a Run
-or Evaluator configuration is not connected yet.
-
-Start each process in its own terminal. The API and worker must use the same absolute
-SQLite path and Redis URL. When the optional Judge is enabled, both processes must also
-receive the identical four Judge values above.
-
-```bash
-redis-server --port 6379
-```
-
-```bash
-AGENTGATE_DB="$PWD/agentgate-demo.db" \
-AGENTGATE_REDIS_URL="redis://127.0.0.1:6379/0" \
-PYTHONPATH=src \
-python3 -m celery \
-  -A agentgate.integrations.job_dispatchers.celery:celery_app worker \
-  --loglevel=INFO --concurrency=1
-```
-
-For a Redis Cluster broker, give the API, workers, and scheduler the same cluster
-settings. The URL names one reachable seed node; redis-py discovers the remaining
-topology. Redis Cluster supports only database `0`.
-
-```bash
-AGENTGATE_REDIS_MODE=cluster \
-AGENTGATE_REDIS_URL="redis://username:password@redis-seed:6379/0" \
-AGENTGATE_REDIS_CLUSTER_HASH_TAG="{agentgate}" \
-PYTHONPATH=src \
-python3 -m celery \
-  -A agentgate.integrations.job_dispatchers.celery:celery_app worker \
-  --loglevel=INFO --concurrency=1
-```
-
-The hash tag keeps Celery queue, binding, and unacknowledged-message keys in one
-Redis Cluster slot so Kombu's multi-key operations do not fail with `CROSSSLOT`.
-AgentGate does not use Redis as a Celery result backend.
-
-Scheduled Runs additionally require one lightweight scheduler worker and Celery Beat:
-
-```bash
-AGENTGATE_DB="$PWD/agentgate-demo.db" \
-AGENTGATE_REDIS_URL="redis://127.0.0.1:6379/0" \
-PYTHONPATH=src \
-python3 -m celery \
-  -A agentgate.integrations.job_dispatchers.celery:celery_app worker \
-  --loglevel=INFO --concurrency=1 --queues=agentgate.scheduler \
-  --hostname=scheduler@%h
-```
-
-```bash
-AGENTGATE_SCHEDULER_INTERVAL_SECONDS=10 \
-PYTHONPATH=src \
-python3 -m celery \
-  -A agentgate.integrations.job_dispatchers.celery:celery_app beat \
-  --loglevel=INFO
-```
-
-```bash
-AGENTGATE_DB="$PWD/agentgate-demo.db" \
-AGENTGATE_REDIS_URL="redis://127.0.0.1:6379/0" \
-PYTHONPATH=src \
-python3 -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8000 --reload
-```
-
-```bash
-cd web
-AGENTGATE_API_TARGET="http://127.0.0.1:8000" npm run dev
-```
-
-Open the Vite URL, submit an evaluation, then use **运行队列** to inspect queue position,
-Case progress, timing, failures, and recent completed reports.
-
-`scheduled_for` is an optional timezone-aware UTC value on `POST /api/evaluations`.
-The default scheduler interval is 10 seconds, so a due Run normally enters the
-execution queue within 10 seconds of that value. Worker availability determines its
-actual start time.
-
-## Asynchronous Run APIs
-
-- `POST /api/evaluations` persists a pending Run, dispatches only its ID, and returns
-  `202 Accepted`.
-- `GET /api/runs?status=<status>` lists filterable Run history.
-- `GET /api/runs/activity` returns exact lifecycle counts plus queued, running, and
-  recent terminal projections.
-- `GET /api/runs/{run_id}/status` returns progress, timing, error, and best-effort
-  queue position.
-- `GET /api/runs/{run_id}` returns the report after completion.
-
-## Verification
-
-```bash
-pytest -q
-cd web
-npm run typecheck
-npm run build
-npm run test:e2e
-```
-
-The Playwright suite starts its own Redis broker, one Celery worker, FastAPI, and Vite.
-It requires `redis-server` on `PATH` and a Playwright Chromium installation. Install the
-browser once with `npx playwright install chromium` if needed.
-
----
-
-# 附：AgentGate 工作台（agentgate-web-nh 集成）
-
-以下为 `agentgate-web-nh` 仓库合入本分支的内容说明。合入时已将原 `backend/` 并入仓库根目录，相关路径已同步调整。
-
-# AgentGate 工作台与三模式被测智能体
-
-## 2026-09-20 最新前端测试
-
-本次更新仅同步 `frontend/` 的新版页面、工程规范依赖和测试；后端、三类智能体及历史交付资料保持不变。
-
-**前端测试请优先阅读 [frontend/README.md](frontend/README.md)**：安装后默认访问 `http://127.0.0.1:5198/#/overview`，代理默认连接 8098。若使用下方旧版整套启动脚本，须按前端说明设置 `FRONTEND_PORT=5197` 和 `API_PROXY_TARGET=http://127.0.0.1:8097`。本次没有同步开发者本机数据库或浏览器标注数据。
-
-以下是保留的后端与三模式智能体交接说明。
-
-本仓库包含 Vue 工作台、AgentGate 评测后端，以及独立运行的基础编排、工作流、云虾三模式贷款测试智能体。保留已有前后端目录和历史交付文件，不使用日期文件夹复制整套工程。
-
-**本次交付入口：[安装与端到端验收](docs/bank-agents/README.md)。**
-
-2026-09-18 更新：已集成后端上游 `33db48a`，包括用户/团队上下文、并发参数和旧数据库迁移。前端、被测智能体和 SDK 源码保持原样。已有部署请先阅读[升级与回退说明](docs/bank-agents/upstream-sync-20260918.md#七本次代码交付与升级)。
-
-## 快速开始
-
-准备 Python 3.11、uv、Node.js 22/npm、Redis 和有效的支持工具调用的模型配置。
-
-```bash
+git clone --branch integration/baibo https://github.com/open-fin-sub/agentgate.git
+cd agentgate
 bash scripts/setup-bank-integration.sh
 cp .env.example .env
 chmod 600 .env
-# 编辑 .env，填写模型配置；不要上传真实密钥
+```
+
+在 `.env` 中取消以下配置项的注释并填入自己的模型连接，不要上传密钥：
+
+```dotenv
+AGENTGATE_JUDGE_TRANSPORT=api
+AGENTGATE_JUDGE_PROVIDER_ID=openai-compatible
+AGENTGATE_JUDGE_BASE_URL=https://provider.example/v1
+AGENTGATE_JUDGE_API_KEY=your-api-key
+AGENTGATE_JUDGE_MODEL_ID=your-model-id
+```
+
+模型地址不含 `/chat/completions`。三种贷款智能体默认复用这套连接；需要单独的被测模型时填写 `BANK_MODEL_BASE_URL`、`BANK_MODEL_API_KEY`、`BANK_MODEL_NAME`。DeepSeek v4 Pro 可设 `BANK_MODEL_THINKING=disabled`，具体模型可用性取决于自己的账号。
+
+```bash
 bash scripts/start-bank-integration.sh
 ```
 
-打开 http://127.0.0.1:5197/#tasks 。启动后会创建本机数据库并初始化三个数据库评测集，共 24 条用例。前端、API、Worker、Scheduler、Redis、被测服务共同运行；Ctrl+C 关闭本次启动的服务，不删除数据。
+打开 [工作台](http://127.0.0.1:5197/)，选择 **行外 Login**。启动器运行前端、API、Redis、执行 Worker、Scheduler、本地智能体目录、贷款服务和 Trace Server，共八项服务；Ctrl+C 停止本次启动的进程，保留数据。缺少模型配置时会报错，不会回退为模拟模型。
 
-## 目录
+| 服务 | 默认端口 |
+|---|---|
+| 前端 | 5197 |
+| API | 8097 |
+| Redis | 6397 |
+| 本地智能体目录 | 8119 |
+| 贷款智能体服务 | 8107 |
+| Trace Server | 8210 |
 
-- `frontend/`：前端与当前真实接口接入。
-- 仓库根目录：AgentGate API、执行调度、评估与存储（原 `backend/` 已并入）。
-- `tested-agents/`：独立贷款智能体、测试与依赖锁。
-- `vendor/trace-sdk/`：必需 SDK 源码与来源摘要。
-- `scripts/`：安装、启动、初始化、验收脚本。
-- `docs/bank-agents/`：本次交付说明、架构和验证记录。
-- `runtime/`：本机生成数据、日志及 Trace，不上传。
-- `delivery/2026-09-16/`：保留的历史数据库及 Trace 快照，不自动恢复。
+端口占用会退出，不会关闭别人的服务。可用 `bash scripts/start-bank-integration.sh --port-offset 1000` 同时偏移全部端口。前端独立开发的默认端口是 5198、代理 8098；完整启动器会显式设置为上表端口。启动器统一使用自己启动的 Redis，不使用 `.env` 中的远程 Redis 地址。
 
-## 新机器验收
+配置可放在仓库外：`AGENTGATE_MODEL_ENV_FILE=/absolute/path/private.env bash scripts/start-bank-integration.sh`。仅查看页面及规则配置而不执行真实贷款测评时，可以用 `.venv/bin/python scripts/start-integration.py --no-browser`；不配置 Judge 时仅初始化专项路径规则。
 
-保持服务运行，在另一个终端中执行（会真实调用模型并产生费用）：
+## 下载后自带哪些数据
+
+- **3 套核心专项测评集**：v3，每套 12 个样本、14 轮，共 36 个样本、42 轮。分别检查工具与审批分支、完整工作流路径、Skill 路由与实际调用。
+- **7 个专项评估器**：1 个执行路径规则、3 个 LLM、3 个规则＋LLM。完整模型配置存在时，启动器自动发布，使用接收方自己的模型；已有配置和用户编辑不会被覆盖。
+- **9 个历史验收任务的结果快照**：旧 v2、DeepSeek v4 Pro，72 次样本执行，67 通过、5 失败。打开 [历史报告](examples/loan-core/history/index.html)，或查看 [JSON 和说明](examples/loan-core/README.md)。历史文件不会伪装成本机新执行的任务。
+
+在页面“测评集”搜索“核心专项”，新建任务即可选择专项评估器。也可一次创建三种智能体 × 三种评估方式共 9 个新任务（会真实调用模型并产生费用）：
 
 ```bash
-(cd frontend && npx playwright install chromium)
-node scripts/accept-bank-browser.mjs
-.venv/bin/python scripts/verify-bank-traces.py
+.venv/bin/python scripts/run-loan-core-evaluations.py
+# 快速连通性验收：每个任务只运行一个低风险样本
+.venv/bin/python scripts/run-loan-core-evaluations.py --smoke
 ```
 
-测试从前端发起新任务，不依赖开发者历史任务 ID。输入输出、页面 Trace、平台数据库、业务数据库与 SDK JSONL 互相核对。结果写入 runtime/bank-acceptance/，业务失败不会被伪装为通过。
+新任务可以在页面查看；脚本保存任务 ID 和结果至 `runtime/loan-core-acceptance/`。连接性验收不等同于全量业务通过，失败和待复核结果应按页面证据处理。
 
-## 重要边界
+## 数据保存和备份
 
-这是可执行的本地联调实现，不是客户行内完整源码或生产行为的等价复制。使用合成数据与 test-policy-v1，不连接真实银行征信或放款系统。客户工厂、文件、完整云虾协议和安全围栏仍存在待接入内容，详见交付文档。
+测评集/评估器定义在 `src/agentgate/demo/loan-core-*.json`，历史只读报告在 `examples/loan-core/history/`，随源码分发。运行后新建数据默认存储在 `runtime/agentgate.db`；贷款业务数据库、SDK 轨迹在 `runtime/bank-agents/`。智能体通过认证HTTP上传JSONL事件及模型请求附件；Trace Server独立保存到 `runtime/trace-server/received/`，查询不读取发送端目录。
 
-三模式启动必须有有效模型配置，无 Mock fallback。旧 Demo 入口 start-macos.command 仍保留；旧日期能力记录是历史资料，不应覆盖本次交付说明。现有历史浏览器测试包含固定数据依赖，新机器请使用上述验收脚本。
+启动器首次生成 `runtime/credential.key`（仅当前用户可读），API 和 Worker 共享用于加密密钥库；若手动指定 `AGENTGATE_API_KEY_ENCRYPTION_KEY`，请自己保存该值。备份前停止服务，完整备份 `runtime/` 并妥善保管密钥文件；删除运行目录会丢失本机新增数据，种子文件不能还原个人修改。`.env`、`runtime/` 和模型密钥不提交 Git。
 
-后端原基线：open-fin/agentgate 的 refactor-1，提交 e3760d16602c9423b54be968ea97839a5144d691；2026-09-18 集成 open-fin-sub/agentgate 的 refactor-1 提交 33db48afcb83b0331e6e012abbd100c823268313，并保留本地接入与兼容性修复。后端 Apache-2.0 许可保留在根目录 LICENSE；不要自动将其扩展至客户 SDK 和其他目录。SDK 来源声明见 vendor/trace-sdk/PROVENANCE.md。
+## 行内与行外
+
+默认使用 SQLite/Celery 行外联调；已有 BJS 配置仍使用独立调度进程，不启动 Redis/Celery Worker，已有 MySQL 配置不会被覆盖，也不会初始化本地专项数据。行外目录使用本地 `localAgentDirectory` 和 `local` 令牌；行内使用配置的网关与真实会话令牌。行内部署不使用本地初始化脚本，应按机构环境配置数据库、调度和网关。贷款测试使用 `test-policy-v1`、合成客户，不连接生产征信或放款系统。
+
+## 目录与验证
+
+`frontend/` 是 Vue 前端，`src/agentgate/` 是后端，`tested-agents/` 是贷款服务，`vendor/trace-sdk/` 和 `vendor/trace-server/` 保存上游 SDK/查询服务及来源说明，`scripts/` 提供安装与验收入口。
+
+```bash
+PYTHONPATH=src .venv/bin/pytest -q tests
+(cd tested-agents && PYTHONPATH=src .venv/bin/pytest -q)
+(cd frontend && npm run lint && npm run test:unit && npm run build)
+```
+
+自动化单元测试使用模拟模型，真实模型验收使用上述 `run-loan-core-evaluations.py`。更详细的 [安装与验收](docs/bank-agents/README.md)、[架构](docs/architecture.md)、[项目进展](docs/project-progress.md) 和 [文档索引](docs/README.md) 均在仓库内。后端许可证见 LICENSE；不能将该许可证自动扩展至客户 SDK/Trace Server，来源声明在对应 vendor 目录。
+
+本次[新目录及真实模型验收记录](docs/bank-agents/delivery-verification-20261008.md)保留运行ID、实际分数及验证范围。
+
+六类智能体现支持[主动 Trace 上报与分机部署](docs/trace/trace-reporting.md)。可运行 `.venv/bin/python scripts/verify-trace-reporting.py` 新建六项验收任务；三个本地模拟体的轨迹会明确标记为模拟。

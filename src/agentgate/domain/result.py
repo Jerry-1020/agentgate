@@ -58,6 +58,8 @@ class JudgeRecord(DomainModel):
     resolved_model: str | None = None
     request_sha256: str
     raw_response: str
+    request_system_prompt: str | None = None
+    request_user_prompt: str | None = None
     request_id: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)

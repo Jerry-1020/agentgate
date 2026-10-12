@@ -74,7 +74,7 @@ function externalLogin() {
   <div class="welcome">
     <div class="welcome-card">
       <div class="welcome-brand">
-        <b>智能体评测中心</b><small>AgentGate · 评测工作台</small>
+        <b>智能体测评中心</b><small>AgentGate · 测评工作台</small>
       </div>
       <h1 class="welcome-title">欢迎页面</h1>
       <p class="welcome-hint">请输入行内用户token</p>

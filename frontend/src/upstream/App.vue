@@ -75,7 +75,7 @@ async function refresh() {
 async function launch() {
   if (selectedEvaluators.value.length === 0) return ElMessage.warning('请至少选择一个评估器');
   if (selectedDatasetInfo.value?.version == null)
-    return ElMessage.warning('请选择已有发布版本的评测集');
+    return ElMessage.warning('请选择已有发布版本的测评集');
   loading.value = true;
   try {
     await runsApi.launch({
@@ -142,7 +142,7 @@ const outcomeText = {
 const gateReason: Record<ReleaseGateReason, string> = {
   threshold_met: '达到发布门槛',
   score_below_threshold: '未达到发布门槛',
-  missing_results: '缺少预期评测结果',
+  missing_results: '缺少预期测评结果',
   evaluator_error: '评估器执行错误',
   blocking_failure: '阻断级检查失败',
   review_required: '存在需要人工复核的结果',
@@ -209,7 +209,7 @@ onUnmounted(() => {
           </p>
           <h1>
             {{
-              page === 'evaluate' ? 'AgentGate 评估台' : page === 'runs' ? '运行队列' : '评测集管理'
+              page === 'evaluate' ? 'AgentGate 评估台' : page === 'runs' ? '运行队列' : '测评集管理'
             }}
           </h1>
           <p>
@@ -218,7 +218,7 @@ onUnmounted(() => {
                 ? '配置评估对象，运行用例，并用可追溯指标判断是否达到发布门槛。'
                 : page === 'runs'
                   ? '跟踪排队、执行进度与最近结果。'
-                  : '维护评测集、不可变版本与可复用测试用例。'
+                  : '维护测评集、不可变版本与可复用测试用例。'
             }}
           </p>
         </div>
@@ -230,7 +230,7 @@ onUnmounted(() => {
             <div>
               <span class="step">01 · EVALUATION SETUP</span>
               <h2 id="config-title">评估配置</h2>
-              <p>选择 Agent、数据集与评估器，然后启动一次真实评估。</p>
+              <p>选择 Agent、测评集与评估器，然后启动一次真实评估。</p>
             </div>
             <div class="run-count">已完成 {{ overview.completed_runs }} 次运行</div>
           </div>
@@ -257,7 +257,7 @@ onUnmounted(() => {
             <article class="config-card">
               <div class="card-index">D</div>
               <label>Dataset</label>
-              <el-select v-model="selectedDataset" data-testid="dataset-select" aria-label="数据集">
+              <el-select v-model="selectedDataset" data-testid="dataset-select" aria-label="测评集">
                 <el-option
                   v-for="item in datasets"
                   :key="item.id"

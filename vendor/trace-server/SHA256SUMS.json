@@ -1,0 +1,21 @@
+{
+  "backend/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "backend/api/deps.py": "98b97004e3413373ad92decd42b074198a77d15f8a91822d1998f4acba2f12bf",
+  "backend/api/helpers.py": "ac05788c9f6fb80d473c4c6fe1f944664dae569162e8681aa0bbeb08b36c413e",
+  "backend/api/main.py": "cdf530ba0d21e91eaaf77f3feadc469e718a6947c08dad5eb4608259d32f7187",
+  "backend/api/routes/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "backend/api/routes/projects.py": "083de790761427e39180a70f36188c258b7b87922c61df0d18730569b29976e8",
+  "backend/api/routes/traces.py": "210c24f0c1aad6b5578cdeedbe606bb96edba6df6e19ca4af90cb3d5e69b0332",
+  "backend/api/schemas.py": "23895619ac675d02482433f55eb916a3acc952832cf9edf7eaeb7f6b659759b8",
+  "backend/config.py": "ab428c596b9ed8af39de0f73d3a3a45cdad055833c28b166d1dfc8e7f08e9abf",
+  "backend/db/__init__.py": "59dfdf72c2cfb8f2f6f8411000553111a4260818ea0bbd897e9af2fc6b3f22bb",
+  "backend/db/backends/__init__.py": "3f39320157ffcf2f0fb1cdd6c99eef26239a99ec5a8ccc7e3031090208584625",
+  "backend/db/backends/base.py": "96b4d07357f2902f06f5485ca1178a6a08d090113919bd299b5ffe939e08239e",
+  "backend/db/backends/database_backend.py": "0a8dd39e8e4b73bbf8fca7e0d5d9efd26e471e8176a0c49cac8bdff91ca948f8",
+  "backend/db/backends/file_backend.py": "6f5a44104a1dd0cf6700ae303c3a129dcd1688c46eebda584f330413ebb88bdb",
+  "backend/db/connection.py": "cca4e00afb060477122d5e39113383b47ceddd8cb43ba1fe71e2138c155a52ab",
+  "backend/db/models.py": "0ea5c4721b3662a50f888d5aa0b6bc8c80aae9ecef1215b45d87ee3ac87a3813",
+  "backend/db/repositories/__init__.py": "2bae34b1eca4729ce2e430177318472c7a3d48928c40c7f89a12c7872ae3d6b5",
+  "backend/db/repositories/trace_repository.py": "bf1d52d611387a8bf56c03e1d9c16208b0cdb2561b72b0be857030c5423cbee6",
+  "backend/scripts/run_api.py": "a6ff132a9311a6ce40e74e3f0669d90c4fa896f37203c2de6f90771bdf878bdc"
+}

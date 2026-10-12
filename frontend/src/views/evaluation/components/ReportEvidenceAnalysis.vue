@@ -220,7 +220,7 @@ watch(
         >
         <div class="case-heading">
           <h4>{{ caseName(selectedCase) }}</h4>
-          <button class="link" @click="reportCase = selectedCase">查看完整样本评测报告 ↗</button>
+          <button class="link" @click="reportCase = selectedCase">查看完整样本测评报告 ↗</button>
         </div>
         <p class="muted">当前展示所选评估器的未通过检查项。</p>
         <article v-for="(result, index) in caseResults" :key="index" class="case-result">
@@ -291,7 +291,7 @@ watch(
   <el-dialog
     :model-value="!!reportCase"
     @close="reportCase = ''"
-    title="样本评测报告"
+    title="样本测评报告"
     width="min(1200px,94vw)"
     top="4vh"
     destroy-on-close

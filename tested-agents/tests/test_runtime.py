@@ -170,3 +170,130 @@ def test_live_model_requires_configuration(monkeypatch):
     for key in ("BANK_MODEL_BASE_URL", "BANK_MODEL_API_KEY", "BANK_MODEL_NAME"):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(ValueError): LiveModel()
+
+
+@pytest.mark.parametrize("thinking", ["", "disabled", "enabled"])
+def test_live_model_thinking_and_tool_protocol(tmp_path, monkeypatch, thinking):
+    import httpx
+    from bank_agents import model
+    monkeypatch.setenv("BANK_MODEL_BASE_URL", "https://model.example")
+    monkeypatch.setenv("BANK_MODEL_API_KEY", "test-private-key")
+    monkeypatch.setenv("BANK_MODEL_NAME", "deepseek-v4-pro")
+    monkeypatch.setenv("BANK_MODEL_THINKING", thinking)
+    requests = []
+    def respond(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        assert request.headers["Authorization"] == "Bearer test-private-key"
+        if len(requests) == 1:
+            message = {"role": "assistant", "content": None, "reasoning_content": "protocol-context",
+                       "tool_calls": [{"id": "tool-1", "type": "function", "function": {"name": "status", "arguments": "{}"}}],
+                       "provider_extra": "not-forwarded"}
+        else:
+            message = {"role": "assistant", "content": '{"status":"ok"}'}
+        return httpx.Response(200, json={"choices": [{"message": message}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+    client_type = httpx.Client
+    monkeypatch.setattr(model.httpx, "Client", lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs))
+    live = model.LiveModel()
+    evidence = Evidence(tmp_path, str(uuid4()), str(uuid4()), "base", "test")
+    tools = [{"type": "function", "function": {"name": "status", "parameters": {"type": "object"}}}]
+    messages = [{"role": "user", "content": "test"}]
+    response = live.complete(messages, evidence, tools=tools)
+    assert "provider_extra" not in response
+    messages.extend([response, {"role": "tool", "tool_call_id": "tool-1", "content": "ok"}])
+    live.complete(messages, evidence, tools=tools, json_mode=True)
+    assert requests[1]["messages"][1]["reasoning_content"] == "protocol-context"
+    assert requests[1]["response_format"] == {"type": "json_object"}
+    if thinking:
+        assert all(r["thinking"] == {"type": thinking} for r in requests)
+    else:
+        assert all("thinking" not in r for r in requests)
+    evidence.finish({"status": "ok"})
+    assert "test-private-key" not in evidence.path.read_text()
+
+
+def test_live_model_rejects_invalid_thinking(monkeypatch):
+    from bank_agents.model import LiveModel
+    monkeypatch.setenv("BANK_MODEL_THINKING", "invalid")
+    with pytest.raises(ValueError, match="BANK_MODEL_THINKING"):
+        LiveModel()
+
+
+def test_workflow_definition_exports_without_executing_handlers():
+    from bank_agents.runtime import build_loan_workflow, loan_workflow_topology
+
+    def forbidden(_):
+        pytest.fail("building/exporting a workflow must not execute a node")
+
+    ids = {"extract", "submit", "credit", "decide", "act", "lookup", "end"}
+    build_loan_workflow(dict.fromkeys(ids, forbidden)).compile()
+    graph = json.loads(json.dumps(loan_workflow_topology(), ensure_ascii=False))
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    assert set(nodes) == ids | {"__start__", "__end__"}
+    assert nodes["decide"]["node_type"] == "rule"
+    assert nodes["extract"]["node_type"] == nodes["end"]["node_type"] == "llm"
+    assert all(nodes[n]["trace_name"] == f"workflow.{n}" for n in ids)
+    assert {(e["target"], e["relation"]) for e in graph["edges"] if e["source"] == "extract"} == {
+        ("lookup", "查询进度"), ("submit", "申请且资料齐全"), ("end", "缺资料或咨询"),
+    }
+    with pytest.raises(ValueError, match="handlers"):
+        build_loan_workflow({"extract": forbidden})
+
+
+@pytest.mark.parametrize("intent,text,expected", [
+    ("apply", "申请8万元农机", ["extract", "submit", "credit", "decide", "act", "end"]),
+    ("apply", "缺资料", ["extract", "end"]),
+    ("status", "查询进度", ["extract", "lookup", "end"]),
+    ("help", "贷款咨询", ["extract", "end"]),
+])
+def test_exported_workflow_edges_match_actual_branches(runtime, intent, text, expected):
+    from bank_agents.runtime import loan_workflow_topology
+
+    class IntentModel(ScriptedModel):
+        def structured(self, prompt, messages, evidence):
+            return {**super().structured(prompt, messages, evidence), "intent": intent}
+
+    runtime.model = IntentModel()
+    sid = runtime.store.create_session("workflow", "test-low")
+    result = runtime.execute("workflow", sid, str(uuid4()), text)
+    actual = [step["node_id"] for step in result["workflow_calls"]]
+    assert actual == expected
+    path = ["__start__", *actual, "__end__"]
+    edges = {(e["source"], e["target"]) for e in loan_workflow_topology()["edges"]}
+    assert set(zip(path, path[1:])) <= edges
+    assert result["final_state"]["status"] == ("approved" if "submit" in actual else "no_application")
+
+
+def test_agent_directory_exposes_only_workflow_graph_without_execution(runtime, monkeypatch):
+    from bank_agents.runtime import loan_workflow_topology
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("reading the agent directory must not execute models or business actions")
+
+    class NoBusinessStorage:
+        def __getattr__(self, name):
+            pytest.fail(f"reading the agent directory must not access business storage: {name}")
+
+    monkeypatch.setattr(runtime, "execute", forbidden)
+    monkeypatch.setattr(runtime.model, "complete", forbidden)
+    monkeypatch.setattr(runtime.model, "structured", forbidden)
+    monkeypatch.setattr(runtime, "store", NoBusinessStorage())
+    with TestClient(create_app(runtime)) as client:
+        response = client.get("/agents")
+        assert response.status_code == 200
+        records = {record["mode"]: record for record in response.json()}
+        assert set(records) == {"base", "workflow", "cloudshrimp"}
+        workflow = records["workflow"]
+        assert workflow["topology"] == loan_workflow_topology()
+        assert len(workflow["topology"]["nodes"]) == 9
+        assert len(workflow["topology"]["edges"]) == 10
+        assert workflow["agent_id"] == "loan-workflow"
+        assert workflow["agent_version"] == "v1"
+        assert len(bytes.fromhex(workflow["implementation_sha256"])) == 32
+        assert "topology" not in records["base"]
+        assert "topology" not in records["cloudshrimp"]
+        assert records["base"]["skills"] == workflow["skills"] == []
+        assert {skill["id"] for skill in records["cloudshrimp"]["skills"]} == {
+            "loan_application", "application_status", "general_help",
+        }
+        assert client.get("/agents").json() == response.json()

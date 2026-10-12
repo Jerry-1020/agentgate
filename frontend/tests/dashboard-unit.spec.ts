@@ -23,6 +23,7 @@ test('average is unavailable when reports are missing, and evaluator errors excl
 })
 test('events use actual timestamps; readable title does not concatenate dataset jargon',()=>{
  const record=run('e7523744-1234');expect(recentEvents([record]).map(e=>e.label)).toEqual(['创建任务'])
- expect(taskTitle(record)).toBe('贷款智能体 · 规则评测 · e7523744')
- expect(taskTitle(record,'ab')).toContain('A/B 对比')
+ expect(taskTitle(record)).toBe('贷款智能体919')
+ expect(taskTitle(record,'ab', '我的回归任务')).toBe('我的回归任务')
+ expect(taskTitle({...record, created_at:'2026-10-03T17:00:00Z'})).toBe('贷款智能体1004')
 })

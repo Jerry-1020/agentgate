@@ -22,7 +22,7 @@ const total = computed(
             : 'LLM 评分输出样例'
       }}
     </h2>
-    <span class="mock-label">Mock 演示 · 不参与真实评测</span>
+    <span class="mock-label">Mock 演示 · 不参与真实测评</span>
     <template v-if="kind === 'static'">
       <div class="grid two-columns">
         <article>
@@ -40,7 +40,7 @@ const total = computed(
         都声明可以处理“退款到哪里了”，存在路由歧义。此发现是描述层风险，不等于运行时已经路由错误。
       </p>
       <p>
-        建议：明确由退款查询处理退款进度，订单查询仅负责订单状态。修改资产后发布新版本，再用相应样本做动态评测验证。
+        建议：明确由退款查询处理退款进度，订单查询仅负责订单状态。修改资产后发布新版本，再用相应样本做动态测评验证。
       </p>
       <label class="field"
         >样例复核状态（仅本页）<select class="input" v-model="decision">

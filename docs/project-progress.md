@@ -1,6 +1,80 @@
 # AgentGate Project Progress
 
-Last updated: 2026-09-22
+Last updated: 2026-10-08
+
+## LLM 评估器保存、发布与按版本运行 — 2026-10-08
+
+用户批准并授权完成后推送 GitHub。当前实际入口 JudgeSystem 已接通服务端草稿、发布启用与版本历史；
+保存后刷新可恢复完整维度配置，保存失败保留编辑内容，写成功而刷新失败时保留已完成操作的状态。
+删除原前端临时草稿/历史状态。发布后旧版本保持不变，任务配置区显示当时的模型、维度提示词、权重与阈值。
+
+新增 `answer_quality@2`，单次模型请求返回逐维度分数、置信度、依据和复核标记；后端用十进制算法
+计算加权总分，前端同步严格校验权重合计。保留原 `answer_quality@1`，历史按其原协议运行。
+非法响应最多纠正一次，超时、错误和纠正均保留实际请求/响应证据，不能变为通过。
+复用 Catalog/SQLite/RunManifest，没有新增持久化表或迁移别名。
+
+单任务、平台 A/B 和稳定性任务均贯通精确版本引用，行内真实 Token、行外 local Token 与目录分流保持不变。
+复合评估器子项仅作为执行依赖，主评估器来自用户明确选择，避免重复参与总分计算。
+基线参考与职责记录在 [Catalog 实施计划](evaluator/catalog-implementation-plan.md)，
+用户验收步骤见 [LLM 持久化操作指南](evaluator/llm-persistence-guide.md)。
+
+后端全量回归：1550 项通过、40 项跳过（两条既有依赖弃用提示）。
+前端验收：88 项单元测试、6 项真实后端保存发布浏览器测试、5 项任务版本及登录分流浏览器测试通过；
+栈检查、lint、类型检查与生产构建通过。浏览器使用独立临时 SQLite，模型执行使用确定性客户端验证；
+本次未访问付费模型或真实行内网关。
+
+## In-bank complete evidence and BJS dispatch integrity — 2026-10-08
+
+- Autonomous Goal scoped to complete in-bank Trace retrieval and truthful BJS failures. User explicitly deferred in-bank Skill static analysis because no real version-definition API is available; the existing unavailable UI remains unchanged.
+- ChatABC base/workflow and Yunxia now require per-turn SSE Trace references, fetch configured project evidence and model attachments, validate session/Pod/input/output/completeness, and reuse SDK normalization. Missing evidence fails instead of becoming output-only success. Query credentials remain separate from login credentials; no conversation replay on query failure. Yunxia requests debugTrace.
+- Removed BJS transport-error simulated success. Tests verify waiting/retry/exhausted-failure transitions and no retry inside the dispatcher. Remote exactly-once acceptance/cancellation is not claimed.
+- Validation: full backend 1469 passed/40 skipped, including positive/negative tool-rule checks and Case input aliases (28 evidence tests total); loan runtime 32 passed; unchanged frontend 82 tests, lint, typecheck/build passed using the identical frontend source in the existing dependency worktree. Seven pre-existing Ruff diagnostics in the legacy adapters/execution tests remain; new evidence and changed BJS/query files pass Ruff. Existing dependency and frontend chunk-size warnings remain.
+- Verified real local HTTP Trace query transport with fixture gateways, not a real in-bank deployment. See [configuration and acceptance](inbank-evidence-acceptance.md), [implementation ownership](inbank-evidence-implementation.md).
+- Restarted the full local acceptance stack with the current source and preserved/backed up the existing database. All nine external loan smoke runs (three agents × rule/LLM/hybrid) completed with passing evaluation results, numeric scores and remote Trace evidence; model records identify DeepSeek v4 Pro. Real in-bank integration remains unverified. After autonomous implementation concluded, the user explicitly authorized committing and merging/pushing this work to `origin/integration/baibo`.
+
+## Six-target HTTP Trace reporting — 2026-10-08
+
+- Added authenticated complete-bundle upload and independent receiver storage without modifying original vendor sources. The three loan targets transmit actual SDK events and LLM attachments; three protocol peers transmit explicitly simulated traces, including simulated failure status.
+- Local full startup enables strict reported evidence and shared private reporting credentials; in-bank gateway/Trace query configuration stays separate. The UI labels simulated traces. Remote sender endpoints require HTTPS; physical cross-machine/TLS deployment is documented, not claimed as tested.
+- Six tasks/nine turns passed real HTTP acceptance (three actual DeepSeek v4 Pro loan executions). Receiver queries still returned all nine traces and nine LLM attachments while sender evidence was temporarily moved aside. Files were restored.
+- Verification:1398 backend tests passed,35 skipped;32 tested-Agent tests;82 frontend unit tests;lint/typecheck/build passed. See [protocol, deployment and run IDs](trace/trace-reporting.md). Current feature work is on `feature/trace-reporting`; no merge or remote push is included in this Goal.
+
+## Portable local delivery — 2026-10-08
+
+- Completed the local eight-process launcher with the bundled upstream Trace Server file backend and local Agent directory. Unified Redis6397 and persistent runtime paths; retained BJS scheduling and configured in-bank gateway/Trace routing.
+- Shipped seven loan evaluators using the recipient's model, alongside the existing three v3 datasets. Added read-only v2 historical results/report and a command that creates nine fresh rule/LLM/hybrid tasks.
+- Replaced stale installation instructions. Removed automatic global process termination from service-start commands; pre-existing services are preserved.
+- Verified clean-directory installation, all nine real DeepSeek v4 Pro smoke runs, browser Trace/LLM scores, shutdown/restart persistence, and wheel seed resources. Two LLM-only tasks scored85 below the existing95 task gate; evidence is retained, not converted to pass.
+- Validation:1385 backend tests passed (35 skipped),29 tested-Agent tests,82 frontend tests,lint/typecheck/build. See [delivery evidence](bank-agents/delivery-verification-20261008.md).
+
+## Annotation v2 per-turn editor — 2026-09-26
+
+- Enabled per-turn forms for the template's selected annotation objects. Dataset review shows original input, actual output and source expectations beside compact dimension scores, tags, a single-line comment and a human expected-answer field.
+- Added independent v2 object records with local persistence, range validation, draft/completed status and unsaved-change protection. Original datasets, runs and automatic evaluation evidence remain unchanged.
+- Verification: 53 frontend unit tests, typecheck/build and affected-file ESLint passed; browser checks covered selected objects, multiple turns, range rejection, save/reopen and completed state. See [implementation record](annotation/implementation-plan.md).
+
+## Task and dataset names — 2026-09-26
+
+- Task creation starts with a required name. Names persist with platform tasks and appear in task lists, result headings and v2 annotation task filters. Visible historical tasks are named once using Agent name plus the original Shanghai-calendar month/day (for example 924).
+- Dataset creation starts with its existing name field; cards keep using stored dataset names and historical dataset names are unchanged.
+- Verification: 1333 backend tests passed, 35 environment-dependent skips; 50 frontend unit tests, typecheck, build and affected-file ESLint passed. Browser-created named task completed and displayed its configured name in the list and result page. See [implementation details](task-names/implementation.md).
+
+## Annotation v2 template and conversation list — 2026-09-26
+
+- Added independent v2 template creation with three optional annotation groups, default 0–100 range, and separate details/start actions on cards. Existing v1 behavior is retained.
+- Added a dedicated v2 conversation list with evaluation task, aggregate score, evaluation time, content-based column filters, score interval and Bad Case shortcut. Exemption is browser-persisted and reversible.
+- The user confirmed this stage covers the list, filters and exemption; the three v2 scoring forms remain a later stage. Loading retains the existing limit of 200 completed runs.
+- Verification: 50 frontend unit tests, typecheck, build and affected-file ESLint passed. Browser checks covered 36 conversations, 17 Bad Cases, score ranges, combined filters, pagination, conversation details and exemption reload/recovery. See [implementation plan](annotation/implementation-plan.md).
+
+## Human annotation feedback loop — 2026-09-24
+
+- Connected annotation templates to the existing login-aware platform directory picker; target matching pins environment, team, Agent, branch and version. Added a completed-run source entry for historical Demo/tool traces.
+- Added per-tool-span scores, tags, comments, explicit call/argument expectations and completeness checks. Inputs and actual Trace evidence remain unchanged; human scores are audit notes, while explicit expectations become existing rule contracts.
+- Added previewed export to a new dataset draft and writeback to the original dataset draft. Existing checks at unrelated paths, other cases, published versions and historical reports are preserved. Deleted/changed source cases and changed preview drafts require manual reconciliation. Writes use current dataset APIs; multi-user atomic concurrency is not claimed.
+- Resolved template-library refresh inconsistency by deriving the library from persisted task snapshots; fixed its route display. Annotation persistence remains browser-local, with no cross-browser/team synchronization claim.
+- Browser acceptance completed on 5197: external Cloudshrimp branch/version selection; message/tool score validation; refresh recovery; export and publish; Demo A/B automatic grading (risky output fails, fixed version passes Final Output/Required Tool/Tool Arguments); follow-up annotation/writeback, published v1 hash unchanged. Restarted stopped Redis/Worker/Scheduler so actual jobs complete.
+- Verification: 1327 Python tests passed, 35 environment-dependent skips, two dependency warnings; 44 frontend unit tests passed; frontend typecheck/build and affected-file ESLint passed with existing bundle-size warning.
+- See [end-to-end operation guide](annotation/end-to-end-guide.md) and [implementation plan](annotation/implementation-plan.md). Changes remain uncommitted on `feature/annotation-feedback`; pre-existing task-deletion edits are preserved.
 
 ## Agent platform local acceptance — 2026-09-22
 
@@ -320,3 +394,149 @@ committed and pushed; review and merge remain.
 - Persisted Optimization Reports and cross-Run history.
 - Suggestion review and application lifecycle.
 - Automatic regression Run creation from accepted suggestions.
+
+### 2026-09-27 · V2 逐评估器人工标注
+
+完成本次运行快照驱动的评估器列表、规则证据/结果/关键代码与左右联动折叠、LLM 实际请求提示词留存和历史重建标识、逐评估器评分与提示词保存。操作步骤见 docs/annotation/end-to-end-guide.md。后端全量回归 1337 passed / 35 skipped，前端 60 项测试及构建通过；规则浏览器闭环通过，LLM 使用录制模型验证，尚无本地历史 LLM 会话供真实页面验收。
+
+
+### 2026-09-29 · 样本执行轨迹与完整 JSON 联动
+
+样本详情的测评模块下方接入 TraceExplorer：左侧按父子关系展示执行节点、状态和时间条，右侧展示接口返回的完整只读 Trace JSON。点击节点展开相关折叠范围、滚动并高亮对应 Span；切换样本重置选中状态。trace-presentation 仅整理显示数据，保留原始 JSON 顺序和未知字段，处理缺失父节点、循环关系、缺失或无效时间。
+
+验证：17 项相关单元测试、类型检查、局部 ESLint/Prettier 和生产构建通过；隔离浏览器验证覆盖折叠展开、只读、重置及窄屏，当前本地应用已有样本通过全部节点展示、JSON 完整性、点击定位和高亮检查。仅可展示接口已返回的节点，不补造缺失链路。
+
+### 2026-10-06 · 历史标注功能恢复（隔离分支）
+
+从 10 月 5 日遗留的 Git stash 快照恢复 V2 模板创建、会话列表与标注、评估器证据、测评集反馈及 Trace 图。恢复分支 `feature/restore-annotation-v2` 以 `refactor-1` 为起点并对齐 `integration/baibo` 的已提交进度；现有工作区的未提交 Agent 拓扑改动未纳入。数据集创建页面沿用当前已更新的行内/行外目录与图谱实现，不覆盖为旧快照。V2 模板继续保存在浏览器本地存储，旧 V1 数据使用原有存储键。
+
+验证：前端类型检查、lint、生产构建和 75 项单元测试通过；后端全量回归 1348 passed / 35 skipped。隔离页面 `http://127.0.0.1:5198/#/annotations` 已完成行外登录、选择本地智能体与版本、创建 V2 模板、刷新后重新登录验证卡片恢复，并进入 V2 会话工作台。隔离数据库没有已完成运行，所以逐轮标注的页面闭环尚未实测。分支尚未合入 `integration/baibo`。
+
+
+### 2026-10-06 · 历史改动二次核对与弹窗宽度恢复
+
+核对来源：`recovery/annotation-v2-snapshot`（`d18301f`）、其未跟踪文件快照、当前 `integration/baibo` 提交、Git reflog 中的遗留提交，以及「记录并优化需求描述」历史会话。历史快照的 60 个已跟踪改动文件和 21 个新增文件在恢复工作树中均存在；恢复时已适配的目录、类型、存储与行内模型修复单独检查，未用旧文件覆盖新实现。`origin/goal/p1-demo` 与 `origin/integration/p1-new` 没有当前前端样式文件，本轮使用当前前端及用户历史要求恢复，不变更架构。
+
+| 核对项 | 发现与处理 |
+| --- | --- |
+| 创建测评集弹窗 | 后续表单替换丢失了原 800px 样式；恢复为 `min(800px,96vw)`，内容区域保持 68vh 上限。 |
+| 标注模版、详情等弹窗 | 全局 `width: min(400px,92vw) !important` 压过各组件声明宽度；改为遵循 Element Plus 的宽度变量，未声明宽度仍默认 400px，限制不超过 96vw，全屏弹窗排除普通尺寸限制。移除任务、样本向导、LLM 设计中已无必要的强制宽度补丁。 |
+| 创建测评集字段 | 恢复“01 测评集名称”、名称下方单行选填描述、“02 关联智能体”，场景标签明确选填；清除残留的“数据集”页面文案和一个多余的 > 字符。 |
+| 标注模版默认描述 | 恢复历史快照中“通用消息与工具评分维度，复制后可调整评分范围与标签。”，不改写用户已保存模板。 |
+| Agent 目录与图谱 | 保留 10 月 6 日新实现及行内／行外路由；主工作区尚未提交的任务拓扑改动仍在原处，没有混入恢复分支。 |
+| V2、Trace、样本期望、评估器证据 | 对照快照，相关新增实现和测试均存在，未发现进一步的整文件遗漏；这不替代真实模型及所有历史需求的端到端验收。 |
+
+浏览器实测：1440px 视口下创建测评集 800px、创建 V2 模版 1080px，均按声明宽度生效；默认窄窗口下 V2 为视口的 96%，弹窗无横向溢出。名称顺序、描述单行和选填文案已检查。前端 75 项单元测试、类型检查、lint 和生产构建通过；本轮没有修改后端。代码仍位于 `feature/restore-annotation-v2` 的隔离工作树，尚未合入主工作区。
+
+
+### 2026-10-06 · 验收页面加载历史测评数据
+
+5198 页面此前使用 `/private/tmp/agentgate-annotation-restore.db`，仅含自动初始化的 1 个贷款演示测评集，无运行记录。只读核查发现原工作区 `runtime/agentgate.db` 保留 11 个测评集、21 个版本、26 个当前格式任务记录、38 次运行和 98 条 Trace。通过 SQLite backup 创建独立副本 `/Users/baibo/915-HN-AgentGate/runtime/recovery-preview/agentgate-history-20261006.db`，完整性检查为 ok，随后将 8098 验收后端的 `AGENTGATE_DB` 切到该副本。原库及此前临时库均保留；页面此后的编辑仅影响副本。
+
+新版接口实际返回：测评集 11 条、任务记录 26 条、运行 38 条，均 HTTP 200。浏览器已确认测评集列表共 11 个；任务默认近 7 天只有 1 项，切到近 30 天后为 32 项（26 个任务以及 6 个未绑定任务的历史运行）。该切换为当前页面筛选，没有改动用户之前要求的近 7 天默认值。历史记录可继续用于 V2 与 Trace 验收，此前“隔离库没有已完成运行”的限制已解除。
+
+另发现独立模拟环境 `runtime/agent-platform/local/agentgate.db` 中有 2 个测评集、10 个任务、12 次运行，以及旧交付快照 `delivery/2026-09-16/agentgate.db` 中有 18 个测评集、53 次运行。它们属于不同环境/旧结构，本次未混合或覆盖到主历史副本。默认启动只初始化贷款测评集和目标定义，不自动生成历史任务；平台模拟和三种贷款模式另有种子脚本。
+
+
+### 2026-10-06 — 历史智能体接入关联目录
+
+行外 localAgentDirectory 组合 8119 的三类平台模拟智能体与 API 本地目录：Loan Agent 两版本、8107 的贷款基础编排/工作流/云虾三模式，共 7 个逻辑智能体。贷款服务不可达时显示离线条目；行内仍使用 agentDirectory 和行内 token。版本选项传递真实描述符与明确执行类型，贷款云虾无需平台分支。新建任务分别提交到 platform、bank 或 demo 执行入口；测评集拓扑使用本地真实描述符；V1/V2 标注保存 source/adapter 并按历史身份匹配会话。已通过 UI 创建“接入验收 · 贷款云虾”V2 模板，匹配 12 条既有会话。
+
+运行环境沿用独立历史副本，新增隔离队列 6398、Worker、贷款服务 8107、读取本次 SDK 输出的 Trace Server 8218。原有 8210 服务保持不动。模型复用旧工程外部环境文件，密钥未写入代码；上游 glm-5.3 请求返回 HTTP 403，三种贷款新运行诚实记录 failed，真实模型验收尚未通过，需要可用模型配置。平台模拟基础两版本、工作流及云虾两分支共 5 次运行 completed，内置 Demo 两版本共 2 次 completed，7 次成功运行均可读取新 Trace。验收结果保存在主目录 runtime/recovery-preview/local-agent-verification.json。
+
+验证：前端 lint、typecheck、76 项单测及生产构建通过；后端 1349 passed、35 skipped。新增测试覆盖本地目录真实来源/版本、离线条目、任务名称、标注来源与登录模式隔离。当前变更保留在恢复工作树，未合并、未覆盖原工作区未提交内容。
+
+补充页面验收：直接在“新建测评任务”选择 Loan Agent → loan-agent-v2-fixed → 高风险贷款策略评估 v1，提交“接入验收 · 页面选择 Loan Agent”。运行 1a738eda-cc31-40e4-87b8-88fb47f21d59 完成，manifest adapter_type=demo_loan，页面显示 1/1、100 分。截图保存在主目录 runtime/recovery-preview/all-local-agents.png 和 loan-history-associated.png。
+
+
+### 2026-10-06 — 三种贷款智能体切换 DeepSeek v4 Pro
+
+已使用环境中的有效 DEEPSEEK_API_KEY（不落库/不写源码）连接 https://api.deepseek.com，模型 deepseek-v4-pro，BANK_MODEL_THINKING=disabled。原 8107 服务已重启，基础编排、工作流、云虾的描述符和实际 Trace 均报告 deepseek-v4-pro。保留旧运行及旧描述符，不修改历史证据；原 glm-5.3 403 阻塞已通过本次模型切换解除。LLM 评估器连接不在本次范围内。
+
+LiveModel 支持显式 thinking 参数并校验取值，工具消息保留 reasoning_content 以满足 DeepSeek 协议；未配置 thinking 时不发送该参数。tested-agents 全部 23 项测试通过（含三种配置、工具循环协议、JSON 输出及密钥不进入 Trace）。参考官方 Chat Completions / Thinking Mode 文档： https://api-docs.deepseek.com/api/create-chat-completion/ ，https://api-docs.deepseek.com/guides/thinking_mode/ 。
+
+真实验收：三模式各跑 high 和 multi 两个合成样本，共 6 样本、9 轮，3 任务全部 completed、综合分均 1.0、18 项评估器结果均 pass。逐个检查新 Trace 的 trace_sdk.model=deepseek-v4-pro；高风险结果 pending_review，多轮补齐结果 approved。
+
+- base：aec9ffe7-9e78-480b-8aa5-a49c89bb688f
+- workflow：1f4c78f8-783d-4a47-916e-ce90978bcc33
+- cloudshrimp：8e375007-4d9e-49de-bd1f-157bea38dd86
+
+本机启动脚本：主目录 runtime/recovery-preview/run-bank-deepseek.py（从环境读取密钥）；验收记录 deepseek-v4-pro-verification.json，页面截图 deepseek-v4-pro-tasks.png。测评任务页搜索“DeepSeek v4 Pro 验收”即可查看三条结果和样本 Trace。上述 100 分仅代表这组规则验收样本。
+
+
+### 2026-10-06 — 贷款云虾 LLM 评估器配置
+
+复用现有 answer_quality 实现、Evaluator Catalog 版本发布、full_trajectory 证据选择及 Judge 严格 JSON 契约，未新增执行框架或修改被测智能体。创建并启用“贷款云虾 · 回答可信度与审批解释”（113ee56f-3136-4d7d-9b43-ab47dfaeea06），当前发布 v3。评分提示词定义事实一致性40%、审批原因解释30%、请求与多轮处理20%、测试边界10%，通过阈值0.85、最低置信度0.75；原因混淆最高0.79，关键事实矛盾/编造审批/真实放款最高0.49，关键证据不足转review。权重由LLM依据评分提示计算，后端目前仅持久化一个整体score，不提供独立的维度得分字段。
+
+v1试运行发现模型把信用评分的 [redacted] 当成事实矛盾；v2明确脱敏值不属于可核验数值，不据此扣分或反推出值。后续发现“因为高风险（存在阻断标记）”被过宽解释，v3加入并列归因、括号归因、简洁正确归因等评分锚点。7类校准样例全部符合预期：原历史混淆回答与括号变体均0.79/fail，两种正确回答均1.0/pass，虚构审批及提示注入均fail，独立证据缺失review。这些是开发者构造的校准样例，尚非人工标注一致率或泛化准确率。
+
+本地预览API/Worker的默认Judge连接已由旧GLM切换为 https://api.deepseek.com / deepseek-v4-pro，密钥只读环境 DEEPSEEK_API_KEY，通过 env:AGENTGATE_JUDGE_API_KEY 引用，不写入配置JSON。此默认连接也由当前预览的Skill分析和根因分析复用；不修改行内网关或登录Token路由。被测目标使用行外local_bank云虾，synthetic token=local。所有验收数据来自内置合成测试客户；发送前沿用工程脱敏，不解除脱敏。
+
+配置与验收证据位于主工作区 runtime/recovery-preview/：cloudshrimp-loan-judge.json（可重建的创建请求）、cloudshrimp-loan-judge-published.json（v3快照）、cloudshrimp-judge-calibration.json（7类校准结果）。保留v1/v2任务作为校准试运行，不改历史结果。最终v3验收任务 a730b7ed-ec57-4660-b34a-e4176e025f85 使用贷款云虾测评集v1全部8个场景，并同时运行 final-state、required-tool、forbidden-tool 和本LLM评估器。
+
+最终验收完成：a730b7ed-ec57-4660-b34a-e4176e025f85 全部8样本完成，耗时174.3秒，无执行或评估异常。8项LLM结果均留存deepseek-v4-pro真实Judge请求/响应，7通过、1失败、0复核，LLM均分89.875；阻断样本因拒绝原因混淆得到79分/fail。规则检查20通过、4不适用，无失败。页面综合分96.6包含规则分，不等于LLM均分；独立维度分数未返回，页面诚实显示“—”，样本详情“评估结论与依据”显示LLM整体分与问题证据。完整输出 cloudshrimp-judge-v3-report.json、摘要 cloudshrimp-judge-verification.json、截图 cloudshrimp-judge-v3-result.png 均保存在主目录 runtime/recovery-preview/。已通过浏览器确认自建评估器启用、最终任务8/8完成及失败样本79分原因。此次仅配置和文档变更，未改业务源码，未进行无关全量回归；现有行内目录/Token路由保持不变。
+
+
+### 2026-10-06 — 修复LLM结果分数列为空
+
+结果表曾将LLM rubric的每条标准展开成独立分数列，而Judge契约只返回评估器整体score，导致已有79分等真实评分未在主表展示。现按运行快照中的主评估器各生成一列，直接读取对应EvaluationResult.score；任务结果、样本详情评分条及CSV共用逻辑。评分区改称“评估器得分”，不虚构独立维度分数，不改变历史分数和总分算法。任务a730b7ed-ec57-4660-b34a-e4176e025f85页面已验证LLM列依次显示79/85/100/85/85/100/85/100，样本详情显示79分。7项结果逻辑测试、前端typecheck与lint通过。截图：主工作区runtime/recovery-preview/llm-score-columns-fixed.png。
+
+
+### 2026-10-06 — Skill 静态分析页面接通与真实验收
+
+复用现有 skill_analysis 职责关系分析、不可变报告、人工复核与任务关联接口，接通当前 TaskResults 的“Skill 静态分析”页签。按本次运行的精确 TargetDescriptor 分析，读取历史报告并持久关联任务；不重新执行测评用例。新建任务支持对行外本地已注册描述符预先分析并保存报告关联，切换智能体/版本/模式会清理过期结果；行内不回退到本地 Demo，运行后可按任务描述符分析。少于两个 Skill 时明确不适用。未新增目录或后端抽象。
+
+页面展示逐对关系、模型置信度、完成数量、问题依据/建议、人工复核和原始报告，明确只覆盖职责描述重叠/冲突/重复/歧义，不表示代码安全、Prompt-Tool 一致性或实际路由准确率。云虾任务 a730b7ed-ec57-4660-b34a-e4176e025f85 已通过 DeepSeek v4 Pro 真实分析：3 Skills、3/3 比较、completed、0 findings、0 errors，三对关系均 none（模型置信度0.95）。报告 54d4b198-5a50-4ee8-9f13-ca3d94962076 已持久关联，切换页签后可重新读取。
+
+验证：前端 lint、78 项单测、类型检查及生产构建通过；Skill 分析模型/应用/存储/API及任务关联相关后端57项测试通过。证据：主工作区 runtime/recovery-preview/cloudshrimp-skill-static-verification.json 与 cloudshrimp-skill-static-analysis.png。验收入口：任务详情 → Skill 静态分析。
+
+
+### 2026-10-07 — 贷款工作流图谱区分完成
+
+runtime.py 共用执行与导出的 StateGraph 定义，保持7个业务节点、开始/结束、10条连线及 workflow.* Trace 名称。/agents 返回 workflow topology；local_bank.py 校验节点ID、类型和连线端点后固定到描述符，异常图拒绝，不回退为工具图。
+
+TargetStructure.vue 对工作流按有向层级展示，标注LLM/规则/工具/起止、箭头和三条条件分支。基础编排仍为 Agent → Tool（7节点/6边），云虾为 Agent → Skill → Tool（10节点/10边），工作流9节点/10边。点击节点显示职责及关联条件；循环图保留关系并提示不作线性排序。此轮只区分结构图，没有新增编辑画布或Trace到JSON联动。
+
+本地预览8107、8098及Worker已更新。三类图谱已逐项页面验证，历史任务1f4c78f8-783d-4a47-916e-ce90978bcc33保留原图快照，行内/行外目录与token路由不变。入口：测评任务 → 新建测评任务 → 贷款智能体 · 工作流 → v1 → 智能体图谱。
+
+验证：贷款服务29项、适配器相关133项、前端81项测试通过；前端lint、类型检查与构建通过。主工作区 runtime/recovery-preview/workflow-topology-verification.json 保存实际目录及历史快照证据；workflow-agent-topology.png 为页面截图。
+
+
+### 2026-10-07 — 三类贷款智能体核心专项测评完成
+
+按用户授权直接完成实施和验收。复用当前多轮 Case/Expectation、状态/工具/Skill 路由规则、answer_quality full_trajectory、已发布评估器和 composite(all)；新增 ExecutionPathExpectation 与 execution_path 规则实现，未扩展默认内置评估器列表，使用已发布的用户规则配置。规则逐轮检查工具顺序/次数/额外调用、完整工作流路径、真实 Skill 执行及工具祖先归属，要求成功的轮根节点和成功的执行状态；根据开始时间排序，避免完成事件顺序误判。local_bank 将真实 workflow.* / skill.* SDK spans 规范化，未构造执行证据。前端保存、JSON/Excel 导入导出保留新断言，样本编辑页展示只读明细。
+
+基线评估：本地未能解析 goal/p1-demo 与 integration/p1-new，不能声称已比较其实现；本次采用当前恢复分支既有领域、适配器、评估器与数据集契约，新增路径能力独立于目录查询，未改变行内/行外目录和 Token 分流。真实验收在行外本地预览进行，行内依赖回归测试，未连接实际行内网关。
+
+创建3套专项集，每套8样本、10轮：基础编排覆盖审批三分支、缺资料、多轮补齐、查询和绕过政策；工作流覆盖全部7业务节点与10条图连线（含逻辑起止边），包括完整申请、查询、缺资料/咨询短路；云虾覆盖 loan_application/application_status/general_help 三个 Skill、跨轮路由切换、禁止未注册 Skill 和工具归属。三类申请后查询样本均从实际状态核实申请编号连续。只统计这组核心场景，不代表所有输入或异常路径完整覆盖。
+
+初次配置校验发现 tool_argument 路径应为 arguments.amount / arguments.purpose，已发布数据集v2，旧任务改名“配置校验 v1”并保留结果，未篡改历史。最终任务全部锁定v2，每个智能体各运行规则、LLM、规则＋LLM三种配置，共9任务、72样本、90轮；被测模型与48条真实 Judge 记录均为deepseek-v4-pro。全部任务 completed，无执行/评估异常、无待复核；67样本通过、5样本失败。
+
+| 智能体 | 规则 | LLM | 规则＋LLM |
+| --- | --- | --- | --- |
+| 基础编排 | 8/8 | 7/8 | 8/8 |
+| 工作流 | 8/8 | 7/8 | 7/8 |
+| 云虾 | 8/8 | 7/8 | 7/8 |
+
+以上为通过数。五条失败均为阻断客户回答的原因混淆，LLM给79分：正确执行拒绝，但未明确 blocked 是决定性原因。独立任务重新执行智能体，输出不同，基础编排联合任务通过不代表与LLM任务共享同一回答。联合任务使用 all 门禁，子LLM失败即整体失败；均分仍沿用现有聚合算法，云虾失败样本综合97分也显示未通过，不将高均分当作通过。
+
+入口：测评集搜索“核心专项”；测评任务搜索“核心专项验收”。主目录 runtime/recovery-preview/loan-specialized-v1-index.json 保存3集、7个发布评估器、9任务ID（文件名历史保留，内容数据集v2）；loan-specialized-summary.json 为完整摘要；loan-specialized-coverage.json 为逐轮路径、Skill、模型与编号连续性审计；loan-core-*-results.json 为结果。create-loan-specialized.py 已同步正确参数路径。前端截图 loan-specialized-final.png。
+
+验证：后端1380通过、35跳过（2条现存告警）；前端82项测试通过，lint、类型检查和生产构建通过（既有包体积提示）。页面核实工作流路径对照、云虾第二轮 Skill 切换、联合任务真实分数和失败门禁。临时增加的两个 Worker 在任务完成后停止，常驻预览API/Worker/贷款服务保留，未提交或合并已有恢复分支改动。
+
+
+### 2026-10-07 — 核心专项测评集随源码分发
+
+复用 demo/bootstrap.py 的启动初始化职责，新增包内 loan-core-datasets.json 保存三套最新v2合成样本（24样本30轮），无本机路径、模型连接、任务或凭据。SQLite API启动自动原子写入缺失的数据集及发布版本；已存在ID完全保留，包括归档、用户修改和后续版本。MySQL启动不自动写入测试集，未改变行内/行外智能体目录和token路由。空数据库API测试已确认原示例加三套专项集可见，重启持久化测试验证无重复、无覆盖。README补充下载和查看方法；本次未提交或推送，分发需使用包含这些变更的源码。
+
+最终验证：后端全量1381通过、35跳过（2条既有告警）；新安装API可见性及重复启动保护6项针对性测试通过。
+
+
+### 2026-10-07 — 金额审批策略用例v3
+
+读取本地贷款测试数据库：已有5万拒绝、8万三种结果、20万通过、30万转人工记录；profiles只有test-low(720/low/未阻断)、test-high(580/high/未阻断)、test-blocked(400/high/阻断)。审批函数先判blocked拒绝，再判高风险或评分<650或amount>200000转人工，否则通过。三套核心集发布v3：保留原场景，将阻断样本改5万，新增199999/200000/200001/300000元低风险案例，每套12样本14轮。199999和200001为依据规则新增的边界输入，不声称原数据库已有记录。同步参数金额、状态和工具路径断言、源码种子及README；历史v2和既有任务结果保留。本次验证用例配置与真实决策函数，不重新执行付费模型测评。
+
+
+### 2026-10-08 — 提交至 integration/baibo
+
+用户授权将当前恢复分支成果提交并推送到远程baibo分支，实际目标为origin/integration/baibo。包含标注v2恢复、完整Trace展示、贷款图谱与Skill分析、核心专项规则与v3种子数据，以及样本详情结果栏加宽与单轮轮次目录统一。主工作区另存的EvaluationTaskForm.vue与agent-topology.ts未纳入本次提交；不包含运行数据库、依赖软链接或凭据。提交前后端1381通过/35跳过，前端82通过，贷款运行时29通过；前端lint及生产构建通过。

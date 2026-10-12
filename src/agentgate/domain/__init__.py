@@ -20,7 +20,7 @@ from .evaluator import (
     EvaluatorSeverity, EvaluatorSource, EvaluatorSpec,
 )
 from .expectation import (
-    Condition, Equals, Expectation, MatchesJsonSchema, MatchesPattern, MustBeMissing,
+    Condition, Equals, ExecutionPathExpectation, Expectation, MatchesJsonSchema, MatchesPattern, MustBeMissing,
     OneOf, OutputExpectation, PolicyExpectation, SkillRouteExpectation,
     StateExpectation, ToolArgumentExpectation, ToolCallExpectation, WithinRange,
     WithinTolerance,

@@ -60,14 +60,14 @@ const pageItems = computed(() =>
     <div class="dataset-panel-heading">
       <div>
         <span class="step">DATASETS</span>
-        <h2>评测集</h2>
+        <h2>测评集</h2>
       </div>
     </div>
-    <el-input v-model="query" clearable placeholder="搜索评测集" aria-label="搜索评测集" />
-    <select class="input" v-model="group" aria-label="评测集分类">
-      <option value="all">全部评测集</option>
+    <el-input v-model="query" clearable placeholder="搜索测评集" aria-label="搜索测评集" />
+    <select class="input" v-model="group" aria-label="测评集分类">
+      <option value="all">全部测评集</option>
       <option value="demo">内置业务样例</option>
-      <option value="business">业务评测集</option>
+      <option value="business">业务测评集</option>
       <option value="regression">回归草稿与集合</option>
       <option value="validation">自动集成验证记录</option>
     </select>
@@ -94,7 +94,7 @@ const pageItems = computed(() =>
           >
         </span>
       </button>
-      <el-empty v-if="!filtered.length" description="暂无评测集" :image-size="72" />
+      <el-empty v-if="!filtered.length" description="暂无测评集" :image-size="72" />
     </div>
     <div class="toolbar">
       <button class="link" :disabled="currentPage <= 1" @click="currentPage--">上一页</button
@@ -110,12 +110,12 @@ const pageItems = computed(() =>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="emit('copy', items.find((item) => item.id === selectedId)!)"
-              >复制评测集</el-dropdown-item
+              >复制测评集</el-dropdown-item
             >
             <el-dropdown-item
               divided
               @click="emit('archive', items.find((item) => item.id === selectedId)!)"
-              >归档评测集</el-dropdown-item
+              >归档测评集</el-dropdown-item
             >
           </el-dropdown-menu>
         </template>

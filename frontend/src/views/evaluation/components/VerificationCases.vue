@@ -95,7 +95,7 @@ function submit() {
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="form-grid">
       <label class="field"
-        >评测集<select class="input" aria-label="验证评测集" v-model="dataset">
+        >测评集<select class="input" aria-label="验证测评集" v-model="dataset">
           <option value="">请选择</option>
           <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.name }}</option>
         </select></label
@@ -136,7 +136,7 @@ function submit() {
       </table>
     </div>
     <p v-if="version !== null && !rows.length" class="empty">
-      没有匹配用例，可取消筛选，或到评测集中补充草稿并发布。
+      没有匹配用例，可取消筛选，或到测评集中补充草稿并发布。
     </p>
     <template #footer
       ><button class="secondary" @click="emit('close')">返回</button

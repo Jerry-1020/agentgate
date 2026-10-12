@@ -16,7 +16,7 @@ from agentgate.dataset.versioning import (
     reorder_cases as reorder_draft_cases,
     with_case,
 )
-from agentgate.domain import Case, Dataset, DatasetVersion, utcnow
+from agentgate.domain import Case, Dataset, DatasetVersion, DatasetVersionStatus, utcnow
 from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
 
@@ -83,6 +83,20 @@ class DatasetManagement:
 
     def archive_dataset(self, dataset_id: str) -> Dataset:
         return self.update_dataset(dataset_id, archived=True)
+
+    def delete_record(self, dataset_id: str) -> Dataset:
+        """Permanently remove a Dataset that never published a version."""
+        dataset = self.get_dataset(dataset_id)
+        user_team_id, _, _ = _user_context()
+        versions = self.repository.list_dataset_versions(
+            dataset_id, include_draft=True, user_team_id=user_team_id
+        )
+        if any(version.status == DatasetVersionStatus.PUBLISHED for version in versions):
+            raise ValueError(
+                "Dataset with published versions cannot be deleted; archive it instead"
+            )
+        self.repository.delete_dataset_record(dataset_id, user_team_id=user_team_id)
+        return dataset
 
     def list_versions(
         self, dataset_id: str, include_draft: bool = True

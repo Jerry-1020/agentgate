@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import type { EvaluatorSummary } from '../../../api/evaluations';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  api,
+  request,
+  type Definition,
+  type EvaluatorDetail,
+  type EvaluatorSummary,
+} from '../../../api/evaluations';
 import EvaluatorImport from './EvaluatorImport.vue';
 import RuleEvaluatorCreate from './RuleEvaluatorCreate.vue';
-import { dimensionNames, chineseEvaluatorText, ruleExamples } from '../utils/evaluator-display';
+import { dimensionNames, ruleExamples } from '../utils/evaluator-display';
 import { evaluatorScenarios, evaluatorTechnicalChecks } from '../utils/evaluator-guidance';
-const creatingRule = ref(false);
 import EvaluatorModelSelect from './EvaluatorModelSelect.vue';
-import { modelRefError, modelRefLabel } from '../utils/evaluator-model';
+import { modelRefLabel } from '../utils/evaluator-model';
 import {
   evaluatorCatalog,
   evaluatorDetails,
@@ -15,11 +20,12 @@ import {
   assetsLoading,
   assetsError,
   copy,
-  exportUx,
 } from '../../../stores/review-assets';
 import {
-  evaluatorDesigns,
-  evaluatorDesignHistory,
+  evaluatorDesignError,
+  evaluatorDraftDefinition,
+  hasDimensionScoring,
+  readEvaluatorDesign,
   weightError,
   type EvaluatorDesign,
 } from '../utils/evaluator-design';
@@ -29,34 +35,42 @@ const props = defineProps<{ initialId?: string }>(),
 const category = ref<'rule' | 'llm_judge'>('llm_judge'),
   query = ref(''),
   importing = ref(false),
+  creatingRule = ref(false),
   rule = ref<EvaluatorSummary | null>(null);
 const design = ref<EvaluatorDesign | null>(null),
-  editing = ref(false),
+  detail = ref<EvaluatorDetail | null>(null),
+  definition = ref<Definition | null>(null);
+const editing = ref(false),
   selected = ref(0),
-  originId = ref(''),
+  viewingDraft = ref(false),
+  busy = ref(false),
   error = ref(''),
-  full = ref(false),
-  historyOpen = ref(false);
+  notice = ref(''),
+  baseline = ref('');
+const historyOpen = ref(false),
+  historyLoading = ref(false),
+  historyError = ref(''),
+  versions = ref<Definition[]>([]);
 const active = computed(() => design.value?.dimensions[selected.value]);
+const dirty = computed(() => editing.value && JSON.stringify(design.value) !== baseline.value);
+const ownDesign = computed(
+  () => detail.value?.evaluator.source === 'user' && hasDimensionScoring(definition.value),
+);
 const entries = computed(() =>
   evaluatorCatalog.value.filter(
     (e) =>
       e.kind === category.value &&
-      e.latest_version &&
+      (e.latest_version || (e.kind === 'llm_judge' && e.has_draft)) &&
       e.name.toLowerCase().includes(query.value.toLowerCase()),
   ),
-);
-const drafts = computed(() =>
-  category.value === 'llm_judge'
-    ? evaluatorDesigns.value.filter((e) => e.name.toLowerCase().includes(query.value.toLowerCase()))
-    : [],
 );
 const models = computed(() =>
   Array.from(
     new Map(
       Object.values(evaluatorDetails.value)
-        .filter((d) => d.latest?.kind === 'llm_judge')
-        .map((d) => d.latest!.config.model as { provider_id: string; model_id: string })
+        .flatMap((d) => [d.latest, d.draft])
+        .filter((d) => d?.kind === 'llm_judge')
+        .map((d) => d!.config.model as { provider_id: string; model_id: string })
         .filter(Boolean)
         .map((m) => [JSON.stringify(m), m]),
     ).entries(),
@@ -65,13 +79,24 @@ const models = computed(() =>
 const total = computed(
   () => design.value?.dimensions.reduce((sum, d) => sum + (d.weight ?? 0), 0) ?? 0,
 );
-watch([editing, importing], ([a, b]) => emit('dirtyChange', a || b));
-function blank() {
-  return {
-    id: crypto.randomUUID(),
+const canLaunch = computed(
+  () =>
+    !!detail.value?.latest &&
+    detail.value.evaluator.enabled &&
+    !viewingDraft.value &&
+    design.value?.version === detail.value.latest.version,
+);
+watch([dirty, importing, busy], ([a, b, c]) => emit('dirtyChange', a || b || c));
+let openSequence = 0;
+function create() {
+  openSequence++;
+  detail.value = null;
+  definition.value = null;
+  design.value = {
+    id: '',
     name: '',
     description: '',
-    version: 1,
+    version: null,
     dimensions: [
       ['relevance', '相关性', 25],
       ['correctness', '正确性', 25],
@@ -88,114 +113,251 @@ function blank() {
     modelKey: '',
     scope: 'final_output',
     threshold: 80,
-  } as EvaluatorDesign;
+  };
+  viewingDraft.value = true;
+  beginEdit();
 }
-function create() {
-  design.value = blank();
-  originId.value = '';
+function beginEdit() {
   editing.value = true;
   selected.value = 0;
   error.value = '';
+  notice.value = '';
+  baseline.value = JSON.stringify(design.value);
 }
-function open(e: EvaluatorSummary) {
+function showDefinition(value: EvaluatorDetail, source: Definition, draft: boolean) {
+  detail.value = value;
+  definition.value = copy(source);
+  design.value = readEvaluatorDesign(value.evaluator, source);
+  viewingDraft.value = draft;
+  editing.value = false;
+  selected.value = 0;
+  baseline.value = JSON.stringify(design.value);
+}
+async function refreshDetail(id: string) {
+  const value = await api.evaluator(id);
+  evaluatorDetails.value[id] = value;
+  const source = value.draft ?? value.latest;
+  if (!source) throw new Error('此评估器暂无草稿或发布版本。');
+  showDefinition(value, source, !!value.draft);
+  await loadReviewAssets();
+}
+async function open(e: EvaluatorSummary) {
+  if (busy.value) return;
   if (e.kind === 'rule') {
     rule.value = e;
     return;
   }
-  const d = evaluatorDetails.value[e.id]?.latest;
-  if (!d) return;
-  design.value = {
-    id: e.id,
-    name: e.name,
-    description: e.description,
-    version: Number(d.version),
-    modelKey: JSON.stringify(d.config.model),
-    scope: String(d.config.input_selection),
-    threshold: Number(d.config.pass_threshold) * 100,
-    dimensions: Object.entries((d.config.rubric as Record<string, string>) ?? {}).map(
-      ([id, text]) => ({
-        id,
-        name: id,
-        description: String(text),
-        prompt: String(d.config.instruction ?? '') + '\n\n' + text,
-        weight: null,
-      }),
-    ),
-  };
-  originId.value = e.id;
-  editing.value = false;
-  selected.value = 0;
+  const sequence = ++openSequence;
   error.value = '';
+  notice.value = '';
+  busy.value = true;
+  try {
+    const value = await api.evaluator(e.id);
+    if (sequence !== openSequence) return;
+    const source = value.draft ?? value.latest;
+    if (!source) throw new Error('此评估器暂无草稿或发布版本。');
+    showDefinition(value, source, !!value.draft);
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    if (sequence === openSequence) busy.value = false;
+  }
 }
-function openLocal(d: EvaluatorDesign) {
-  design.value = copy(d);
-  originId.value = '';
-  editing.value = false;
-  selected.value = 0;
-  error.value = '';
-}
-function edit() {
-  if (!design.value) return;
-  if (originId.value) {
+async function edit() {
+  if (!design.value || busy.value) return;
+  if (!ownDesign.value) {
     design.value = {
       ...copy(design.value),
-      id: crypto.randomUUID(),
+      id: '',
       name: design.value.name + '（副本）',
-      version: 1,
+      version: null,
     };
-    const count = design.value.dimensions.length;
-    design.value.dimensions.forEach(
-      (d, i) =>
-        (d.weight =
-          i === count - 1 ? 100 - Math.floor(100 / count) * (count - 1) : Math.floor(100 / count)),
-    );
-    originId.value = '';
+    if (!hasDimensionScoring(definition.value))
+      design.value.dimensions.forEach((d) => (d.weight = 100));
+    detail.value = null;
+    definition.value = null;
+    viewingDraft.value = true;
+    beginEdit();
+    return;
   }
-  editing.value = true;
+  if (viewingDraft.value) {
+    beginEdit();
+    return;
+  }
+  if (detail.value!.draft) {
+    showDefinition(detail.value!, detail.value!.draft, true);
+    beginEdit();
+    return;
+  }
+  busy.value = true;
+  error.value = '';
+  try {
+    const id = design.value.id;
+    const draft = await request<Definition>(
+      '/evaluators/' + encodeURIComponent(id) + '/drafts',
+      'POST',
+      {
+        based_on_version: design.value.version,
+      },
+    );
+    showDefinition(
+      { ...detail.value!, evaluator: { ...detail.value!.evaluator, has_draft: true }, draft },
+      draft,
+      true,
+    );
+    beginEdit();
+    await loadReviewAssets();
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
 }
 function close() {
-  if (editing.value && !window.confirm('放弃未保存的评估器设计？')) return;
+  if (busy.value || (dirty.value && !window.confirm('放弃未保存的评估器修改？'))) return;
+  openSequence++;
   design.value = null;
+  detail.value = null;
+  definition.value = null;
   editing.value = false;
+  error.value = '';
+  notice.value = '';
 }
-function save() {
+async function save() {
   const d = design.value;
-  if (!d) return;
-  error.value = !d.name.trim()
-    ? '请输入评估器名称。'
-    : modelRefError(d.modelKey) || weightError(d.dimensions);
-  if (!error.value && d.dimensions.some((x) => !x.name.trim() || !x.id.trim() || !x.prompt.trim()))
-    error.value = '请填写各维度名称、标识和评分提示词。';
-  if (!error.value && new Set(d.dimensions.map((x) => x.id.trim())).size !== d.dimensions.length)
-    error.value = '维度标识不能重复。';
-  if (!error.value && (!Number.isFinite(d.threshold) || d.threshold < 0 || d.threshold > 100))
-    error.value = '通过分数须为 0—100。';
+  if (!d || busy.value) return;
+  error.value = evaluatorDesignError(d);
   if (error.value) return;
-  const index = evaluatorDesigns.value.findIndex((x) => x.id === d.id);
-  if (index >= 0) {
-    (evaluatorDesignHistory.value[d.id] ??= []).unshift(copy(evaluatorDesigns.value[index]));
-    d.version = evaluatorDesigns.value[index].version + 1;
-    evaluatorDesigns.value[index] = copy(d);
-  } else evaluatorDesigns.value.unshift(copy(d));
-  editing.value = false;
-}
-async function copyPrompt() {
+  busy.value = true;
+  notice.value = '';
   try {
-    await navigator.clipboard.writeText(active.value?.prompt ?? '');
-    error.value = '已复制当前维度提示词。';
-  } catch {
-    error.value = '无法访问剪贴板，请手动选择提示词复制。';
+    const draft = evaluatorDraftDefinition(d, definition.value);
+    if (!d.id) {
+      const created = await request<{ evaluator: { id: string } }>('/evaluators', 'POST', {
+        name: d.name,
+        description: d.description,
+        draft,
+      });
+      d.id = created.evaluator.id;
+    } else {
+      const path = '/evaluators/' + encodeURIComponent(d.id);
+      if (
+        d.name !== detail.value?.evaluator.name ||
+        d.description !== detail.value?.evaluator.description
+      )
+        await request(path, 'PATCH', { name: d.name, description: d.description });
+      await request(path + '/drafts/current', 'PUT', draft);
+    }
+    await refreshDetail(d.id);
+    notice.value = '草稿已保存到服务器；发布后可用于测评。';
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function publish() {
+  if (!detail.value?.draft || editing.value || busy.value) return;
+  busy.value = true;
+  error.value = '';
+  notice.value = '';
+  const id = detail.value.evaluator.id,
+    path = '/evaluators/' + encodeURIComponent(id);
+  let published: Definition | null = null;
+  try {
+    published = await request<Definition>(path + '/drafts/publish', 'POST');
+    showDefinition(
+      {
+        ...detail.value,
+        evaluator: {
+          ...detail.value.evaluator,
+          has_draft: false,
+          latest_version: published.version!,
+        },
+        latest: published,
+        draft: null,
+      },
+      published,
+      false,
+    );
+    if (!detail.value!.evaluator.enabled) {
+      await request(path, 'PATCH', { enabled: true });
+      detail.value!.evaluator.enabled = true;
+    }
+    await refreshDetail(id);
+    notice.value = `v${published.version} 已发布并启用，可用于测评。`;
+  } catch (e) {
+    if (published) {
+      try {
+        await refreshDetail(id);
+      } catch {
+        /* Keep the successful publication distinct from a failed refresh. */
+      }
+      error.value = `v${published.version} 已发布，但启用或刷新失败：${String(e)}。请刷新后检查启用状态。`;
+    } else error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function enable() {
+  if (!detail.value || busy.value) return;
+  busy.value = true;
+  error.value = '';
+  try {
+    const id = detail.value.evaluator.id;
+    await request('/evaluators/' + encodeURIComponent(id), 'PATCH', { enabled: true });
+    await refreshDetail(id);
+    notice.value = '评估器已启用。';
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+async function showHistory() {
+  if (!detail.value || busy.value) return;
+  historyOpen.value = true;
+  historyLoading.value = true;
+  historyError.value = '';
+  versions.value = [];
+  try {
+    versions.value = await request<Definition[]>(
+      '/evaluators/' + encodeURIComponent(detail.value.evaluator.id) + '/versions',
+    );
+  } catch (e) {
+    historyError.value = String(e);
+  } finally {
+    historyLoading.value = false;
+  }
+}
+function viewVersion(value: Definition) {
+  if (!detail.value) return;
+  showDefinition(detail.value, value, false);
+  historyOpen.value = false;
+  error.value = '';
+  notice.value = '已发布版本只读；编辑会创建草稿，原版本保持不变。';
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (dirty.value || busy.value) {
+    event.preventDefault();
+    event.returnValue = '';
   }
 }
 onMounted(async () => {
+  window.addEventListener('beforeunload', beforeUnload);
   await loadReviewAssets();
   if (props.initialId) {
     const e = evaluatorCatalog.value.find((e) => e.id === decodeURIComponent(props.initialId!));
     if (e && e.kind !== 'hybrid') {
       category.value = e.kind;
-      open(e);
+      void open(e);
     }
   }
+});
+onUnmounted(() => {
+  openSequence++;
+  window.removeEventListener('beforeunload', beforeUnload);
+  emit('dirtyChange', false);
 });
 const templateLabels1: Record<string, string> = {
   final_output: '最终回答',
@@ -215,7 +377,9 @@ const templateLabels1: Record<string, string> = {
           ><button class="asset-primary" @click="creatingRule = true">
             ＋ 新建规则评估器
           </button></template
-        ><button v-else class="asset-primary" @click="create">＋ 新建 LLM 评估器</button>
+        ><button v-else class="asset-primary" :disabled="busy" @click="create">
+          ＋ 新建 LLM 评估器
+        </button>
       </div>
     </div>
     <div class="asset-tabs">
@@ -224,34 +388,39 @@ const templateLabels1: Record<string, string> = {
         LLM 评估
       </button>
     </div>
-    <p v-if="category === 'llm_judge'" class="asset-note">新建设计暂存本页 · 未发布</p>
+    <p v-if="category === 'llm_judge'" class="asset-note">
+      保存为草稿，发布后可用于测评；运行保留所选发布版本。
+    </p>
     <p v-if="assetsError" role="alert" class="asset-error">{{ assetsError }}</p>
+    <p v-if="error && !design" role="alert" class="asset-error">{{ error }}</p>
     <div class="asset-filters">
       <input v-model="query" aria-label="搜索评估器" placeholder="搜索评估器名称" />
     </div>
     <p v-if="assetsLoading">正在读取…</p>
     <div v-else class="asset-grid">
-      <article v-for="d in drafts" :key="d.id" class="asset-card">
-        <span class="asset-chip preview">UX 草稿 · v{{ d.version }}</span>
-        <h2>{{ d.name }}</h2>
-        <p>{{ d.dimensions.length }} 项维度 · {{ d.description }}</p>
-        <p class="asset-small">评审模型：{{ modelRefLabel(d.modelKey) }}</p>
-        <button class="asset-link" @click="openLocal(d)">查看设计</button>
-      </article>
       <article v-for="e in entries" :key="e.id" class="asset-card">
         <span class="asset-chip"
-          >{{ e.source === 'builtin' ? '预置' : '自建' }} · v{{ e.latest_version }}</span
+          >{{ e.source === 'builtin' ? '预置' : '自建' }} ·
+          {{ e.latest_version ? 'v' + e.latest_version : '未发布' }}</span
         >
+        <span v-if="e.has_draft" class="asset-chip preview">草稿</span>
         <h2>{{ e.name }}</h2>
         <p>{{ e.description || e.metric }}</p>
         <p v-if="e.kind === 'llm_judge'" class="asset-small">
           评审模型：{{
-            modelRefLabel(JSON.stringify(evaluatorDetails[e.id]?.latest?.config.model ?? {}))
+            modelRefLabel(
+              JSON.stringify(
+                (evaluatorDetails[e.id]?.draft ?? evaluatorDetails[e.id]?.latest)?.config.model ??
+                  {},
+              ),
+            )
           }}
         </p>
         <div class="asset-card-actions">
-          <button class="asset-link" @click="open(e)">查看详情</button
-          ><span class="asset-small">{{ e.enabled ? '已启用' : '已停用' }}</span>
+          <button class="asset-link" :disabled="busy" @click="open(e)">查看详情</button
+          ><span class="asset-small">{{
+            e.latest_version ? (e.enabled ? '已启用' : '已停用') : '发布后可用'
+          }}</span>
         </div>
       </article>
     </div>
@@ -261,178 +430,202 @@ const templateLabels1: Record<string, string> = {
     :before-close="close"
     :close-on-click-modal="false"
     title="LLM 评估器设计"
-    width="min(1280px,96vw)"
-    class="asset-dialog"
+    width="min(800px,96vw)"
+    class="asset-dialog judge-design-dialog"
   >
     <template v-if="design"
-      ><header class="design-header">
-        <div>
-          <h2 v-if="!editing">
-            {{ design.name }} <span class="asset-chip">v{{ design.version }}</span>
-          </h2>
-          <input
-            v-else
-            v-model="design.name"
-            aria-label="评估器名称"
-            placeholder="评估器名称"
-          /><input
-            v-if="editing"
-            v-model="design.description"
-            aria-label="评估器描述"
-            placeholder="描述"
-          />
-          <p v-else>{{ design.description }}</p>
-        </div>
-        <div class="actions">
-          <button v-if="!originId && !editing" class="asset-secondary" @click="historyOpen = true">
-            版本历史</button
-          ><button v-if="!editing" class="asset-primary" @click="edit">
-            {{ originId ? '复制并编辑' : '编辑' }}
-          </button>
-        </div>
-      </header>
-      <p class="asset-small">
-        {{ originId ? '原定义未配置维度权重' : '本页临时设计 · 刷新后清除' }}
-      </p>
-      <EvaluatorModelSelect
-        :key="design.id"
-        v-model="design.modelKey"
-        :editable="editing"
-        :models="models"
-      />
-      <section class="execution-config">
-        <div v-if="editing" class="asset-form-grid">
-          <label
-            >评审输入范围<select v-model="design.scope" aria-label="评审输入范围">
-              <option value="final_output">最终回答</option>
-              <option value="output_and_tools">回答与工具</option>
-              <option value="full_trajectory">完整轨迹</option>
-            </select></label
-          ><label
-            >通过分数（0—100）<input
-              type="number"
-              v-model.number="design.threshold"
-              min="0"
-              max="100"
-              aria-label="评估器通过分数"
-          /></label>
-        </div>
-        <p v-else class="asset-small">
-          评审范围：{{ templateLabels1[design.scope] ?? design.scope }} · 通过分数
-          {{ design.threshold }}
-        </p>
-      </section>
-      <div class="dimension-design">
-        <aside>
-          <h3>评估维度（{{ design.dimensions.length }}）</h3>
-          <button
-            v-for="(d, i) in design.dimensions"
-            :key="i"
-            class="dimension-item"
-            :class="{ active: selected === i }"
-            @click="selected = i"
-          >
-            <strong>{{ dimensionNames[d.name] ?? d.name ?? '未命名维度' }}</strong
-            ><span>{{ d.weight == null ? '未定义' : d.weight + '%' }}</span></button
-          ><button
-            v-if="editing"
-            class="asset-link"
-            @click="
-              design.dimensions.push({
-                id: 'dimension_' + (design.dimensions.length + 1),
-                name: '新维度',
-                description: '',
-                prompt: '',
-                weight: 0,
-              });
-              selected = design.dimensions.length - 1;
-            "
-          >
-            ＋ 添加维度
-          </button>
-          <p v-if="editing" :class="{ 'asset-error': Math.abs(total - 100) > 0.001 }">
-            权重合计 {{ total }}% / 100%
-          </p>
-        </aside>
-        <section v-if="active" class="dimension-content">
-          <header>
-            <h3>{{ dimensionNames[active.name] ?? active.name ?? '评估维度' }}</h3>
-            <div class="actions">
-              <button
-                v-if="editing"
-                class="asset-link"
-                @click="
-                  design.dimensions.splice(selected, 1);
-                  selected = Math.max(0, selected - 1);
-                "
-              >
-                移除维度
-              </button>
-            </div>
-          </header>
-          <div v-if="editing" class="asset-form-grid">
-            <label>维度名称<input v-model="active.name" aria-label="维度名称" /></label
-            ><label>标识<input v-model="active.id" aria-label="维度标识" /></label
-            ><label
-              >权重（%）<input
-                v-model.number="active.weight"
-                type="number"
-                min="0.01"
-                max="100"
-                step=".01"
-                aria-label="维度权重" /></label
-            ><label>说明<input v-model="active.description" aria-label="维度说明" /></label>
+      ><fieldset class="design-fields" :disabled="busy">
+        <header class="design-header">
+          <div>
+            <h2 v-if="!editing">
+              {{ design.name }}
+              <span class="asset-chip">{{ viewingDraft ? '草稿' : 'v' + design.version }}</span>
+            </h2>
+            <input
+              v-else
+              v-model="design.name"
+              aria-label="评估器名称"
+              placeholder="评估器名称"
+            /><input
+              v-if="editing"
+              v-model="design.description"
+              aria-label="评估器描述"
+              placeholder="描述"
+            />
+            <p v-else>{{ design.description }}</p>
           </div>
-          <p v-else>{{ chineseEvaluatorText(active.description) }}</p>
-          <textarea
-            v-if="editing"
-            v-model="active.prompt"
-            aria-label="维度评分提示词"
-            rows="14"
-            placeholder="填写评分标准、指导说明和扣分条件；这是本维度的提示词。"
-          />
-          <pre v-else>{{ chineseEvaluatorText(active.prompt) }}</pre>
+          <div class="actions">
+            <button v-if="detail?.latest && !editing" class="asset-secondary" @click="showHistory">
+              版本历史</button
+            ><button v-if="!editing" class="asset-primary" @click="edit">
+              {{
+                ownDesign
+                  ? viewingDraft || detail?.draft
+                    ? '编辑草稿'
+                    : '创建新版本草稿'
+                  : '复制并编辑'
+              }}
+            </button>
+          </div>
+        </header>
+        <p class="asset-small">
+          {{
+            !definition || hasDimensionScoring(definition)
+              ? '各维度由模型评分，总分由系统按权重计算。'
+              : '此版本按整体评分；复制后可配置维度评分与权重。'
+          }}
+        </p>
+        <EvaluatorModelSelect
+          :key="design.id"
+          v-model="design.modelKey"
+          :editable="editing"
+          :models="models"
+        />
+        <section class="execution-config">
+          <div v-if="editing" class="asset-form-grid">
+            <label
+              >评审输入范围<select v-model="design.scope" aria-label="评审输入范围">
+                <option value="final_output">最终回答</option>
+                <option value="output_and_tools">回答与工具</option>
+                <option value="full_trajectory">完整轨迹</option>
+              </select></label
+            ><label
+              >通过分数（0—100）<input
+                type="number"
+                v-model.number="design.threshold"
+                min="0"
+                max="100"
+                aria-label="评估器通过分数"
+            /></label>
+          </div>
+          <p v-else class="asset-small">
+            评审范围：{{ templateLabels1[design.scope] ?? design.scope }} · 通过分数
+            {{ design.threshold }}
+          </p>
         </section>
-      </div>
-      <p v-if="error" role="status" class="asset-error">{{ error }}</p></template
+        <div class="dimension-design">
+          <aside>
+            <h3>评估维度（{{ design.dimensions.length }}）</h3>
+            <button
+              v-for="(d, i) in design.dimensions"
+              :key="i"
+              class="dimension-item"
+              :class="{ active: selected === i }"
+              @click="selected = i"
+            >
+              <strong>{{ dimensionNames[d.name] ?? d.name ?? '未命名维度' }}</strong
+              ><span>{{ d.weight == null ? '未定义' : d.weight + '%' }}</span></button
+            ><button
+              v-if="editing"
+              class="asset-link"
+              @click="
+                design.dimensions.push({
+                  id: 'dimension_' + (design.dimensions.length + 1),
+                  name: '新维度',
+                  description: '',
+                  prompt: '',
+                  weight: 0,
+                });
+                selected = design.dimensions.length - 1;
+              "
+            >
+              ＋ 添加维度
+            </button>
+            <p v-if="editing" :class="{ 'asset-error': !!weightError(design.dimensions) }">
+              权重合计 {{ total }}% / 100%
+            </p>
+          </aside>
+          <section v-if="active" class="dimension-content">
+            <header>
+              <h3>{{ dimensionNames[active.name] ?? active.name ?? '评估维度' }}</h3>
+              <div class="actions">
+                <button
+                  v-if="editing"
+                  class="asset-link"
+                  @click="
+                    design.dimensions.splice(selected, 1);
+                    selected = Math.max(0, selected - 1);
+                  "
+                >
+                  移除维度
+                </button>
+              </div>
+            </header>
+            <div v-if="editing" class="asset-form-grid">
+              <label>维度名称<input v-model="active.name" aria-label="维度名称" /></label
+              ><label>标识<input v-model="active.id" aria-label="维度标识" /></label
+              ><label
+                >权重（%）<input
+                  v-model.number="active.weight"
+                  type="number"
+                  min="0.01"
+                  max="100"
+                  step=".01"
+                  aria-label="维度权重" /></label
+              ><label>说明<input v-model="active.description" aria-label="维度说明" /></label>
+            </div>
+            <p v-else>{{ active.description }}</p>
+            <textarea
+              v-if="editing"
+              v-model="active.prompt"
+              aria-label="维度评分提示词"
+              rows="10"
+              placeholder="填写评分标准、指导说明和扣分条件；这是本维度的提示词。"
+            />
+            <pre v-else>{{ active.prompt }}</pre>
+          </section>
+        </div>
+      </fieldset>
+      <p v-if="notice" role="status">{{ notice }}</p>
+      <p v-if="error" role="alert" class="asset-error">{{ error }}</p></template
     >
     <template #footer
-      ><button class="asset-secondary" @click="close">关闭</button
-      ><button v-if="editing" class="asset-primary" @click="save">保存 UX 设计</button
+      ><button class="asset-secondary" :disabled="busy" @click="close">关闭</button
+      ><button v-if="editing" class="asset-primary" :disabled="busy" @click="save">
+        {{ busy ? '保存中…' : '保存' }}</button
       ><button
-        v-else-if="design && !originId"
-        class="asset-secondary"
-        @click="exportUx(design, 'evaluator-design-ux.json')"
-      >
-        导出 UX 设计</button
-      ><button
-        v-if="originId && !editing"
+        v-if="!editing && viewingDraft && ownDesign"
         class="asset-primary"
-        :disabled="!evaluatorCatalog.find((e) => e.id === originId)?.enabled"
+        :disabled="busy"
+        @click="publish"
+      >
+        发布并启用
+      </button>
+      <button
+        v-if="
+          !editing &&
+          detail?.latest &&
+          !detail.evaluator.enabled &&
+          detail.evaluator.source === 'user'
+        "
+        class="asset-secondary"
+        :disabled="busy"
+        @click="enable"
+      >
+        启用
+      </button>
+      <button
+        v-if="canLaunch && !editing"
+        class="asset-primary"
+        :disabled="busy"
         @click="
-          emit('launch', originId);
+          emit('launch', detail!.evaluator.id);
           design = null;
         "
       >
-        打开评测配置
+        打开测评配置
       </button></template
     ></el-dialog
   >
-  <el-dialog v-model="full" title="维度提示词" fullscreen class="asset-dialog">
-    <textarea
-      v-if="active && editing"
-      v-model="active.prompt"
-      aria-label="全屏评分提示词"
-      rows="25"
-    />
-    <pre v-else>{{ active?.prompt }}</pre>
-  </el-dialog>
-  <el-dialog v-model="historyOpen" title="UX 版本历史" class="asset-dialog"
-    ><p>本页草稿历史，不是后端发布版本；刷新后清除。</p>
-    <p v-for="v in evaluatorDesignHistory[design?.id ?? ''] ?? []" :key="v.version">
-      v{{ v.version }} · {{ v.name }} · {{ v.dimensions.length }} 个维度
+  <el-dialog v-model="historyOpen" title="已发布版本" class="asset-dialog"
+    ><p>已发布版本只读，历史任务始终使用运行时保存的版本。</p>
+    <p v-if="historyLoading">正在读取版本…</p>
+    <p v-if="historyError" role="alert" class="asset-error">{{ historyError }}</p>
+    <p v-for="v in versions" :key="v.version">
+      <button class="asset-link" @click="viewVersion(v)">查看 v{{ v.version }}</button>
+      <small class="asset-small"> · {{ v.content_sha256 }}</small>
     </p>
-    <p v-if="!(evaluatorDesignHistory[design?.id ?? ''] ?? []).length">暂无历史修订。</p></el-dialog
+    <p v-if="!historyLoading && !historyError && !versions.length">暂无发布版本。</p></el-dialog
   >
   <el-dialog :model-value="!!rule" @close="rule = null" title="规则评估器详情" class="asset-dialog"
     ><template v-if="rule"
@@ -481,6 +674,12 @@ const templateLabels1: Record<string, string> = {
   />
 </template>
 <style scoped>
+.design-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
 .rule-explanation,
 .rule-example {
   margin: 20px 0;
@@ -514,12 +713,12 @@ const templateLabels1: Record<string, string> = {
 }
 .dimension-design {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   border-top: 1px solid #e4eaf4;
   margin-top: 22px;
 }
 .dimension-design aside {
-  padding: 20px 18px 20px 0;
+  padding: 20px 16px 20px 0;
   border-right: 1px solid #e4eaf4;
 }
 .dimension-item {
@@ -527,8 +726,8 @@ const templateLabels1: Record<string, string> = {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  padding: 20px 14px;
-  margin-bottom: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
   border: 1px solid #e2e8f5;
   border-radius: 10px;
   background: #f7f9fd;
@@ -552,9 +751,9 @@ const templateLabels1: Record<string, string> = {
   overflow-wrap: anywhere;
   line-height: 1.8;
   background: #f7f9fb;
-  padding: 24px;
+  padding: 18px;
   border-radius: 10px;
-  min-height: 300px;
+  min-height: 240px;
 }
 .design-header .actions {
   align-items: flex-start;
@@ -574,5 +773,18 @@ const templateLabels1: Record<string, string> = {
   .design-header {
     flex-wrap: wrap;
   }
+}
+</style>
+<style>
+.el-overlay .el-dialog.judge-design-dialog .el-dialog__body {
+  padding: 16px 24px;
+  max-height: 68vh;
+}
+.el-overlay .el-dialog.judge-design-dialog .asset-form-grid {
+  gap: 12px;
+}
+.el-overlay .el-dialog.judge-design-dialog .asset-dialog label,
+.el-overlay .el-dialog.judge-design-dialog label {
+  margin-bottom: 10px;
 }
 </style>

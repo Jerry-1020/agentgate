@@ -81,7 +81,7 @@ async function readAnnotations() {
       );
       const report = await request<{ run: EvaluationRun }>('/runs/' + encodeURIComponent(run));
       const source = report.run.manifest.dataset.cases.find((c) => c.id === caseId);
-      if (!source) throw Error('来源评测缺少样本快照，无法保留初始状态');
+      if (!source) throw Error('来源测评缺少样本快照，无法保留初始状态');
       const sample = blankSample(task.value.name + ' · ' + caseId.slice(0, 8));
       sample.initial_state = JSON.parse(JSON.stringify(source.initial_state));
       sample.category = source.category;
@@ -90,7 +90,7 @@ async function readAnnotations() {
       sample.notes =
         '人工标注来源：模板 ' +
         task.value.id +
-        '；评测 ' +
+        '；测评 ' +
         run +
         '；样本 ' +
         caseId +
@@ -172,7 +172,8 @@ function close() {
   <el-dialog
     :model-value="true"
     title="新增样本"
-    width="min(1050px,96vw)"
+    class="sample-wizard-dialog"
+    width="min(800px,96vw)"
     :close-on-click-modal="false"
     :show-close="!busy"
     :close-on-press-escape="!busy"
@@ -189,7 +190,7 @@ function close() {
         <button
           v-for="m in [
             { id: 'manual', name: '＋ 手动创建', description: '多轮对话、期望输出与工具调用' },
-            { id: 'file', name: '⇧ 导入数据集', description: 'JSON / Excel (.xlsx) / CSV / ZIP' },
+            { id: 'file', name: '⇧ 导入测评集', description: 'JSON / Excel (.xlsx) / CSV / ZIP' },
             {
               id: 'annotation',
               name: '✓ 从标注导入',
@@ -261,7 +262,7 @@ function close() {
               :value="key"
               :disabled="busy || saved > 0"
               @change="reset()"
-            />评测 / 会话：{{ key }}</label
+            />测评 / 会话：{{ key }}</label
           >
           <p v-if="!sessions.length">暂无已保存的标注会话，请先在人工标注中完成评分并保存。</p>
           <button
@@ -334,11 +335,14 @@ function close() {
 .sample-wizard {
   color: #344158;
 }
+.sample-wizard h3 {
+  margin: 10px 0 14px;
+}
 .steps {
   display: flex;
   justify-content: center;
   gap: 20px;
-  padding: 25px;
+  padding: 14px 0;
   color: #99a3b4;
   font-size: 14px;
 }
@@ -347,15 +351,16 @@ function close() {
 }
 .methods {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 .methods button {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   text-align: left;
-  padding: 28px;
+  padding: 16px 24px;
+  min-height: 104px;
   border: 1px solid #dce4ef;
   border-radius: 10px;
   background: white;

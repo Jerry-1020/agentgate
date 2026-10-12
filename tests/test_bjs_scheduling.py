@@ -10,6 +10,7 @@ import pytest
 from test_bjs_execution import prepare_script_tree, run_script
 from test_run_scheduling import create_scheduled_run
 
+from agentgate.application import run_scheduling
 from agentgate.domain import RunStatus, utcnow
 from agentgate.integrations.job_dispatchers.bjs_job_dispatcher import BjsJobDispatcher
 from agentgate.integrations.job_dispatchers.celery import dispatch_due_evaluation_runs
@@ -31,6 +32,36 @@ def due_run(repository):
     )
     repository.save_run(run)
     return run
+
+
+@pytest.mark.parametrize("error", [TimeoutError("private credential"), OSError("connection failed")])
+def test_bjs_transport_failure_persists_waiting_then_failed(tmp_path, monkeypatch, error):
+    repository = SQLiteRepository(tmp_path / "failed-dispatch.db")
+    try:
+        run = due_run(repository)
+        monkeypatch.setattr(run_scheduling, "MAX_DISPATCH_ATTEMPTS", 2)
+        calls = []
+
+        def opener(request, **kwargs):
+            calls.append(request.full_url)
+            raise error
+
+        dispatcher = BjsJobDispatcher("https://bjs.example/submit", "job", opener=opener)
+        scheduler = run_scheduling.RunScheduling(repository)
+        assert scheduler.dispatch_due_runs(dispatcher) == ()
+        waiting = repository.get_run(run.id)
+        assert waiting.status is RunStatus.WAITING
+        assert waiting.dispatch_attempts == 1
+        assert scheduler.dispatch_waiting_runs(dispatcher) == ()
+        failed = repository.get_run(run.id)
+        assert failed.status is RunStatus.FAILED
+        assert "after 2 attempts" in failed.error
+        assert "private credential" not in failed.error
+        assert len(calls) == 2
+        assert scheduler.dispatch_waiting_runs(dispatcher) == ()
+        assert len(calls) == 2
+    finally:
+        repository.close()
 
 
 def test_celery_scheduler_honors_bjs_configuration(tmp_path, monkeypatch):

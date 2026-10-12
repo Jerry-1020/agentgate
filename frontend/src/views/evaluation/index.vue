@@ -130,6 +130,7 @@ onBeforeRouteUpdate((to, from) => {
 });
 const runs = shallowRef<EvaluationRun[]>([]),
   overview = ref<Overview | null>(null);
+const overviewDays = ref(7);
 const auth = useAuthStore();
 const authLabel = computed(() => auth.modeLabel);
 async function confirmLogout() {
@@ -325,37 +326,51 @@ async function taskCreated(link: TaskLink) {
     </div>
     <template v-if="page === 'overview'">
       <div class="page-head">
-        <div><h1 class="page-title">评测总览</h1></div>
-        <span class="muted">{{ loading ? '正在刷新' : '最近任务每 5 秒刷新' }}</span>
+        <div style="display: flex; align-items: flex-end; gap: 16px">
+          <h1 class="page-title">测评总览</h1>
+          <div class="tabs">
+            <button
+              v-for="d in [1, 7, 30]"
+              :key="d"
+              :class="['tab', { active: overviewDays === d }]"
+              :aria-pressed="overviewDays === d"
+              @click="overviewDays = d"
+            >
+              {{ d === 1 ? '今日' : '近' + d + '天' }}
+            </button>
+          </div>
+        </div>
       </div>
-      <OverviewMetrics />
+      <OverviewMetrics :days="overviewDays" @update:days="overviewDays = $event" />
       <div class="card">
         <div class="toolbar">
-          <h2 class="section-title">最近评测任务</h2>
+          <h2 class="section-title">最近测评任务</h2>
           <a href="#tasks" class="link">查看全部 →</a>
         </div>
         <table class="data-table">
           <thead>
             <tr>
               <th>智能体 / 版本</th>
-              <th>评测集</th>
+              <th>测评集</th>
               <th>执行状态</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in runs.slice(0, 6)" :key="r.id">
-              <td>
+              <td class="nowrap">
                 {{ r.manifest.target.display_name }}
-                <div class="muted">{{ r.manifest.target.ref.external_version_id }}</div>
+                <span class="muted">· {{ r.manifest.target.ref.external_version_id }}</span>
               </td>
-              <td>{{ r.manifest.dataset.dataset_name }}</td>
-              <td>{{ statusLabel(r.status) }}</td>
-              <td><button class="link" @click="go('tasks/' + r.id)">查看</button></td>
+              <td class="nowrap">{{ r.manifest.dataset.dataset_name }}</td>
+              <td class="nowrap">{{ statusLabel(r.status) }}</td>
+              <td class="nowrap">
+                <button class="link" @click="go('tasks/' + r.id)">查看</button>
+              </td>
             </tr>
           </tbody>
         </table>
-        <p v-if="!runs.length" class="empty">尚无评测任务，请从“评测任务”发起。</p>
+        <p v-if="!runs.length" class="empty">尚无测评任务，请从“测评任务”发起。</p>
       </div>
     </template>
     <ModelSettings v-else-if="page === 'settings'" @dirty-change="settingsDirty = $event" />
@@ -367,12 +382,12 @@ async function taskCreated(link: TaskLink) {
       @run-version="openCreate($event)"
     />
     <section v-else-if="page === 'dataset-merge'" class="card">
-      多 Skill 合并需求已挂起，当前不提供创建入口。<a href="#datasets">返回评测集</a>
+      多 Skill 合并需求已挂起，当前不提供创建入口。<a href="#datasets">返回测评集</a>
     </section>
     <AnnotationAssets
       v-else-if="page === 'annotations' || page === 'annotation-templates'"
-      :key="page"
-      :templates="page === 'annotation-templates'"
+      :key="route.split('/')[0]"
+      :templates="route.split('/')[0] === 'annotation-templates'"
       :task-id="runId"
       @navigate="go"
       @dirty-change="evaluatorDirty = $event"
@@ -393,10 +408,10 @@ async function taskCreated(link: TaskLink) {
     <template v-else-if="page === 'tasks' || page === 'results'">
       <template v-if="runId">
         <section v-if="pairLink" class="card task-linked-summary">
-          <a href="#tasks" class="link">← 返回评测任务</a>
-          <h3>A/B 实验</h3>
+          <a href="#tasks" class="link">← 返回测评任务</a>
+          <h3>A/B试验</h3>
           <template v-if="pairLink"
-            ><p>两侧使用相同评测集与评估器版本。</p>
+            ><p>两侧使用相同测评集与评估器版本。</p>
             <div class="actions">
               <button
                 v-for="(id, index) in pairLink.runIds"
@@ -496,6 +511,30 @@ async function taskCreated(link: TaskLink) {
 </template>
 
 <style>
+.page-head .tabs {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+.page-head .tab {
+  padding: 3px 12px;
+  border: 0;
+  background: #f3f4f6;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #394250;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.page-head .tab.active {
+  background: #07ac8e;
+  color: #fff;
+}
+.nowrap {
+  white-space: nowrap;
+}
 .task-identity {
   min-width: 250px;
 }
@@ -558,7 +597,7 @@ async function taskCreated(link: TaskLink) {
   font-size: 14px;
 }
 .task-create-grid {
-  gap: 22px 28px;
+  gap: 16px 24px;
 }
 .task-create-grid .full {
   grid-column: 1 / -1;
@@ -567,7 +606,7 @@ async function taskCreated(link: TaskLink) {
   display: flex;
   gap: 12px;
   align-items: center;
-  padding-top: 24px;
+  padding-top: 16px;
   border-top: 1px solid #e8edf1;
   margin-top: 4px;
 }

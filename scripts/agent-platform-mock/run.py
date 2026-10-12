@@ -129,7 +129,12 @@ def main():
             "--hostname=platform-mock@%h",
             "--loglevel=WARNING",
         ],
-        "scheduler": [python, str(ROOT / "scripts/dispatch-scheduled-runs.py")],
+        "scheduler": [
+            python,
+            str(ROOT / "scripts/dispatch-scheduled-runs.py"),
+            "--name",
+            "platform-mock",
+        ],
         "web": ["npm", "run", "dev"],
     }
     children, logs = [], []

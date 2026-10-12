@@ -50,7 +50,7 @@ const output = computed(() =>
 </script>
 <template>
   <h2>{{ kind === 'hybrid' ? '综合质量评估 · Mock' : '回答质量评估 · Mock' }}</h2>
-  <span class="mock-label">Mock 演示 · 不参与真实评测</span>
+  <span class="mock-label">Mock 演示 · 不参与真实测评</span>
   <div class="tabs">
     <button class="tab" :class="{ active: tab === 'output' }" @click="tab = 'output'">
       案例输入与输出</button

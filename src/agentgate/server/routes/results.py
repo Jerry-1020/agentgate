@@ -120,3 +120,25 @@ def writeback_result_case(
         raise_unprocessable(error)
     except ValueError as error:
         raise_conflict(error)
+
+
+@router.get("/runs/{run_id}/cases/{case_id}/annotation-evidence")
+def annotation_evidence(run_id: str, case_id: str, dependencies: Dependencies):
+    """Return this run's frozen evaluator definitions with persisted case evidence."""
+    from agentgate.application.annotation_evidence import evaluator_annotation_evidence
+
+    info = get_user_info()
+    run = dependencies.repository.get_run(run_id, user_team_id=info.user_team_id if info else "")
+    if run is None:
+        raise HTTPException(404, "unknown EvaluationRun: " + run_id)
+    case = next((case for case in run.manifest.dataset.cases if case.id == case_id), None)
+    if case is None:
+        raise HTTPException(404, "unknown Case: " + case_id)
+    if run.manifest.selected_case_ids is not None and case_id not in run.manifest.selected_case_ids:
+        raise HTTPException(404, "Case was not selected for this run")
+    trace = dependencies.repository.get_trace(run_id, case_id)
+    if trace is None:
+        raise HTTPException(404, "Trace is not available")
+    results = {r.evaluator_id: r for r in dependencies.repository.list_results(run_id) if r.case_id == case_id}
+    return [evaluator_annotation_evidence(spec, case, trace, results.get(spec.id))
+            for spec in run.manifest.evaluator_specs]

@@ -34,6 +34,19 @@ class TraceServer:
         ]
 
 
+def workflow_graph():
+    return {
+        "composition": "工作流 · 条件分支",
+        "nodes": [
+            {"id": "extract", "kind": "workflow", "label": "信息提取", "description": "提取资料",
+             "node_type": "llm", "trace_name": "workflow.extract"},
+            {"id": "end", "kind": "workflow", "label": "生成回复", "description": "缺资料时追问",
+             "node_type": "llm", "trace_name": "workflow.end"},
+        ],
+        "edges": [{"source": "extract", "target": "end", "relation": "缺资料或咨询"}],
+    }
+
+
 class Client:
     def __init__(self, mode="base"):
         self.mode, self.requests, self.inputs, self.session = mode, {}, {}, None
@@ -44,7 +57,8 @@ class Client:
         if path == "/agents":
             return [{"mode": self.mode, "agent_version": "v1", "test_only": True, "agent_name": f"loan-{self.mode}-v1",
                      "prompt": "test", "summary_prompt": "test", "model": "test", "policy_version": "test-policy-v1",
-                     "implementation_sha256": "1" * 64, "tools": [], "skills": []}]
+                     "implementation_sha256": "1" * 64, "tools": [], "skills": [],
+                     **({"topology": workflow_graph()} if self.mode == "workflow" else {})}]
         if path.endswith("init_session"):
             self.session = payload["requestId"]
             return {"resCode": "FAIAG0000", "data": {"session_id": self.session}}
@@ -132,9 +146,10 @@ def test_launch_persists_task_before_dispatch_and_rejects_demo_payload(tmp_path,
         datasets.create_draft(ds.id)
         datasets.save_case(ds.id, Case(name="real input", turns=(CaseTurn(input={"txt": "loan"}),)))
         datasets.publish_draft(ds.id)
-        response = http.post("/api/bank-evaluations", json={"mode": "base", "dataset_id": ds.id, "dataset_version": 1})
+        response = http.post("/api/bank-evaluations", json={"name": "真实贷款验收", "mode": "base", "dataset_id": ds.id, "dataset_version": 1})
         assert response.status_code == 202, response.text
         run = deps.repository.get_run(response.json()["data"]["run_id"])
+        assert deps.repository.get_evaluation_task(run.id).name == "真实贷款验收"
         assert run.manifest.max_retries == 0
         assert run.manifest.target.adapter_type == "local_bank"
         pinned = http.get('/api/runs/'+run.id+'/target-descriptor')
@@ -167,3 +182,130 @@ def test_model_metadata_never_exposes_credentials(tmp_path,monkeypatch):
         assert response.status_code==200
         assert all(x not in response.text for x in ('private-test-key','password','secret'))
         assert response.json()['data']['connections'][0]['base_url']=='https://example.test/v1'
+
+
+def test_local_bank_target_derives_declared_topology():
+    from agentgate.integrations.targets.local_bank import declared_topology
+
+    class CapableClient:
+        def call(self, path, **kwargs):
+            assert path == "/agents"
+            return [{
+                "mode": "cloudshrimp", "agent_version": "v1", "test_only": True,
+                "agent_name": "loan-cloudshrimp-v1", "prompt": "p", "summary_prompt": "s",
+                "model": "m", "policy_version": "pv", "implementation_sha256": "1" * 64,
+                "tools": [
+                    {"function": {"name": "submit_application", "description": "提交申请", "parameters": {}}},
+                    {"function": {"name": "get_application", "description": "查询申请", "parameters": {}}},
+                ],
+                "skills": [
+                    {"id": "loan_application", "version": "v1", "name": "贷款申请",
+                     "description": "收集资料并提交", "tools": ["submit_application"]},
+                ],
+            }]
+
+    descriptor, _ = local_bank_target(CapableClient(), "cloudshrimp")
+    topology = descriptor.metadata["topology"]
+    assert topology["composition"] == "Agent → Skill → Tool"
+    kinds = [n["kind"] for n in topology["nodes"]]
+    assert kinds.count("agent") == 1 and kinds.count("skill") == 1 and kinds.count("tool") == 2
+    assert {"source": "agent", "target": "skill:loan_application", "relation": "declares"} in topology["edges"]
+    assert {"source": "skill:loan_application", "target": "tool:submit_application", "relation": "binds"} in topology["edges"]
+
+    assert declared_topology("a", (), ()) is None
+    tools_only = declared_topology("a", (), ({"name": "t", "description": ""},))
+    assert tools_only["composition"] == "Agent → Tool"
+    assert {"source": "agent", "target": "tool:t", "relation": "uses"} in tools_only["edges"]
+
+
+def test_local_catalog_preserves_sources_versions_and_offline_entries(tmp_path, monkeypatch):
+    from agentgate.server.routes import catalogs
+    class Dispatcher:
+        def submit(self, run_id): pass
+        def cancel(self, run_id): pass
+    def resolve(client, mode):
+        return local_bank_target(Client(mode), mode)
+    monkeypatch.setattr(catalogs, "local_bank_target", resolve)
+    app = create_app(tmp_path / "catalog.db", dispatcher=Dispatcher())
+    with TestClient(app) as http:
+        data = http.get('/api/local-targets').json()['data']
+        assert data['unavailable'] == []
+        assert len(data['targets']) == 5
+        assert {(r['descriptor']['ref']['source_id'], r['adapter_type']) for r in data['targets']} == {
+            ('agentgate-demo', 'demo_loan'), ('local-bank-runtime', 'local_bank')}
+        assert len({r['descriptor']['ref']['external_target_id'] for r in data['targets']}) == 4
+        cloud = next(r for r in data['targets'] if r['mode'] == 'cloudshrimp')
+        assert cloud['descriptor']['ref']['external_target_id'] == 'loan-cloudshrimp'
+        def offline(*args): raise TargetExecutionError('unavailable', 'offline')
+        monkeypatch.setattr(catalogs, "local_bank_target", offline)
+        data = http.get('/api/local-targets').json()['data']
+        assert len(data['targets']) == 2
+        assert {r['agent_id'] for r in data['unavailable']} == {'loan-base', 'loan-workflow', 'loan-cloudshrimp'}
+
+
+class GraphClient(Client):
+    def __init__(self, mode="workflow"):
+        super().__init__(mode)
+        self.graph = workflow_graph()
+
+    def call(self, path, payload=None, **kwargs):
+        records = super().call(path, payload, **kwargs)
+        if path == "/agents":
+            records[0]["topology"] = self.graph
+            records[0]["tools"] = [{"function": {
+                "name": "get_application", "description": "查询申请", "parameters": {},
+            }}]
+            if self.mode == "cloudshrimp":
+                records[0]["skills"] = [{"id": "status", "version": "v1", "name": "查询",
+                                         "description": "查询申请", "tools": ["get_application"]}]
+        return records
+
+
+@pytest.mark.parametrize("mode,composition", [
+    ("workflow", "工作流 · 条件分支"), ("base", "Agent → Tool"),
+    ("cloudshrimp", "Agent → Skill → Tool"),
+])
+def test_local_topology_preserves_each_agent_structure(mode, composition):
+    client = GraphClient(mode)
+    descriptor, snapshot = local_bank_target(client, mode)
+    graph = descriptor.model_dump(mode="json")["metadata"]["topology"]
+    assert graph["composition"] == composition
+    assert snapshot.descriptor_sha256 == descriptor.content_sha256
+    if mode == "workflow":
+        assert graph == client.graph
+    else:
+        assert all(node["kind"] != "workflow" for node in graph["nodes"])
+
+
+@pytest.mark.parametrize("fault", [
+    "missing", "empty_nodes", "empty_edges", "duplicate", "dangling", "bad_label",
+    "bad_node_type", "bad_trace", "bad_relation", "bad_endpoint", "bad_composition",
+])
+def test_invalid_workflow_topology_is_rejected_instead_of_tool_fallback(fault):
+    client = GraphClient()
+    graph = client.graph
+    if fault == "missing": client.graph = None
+    elif fault == "empty_nodes": graph["nodes"] = []
+    elif fault == "empty_edges": graph["edges"] = []
+    elif fault == "duplicate": graph["nodes"].append(dict(graph["nodes"][0]))
+    elif fault == "dangling": graph["edges"][0]["target"] = "unknown"
+    elif fault == "bad_label": graph["nodes"][0]["label"] = " "
+    elif fault == "bad_node_type": graph["nodes"][0]["node_type"] = "unknown"
+    elif fault == "bad_trace": graph["nodes"][0]["trace_name"] = 123
+    elif fault == "bad_relation": graph["edges"][0]["relation"] = None
+    elif fault == "bad_endpoint": graph["edges"][0]["target"] = []
+    elif fault == "bad_composition": graph["composition"] = ""
+    with pytest.raises(ValueError, match="workflow topology"):
+        local_bank_target(client, "workflow")
+
+
+def test_workflow_graph_change_creates_new_snapshot_without_mutating_old():
+    client = GraphClient()
+    original, original_snapshot = local_bank_target(client, "workflow")
+    saved = original.model_dump(mode="json")
+    client.graph["edges"][0]["relation"] = "新的分支说明"
+    changed, changed_snapshot = local_bank_target(client, "workflow")
+    assert changed.content_sha256 != original.content_sha256
+    assert changed_snapshot.descriptor_sha256 != original_snapshot.descriptor_sha256
+    assert original.model_dump(mode="json") == saved
+    assert original_snapshot.descriptor_sha256 == original.content_sha256

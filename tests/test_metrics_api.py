@@ -19,7 +19,11 @@ def test_config_catalogs_and_real_report_metrics(tmp_path, monkeypatch):
     with TestClient(create_app(database_path, dispatcher)) as client:
         datasets = client.get("/api/datasets").json()["data"]
         evaluators = client.get("/api/evaluators").json()["data"]
-        assert len(datasets) == 1
+        assert len(datasets) == 4
+        core = [d for d in datasets if "核心专项" in d["name"]]
+        assert len(core) == 3
+        assert all(d["version"] == 3 and d["case_count"] == 12 for d in core)
+        datasets = [d for d in datasets if d["id"] == "loan-risk-policy"]
         assert datasets[0]["id"] == "loan-risk-policy"
         assert datasets[0]["version"] == 1
         assert datasets[0]["case_count"] == 1

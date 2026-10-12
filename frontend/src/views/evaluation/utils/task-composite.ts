@@ -14,7 +14,7 @@ export async function createTaskComposite(
     throw Error('只能组合已启用且已发布的规则或 LLM 评估器。');
   const created = await request<{ evaluator: { id: string } }>('/evaluators', 'POST', {
     name,
-    description: '从评测任务创建的加权组合；固定子评估器版本。',
+    description: '从测评任务创建的加权组合；固定子评估器版本。',
     draft: {
       kind: 'hybrid',
       dimension: 'answer',

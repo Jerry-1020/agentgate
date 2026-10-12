@@ -1,10 +1,12 @@
 """Launch and inspect repeated runs against one immutable manifest."""
 
-from statistics import mean, variance, stdev
+from statistics import mean, stdev, variance
+
 from fastapi import APIRouter, HTTPException
-from pydantic import Field, ConfigDict
-from agentgate.server.routes.runs import LaunchRequest, Dependencies
+from pydantic import ConfigDict, Field
+
 from agentgate.application.evaluation_task_management import EvaluationTaskManagement
+from agentgate.server.routes.runs import Dependencies, LaunchRequest
 
 router = APIRouter(prefix="/api/stability-experiments", tags=["stability"])
 
@@ -19,7 +21,9 @@ def launch(body: StabilityRequest, dependencies: Dependencies):
     if body.scheduled_for is not None:
         raise HTTPException(422, "stability does not support scheduling")
     try:
-        return dependencies.submit_stability_runs(**body.model_dump())
+        settings = body.model_dump()
+        settings["evaluator_refs"] = body.evaluator_refs
+        return dependencies.submit_stability_runs(**settings)
     except (ValueError, LookupError) as exc:
         raise HTTPException(422, str(exc)) from exc
 

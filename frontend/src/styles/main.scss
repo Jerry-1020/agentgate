@@ -55,7 +55,7 @@ button:disabled {
   display: flex;
 }
 .sidebar {
-  width: 220px;
+  width: 160px;
   background: #fff;
   border-right: 1px solid #e5e7eb;
   min-height: calc(100vh - 64px);
@@ -108,6 +108,7 @@ button:disabled {
   margin-top: 6px;
 }
 .primary,
+.asset-primary,
 .secondary,
 .ghost,
 .danger {
@@ -118,11 +119,13 @@ button:disabled {
   font-size: 14px;
   font-weight: 600;
 }
-.primary {
+.primary,
+.asset-primary {
   background: #07ac8e;
   color: #fff;
 }
-.primary:hover {
+.primary:hover,
+.asset-primary:hover {
   background: #02b38a;
   box-shadow: 0 4px 10px #07ac8e33;
 }
@@ -623,7 +626,7 @@ button:disabled {
     padding: 20px;
   }
   .sidebar {
-    width: 200px;
+    width: 160px;
   }
   .choice-grid {
     grid-template-columns: 1fr;

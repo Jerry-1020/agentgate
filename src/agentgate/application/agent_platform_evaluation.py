@@ -12,7 +12,14 @@ from uuid import uuid4
 from agentgate.application.credential_management import ApiKeyManagement
 from agentgate.application.evaluator_management import EvaluatorManagement
 from agentgate.application.run_management import RunManagement
-from agentgate.domain import EvaluationRun, TargetDescriptor, TargetRef, TargetSnapshot, utcnow
+from agentgate.domain import (
+    EvaluationRun,
+    EvaluatorRef,
+    TargetDescriptor,
+    TargetRef,
+    TargetSnapshot,
+    utcnow,
+)
 from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.integrations.targets.agent_platform import PlatformClient, resolve_platform_target
@@ -64,43 +71,21 @@ def _build_inbank_descriptor(
     )
 
 
-def submit_platform_evaluation(
+def _platform_target_snapshot(
     *,
-    repository: AgentGateRepository,
-    evaluators: EvaluatorManagement,
-    credentials: ApiKeyManagement | None,
-    dispatcher: JobDispatcher,
+    platform_mode: str,
+    client: PlatformClient | None,
+    token: str,
     team_id: str | None,
     agent_id: str,
     type_group: Literal["base/workflow", "abcclaw"],
     agent_version: str,
     arrange_type: Literal["base", "workflow"] | None,
     branch_id: str | None,
-    dataset_id: str,
-    dataset_version: int,
-    case_ids: tuple[str, ...] | None,
-    evaluator_ids: tuple[str, ...],
     max_parallel_cases: int,
-    timeout_seconds: int,
     max_retries: int,
-    repetitions: int,
-    scheduled_for: datetime | None,
-    token: str,
-    user_team_id: str,
-    user_id: str,
-    user_name: str,
-) -> EvaluationTask:
-    if credentials is None:
-        raise ConnectionError("platform credential encryption is not configured")
-    if scheduled_for is not None and (scheduled_for <= utcnow() or repetitions != 1):
-        raise ValueError("invalid reservation")
-    if not 1 <= repetitions <= 20:
-        raise ValueError("invalid repetitions")
-    if repository.get_dataset(dataset_id, user_team_id=user_team_id) is None:
-        raise LookupError("dataset unavailable to caller")
-    platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
+) -> tuple[TargetDescriptor, str, dict]:
     if platform_mode == "mock":
-        client = PlatformClient.from_environment()
         descriptor = resolve_platform_target(
             client,
             token,
@@ -110,9 +95,8 @@ def submit_platform_evaluation(
             agent_version=agent_version,
             branch_id=branch_id,
         )
-        adapter_type = "agent_platform_mock"
-        invocation_config = descriptor.metadata
-    elif platform_mode == "inbank":
+        return descriptor, "agent_platform_mock", dict(descriptor.metadata)
+    if platform_mode == "inbank":
         if max_parallel_cases != 1 or max_retries != 0:
             raise ValueError("inbank execution requires concurrency 1 and retries 0")
         if type_group == "abcclaw":
@@ -139,8 +123,63 @@ def submit_platform_evaluation(
             arrange_type=arrange_type,
             branch_id=branch_id,
         )
-    else:
+        return descriptor, adapter_type, invocation_config
+    raise ConnectionError("agent platform mode must be mock or inbank")
+
+
+def submit_platform_evaluation(
+    *,
+    repository: AgentGateRepository,
+    evaluators: EvaluatorManagement,
+    credentials: ApiKeyManagement | None,
+    dispatcher: JobDispatcher,
+    team_id: str | None,
+    agent_id: str,
+    type_group: Literal["base/workflow", "abcclaw"],
+    agent_version: str,
+    arrange_type: Literal["base", "workflow"] | None,
+    branch_id: str | None,
+    dataset_id: str,
+    dataset_version: int,
+    case_ids: tuple[str, ...] | None,
+    evaluator_ids: tuple[str, ...] | None,
+    max_parallel_cases: int,
+    timeout_seconds: int,
+    max_retries: int,
+    repetitions: int,
+    scheduled_for: datetime | None,
+    token: str,
+    user_team_id: str,
+    user_id: str,
+    user_name: str,
+    name: str | None = None,
+    evaluator_refs: tuple[EvaluatorRef, ...] | None = None,
+) -> EvaluationTask:
+    if credentials is None:
+        raise ConnectionError("platform credential encryption is not configured")
+    if scheduled_for is not None and (scheduled_for <= utcnow() or repetitions != 1):
+        raise ValueError("invalid reservation")
+    if not 1 <= repetitions <= 20:
+        raise ValueError("invalid repetitions")
+    if repository.get_dataset(dataset_id, user_team_id=user_team_id) is None:
+        raise LookupError("dataset unavailable to caller")
+    platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
+    if platform_mode not in {"mock", "inbank"}:
         raise ConnectionError("agent platform mode must be mock or inbank")
+    client = PlatformClient.from_environment() if platform_mode == "mock" else None
+    descriptor, adapter_type, invocation_config = _platform_target_snapshot(
+        platform_mode=platform_mode,
+        client=client,
+        token=token,
+        team_id=team_id,
+        agent_id=agent_id,
+        type_group=type_group,
+        agent_version=agent_version,
+        arrange_type=arrange_type,
+        branch_id=branch_id,
+        max_parallel_cases=max_parallel_cases,
+        max_retries=max_retries,
+    )
     repository.save_target_descriptor(descriptor)
     task_id = str(uuid4())
     metadata = credentials.create_api_key(
@@ -166,6 +205,7 @@ def submit_platform_evaluation(
             dataset_version=dataset_version,
             case_ids=case_ids,
             evaluator_ids=evaluator_ids,
+            evaluator_refs=evaluator_refs,
             max_parallel_cases=max_parallel_cases,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
@@ -199,6 +239,7 @@ def submit_platform_evaluation(
         ]
         task = EvaluationTask(
             id=task_id,
+            name=name,
             kind="single" if repetitions == 1 else "stability",
             run_ids=tuple(r.id for r in runs),
             credential_id=metadata.id,
@@ -222,3 +263,152 @@ def submit_platform_evaluation(
         except Exception:  # noqa: BLE001 -- Dispatch after commit has an uncertain outcome.
             raise RuntimeError("task exists but dispatch outcome is uncertain") from None
     return task
+
+
+def submit_platform_comparison(
+    *,
+    repository: AgentGateRepository,
+    evaluators: EvaluatorManagement,
+    credentials: ApiKeyManagement | None,
+    dispatcher: JobDispatcher,
+    team_id: str | None,
+    agent_id: str,
+    type_group: Literal["base/workflow", "abcclaw"],
+    baseline_version: str,
+    candidate_version: str,
+    arrange_type: Literal["base", "workflow"] | None,
+    branch_id: str | None,
+    dataset_id: str,
+    dataset_version: int,
+    case_ids: tuple[str, ...] | None,
+    evaluator_ids: tuple[str, ...] | None,
+    timeout_seconds: int,
+    token: str,
+    user_team_id: str,
+    user_id: str,
+    user_name: str,
+    name: str | None = None,
+    evaluator_refs: tuple[EvaluatorRef, ...] | None = None,
+) -> tuple[EvaluationRun, EvaluationRun]:
+    """Create and dispatch one controlled A/B pair of platform Runs."""
+    if evaluator_ids is not None and evaluator_refs is not None:
+        raise ValueError("use evaluator_ids or evaluator_refs, not both")
+    if credentials is None:
+        raise ConnectionError("platform credential encryption is not configured")
+    if baseline_version == candidate_version:
+        raise ValueError("A/B requires two different agent versions")
+    if repository.get_dataset(dataset_id, user_team_id=user_team_id) is None:
+        raise LookupError("dataset unavailable to caller")
+    platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
+    if platform_mode not in {"mock", "inbank"}:
+        raise ConnectionError("agent platform mode must be mock or inbank")
+    client = PlatformClient.from_environment() if platform_mode == "mock" else None
+
+    task_id = str(uuid4())
+    metadata = credentials.create_api_key(
+        name="Platform comparison " + task_id,
+        provider_id="agent-platform-" + platform_mode,
+        scope="private",
+        plaintext=token,
+    )
+    try:
+        management = RunManagement(repository, evaluators)
+        prepared: list[EvaluationRun] = []
+        selected_specs = (
+            evaluators.select_versions(evaluator_refs)
+            if evaluator_refs is not None
+            else evaluators.select(evaluator_ids)
+        )
+        if evaluator_refs is not None:
+            primary_ids = tuple(ref.evaluator_id for ref in evaluator_refs)
+        elif evaluator_ids is not None:
+            primary_ids = evaluator_ids
+        else:
+            primary_ids = tuple(spec.id for spec in selected_specs)
+        versions = {spec.id: spec.version for spec in selected_specs}
+        selected_refs = tuple(
+            EvaluatorRef(evaluator_id=evaluator_id, evaluator_version=versions[evaluator_id])
+            for evaluator_id in primary_ids
+        )
+        for version in (baseline_version, candidate_version):
+            descriptor, adapter_type, invocation_config = _platform_target_snapshot(
+                platform_mode=platform_mode,
+                client=client,
+                token=token,
+                team_id=team_id,
+                agent_id=agent_id,
+                type_group=type_group,
+                agent_version=version,
+                arrange_type=arrange_type,
+                branch_id=branch_id,
+                max_parallel_cases=1,
+                max_retries=0,
+            )
+            repository.save_target_descriptor(descriptor)
+            snapshot = TargetSnapshot(
+                ref=descriptor.ref,
+                display_name=descriptor.display_name,
+                descriptor_sha256=descriptor.content_sha256,
+                adapter_type=adapter_type,
+                adapter_version="1",
+                invocation_config=invocation_config,
+                credential_ref=metadata.id,
+            )
+            run = management.create_run(
+                snapshot,
+                dataset_id=dataset_id,
+                dataset_version=dataset_version,
+                case_ids=case_ids,
+                evaluator_refs=selected_refs,
+                max_parallel_cases=1,
+                timeout_seconds=timeout_seconds,
+                max_retries=0,
+                scheduled_for=None,
+                persist=False,
+            )
+            if platform_mode == "mock":
+                for case in run.manifest.execution_cases:
+                    if case.initial_state:
+                        raise ValueError("platform mock has no mutable initial business state")
+                    for turn in case.turns:
+                        if (
+                            set(turn.input) != {"txt"}
+                            or not isinstance(turn.input["txt"], str)
+                            or not turn.input["txt"].strip()
+                        ):
+                            raise ValueError(
+                                "platform case input requires nonblank txt only"
+                            )
+            prepared.append(
+                EvaluationRun(
+                    id=(task_id if not prepared else str(uuid4())),
+                    manifest=run.manifest,
+                    status=run.status,
+                    scheduled_for=run.scheduled_for,
+                    user_team_id=user_team_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                )
+            )
+        task = EvaluationTask(
+            id=task_id,
+            name=name,
+            kind="ab",
+            run_ids=tuple(item.id for item in prepared),
+            credential_id=metadata.id,
+        )
+    except Exception:
+        credentials.delete_api_key(metadata.id)
+        raise
+    try:
+        repository.save_task_runs(task, tuple(prepared))
+    except Exception:  # noqa: BLE001 -- Persistence outcome must never become a 4xx rejection.
+        raise RuntimeError("task persistence outcome is uncertain") from None
+    for item in prepared:
+        try:
+            management.dispatch_run(item.id, dispatcher)
+        except RuntimeError:
+            continue
+        except Exception:  # noqa: BLE001 -- Dispatch after commit has an uncertain outcome.
+            raise RuntimeError("task exists but dispatch outcome is uncertain") from None
+    return prepared[0], prepared[1]

@@ -4,6 +4,18 @@ import { request, type TargetDescriptor } from '../../../api/evaluations';
 import type { EvaluationRun } from '../../evaluation/types/run';
 import type { Trace } from '../../../api/client';
 import { datasetApi } from '../../../api/datasets';
+import { agentDirectory, localAgentDirectory } from '../../../api/agent-platform';
+import { useAuthStore } from '../../../stores/modules/auth';
+import AgentTargetPicker, { type AgentTargetSelection } from '../../evaluation/components/AgentTargetPicker.vue';
+import TargetStructure from '../../evaluation/components/TargetStructure.vue';
+import { matchesAnnotationTarget } from '../../evaluation/utils/annotation-feedback';
+
+const auth = useAuthStore();
+const platformDirectory = computed(() =>
+  auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
+);
+const platformToken = computed(() => (auth.loginMode === 'bank' ? auth.token : 'local'));
+const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId : ''));
 
 type Mode = 'base' | 'workflow' | 'cloudshrimp';
 type Descriptor = TargetDescriptor & {
@@ -27,20 +39,19 @@ const modeNames: Record<Mode, string> = {
   workflow: '工作流',
   cloudshrimp: '云虾',
 };
-const mode = ref<Mode>('base'),
-  targets = ref<Target[]>([]),
-  loading = ref(false),
-  loadError = ref('');
-const agentId = ref(''),
-  version = ref(''),
-  branch = ref(''),
-  pinned = ref<Target | null>(null);
+const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
+const selection = ref<AgentTargetSelection | null>(null);
+function receiveSelection(value: AgentTargetSelection | null) {
+  selection.value = value;
+  pinned.value = null;
+}
+const pinned = ref<Target | null>(null);
 const name = ref(''),
   description = ref(''),
   tags = ref<string[]>([]),
   icon = ref('🗂️'),
   error = ref('');
-const tab = ref('prompt');
+const tab = ref('graph');
 const runs = ref<EvaluationRun[]>([]),
   runsLoading = ref(false),
   runsError = ref('');
@@ -50,31 +61,6 @@ const runId = ref(''),
   traceLoading = ref(false),
   traceError = ref('');
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
-const modeTargets = computed(() =>
-  targets.value.filter((t) => t.snapshot.invocation_config.mode === mode.value),
-);
-const agents = computed(() =>
-  Array.from(
-    new Map(modeTargets.value.map((t) => [t.descriptor.ref.external_target_id, t])).values(),
-  ),
-);
-const agentTargets = computed(() =>
-  modeTargets.value.filter((t) => t.descriptor.ref.external_target_id === agentId.value),
-);
-const branches = computed(() =>
-  Array.from(
-    new Set(agentTargets.value.map((t) => t.git_branch_url).filter((b): b is string => !!b)),
-  ),
-);
-const versionTargets = computed(() =>
-  agentTargets.value.filter(
-    (t) =>
-      mode.value !== 'cloudshrimp' || !branches.value.length || t.git_branch_url === branch.value,
-  ),
-);
-const selected = computed(() =>
-  versionTargets.value.find((t) => t.descriptor.ref.external_version_id === version.value),
-);
 const descriptor = computed(() => pinned.value?.descriptor);
 const variables = computed(() => Object.entries(descriptor.value?.input_schema?.properties ?? {}));
 const nodes = computed(
@@ -118,34 +104,6 @@ function invalidate() {
   traceLoading.value = false;
   error.value = '';
 }
-watch(
-  mode,
-  () => {
-    agentId.value = '';
-    branch.value = '';
-    version.value = '';
-    invalidate();
-  },
-  { flush: 'sync' },
-);
-watch(
-  agentId,
-  () => {
-    branch.value = '';
-    version.value = '';
-    invalidate();
-  },
-  { flush: 'sync' },
-);
-watch(
-  branch,
-  () => {
-    version.value = '';
-    invalidate();
-  },
-  { flush: 'sync' },
-);
-watch(version, invalidate, { flush: 'sync' });
 watch(runId, () => {
   caseId.value = '';
   trace.value = null;
@@ -153,50 +111,93 @@ watch(runId, () => {
   traceSequence++;
   traceLoading.value = false;
 });
-async function loadTargets() {
-  loading.value = true;
-  loadError.value = '';
-  invalidate();
-  targets.value = [];
-  agentId.value = '';
-  version.value = '';
-  branch.value = '';
-  try {
-    targets.value = await request<Target[]>('/bank-targets');
-  } catch {
-    loadError.value = '智能体目录读取失败，请检查新版服务后重试。';
-  } finally {
-    loading.value = false;
+// 目录加载由 AgentTargetPicker 内部处理，此处无需手动加载。
+function buildTopologyFromSelection(
+  sel: AgentTargetSelection,
+  composition: string,
+): { composition: string; nodes: { id: string; kind: string; label: string; description: string }[]; edges: { source: string; target: string; relation: string }[] } {
+  const nodes: { id: string; kind: string; label: string; description: string }[] = [
+    { id: sel.agentId, kind: 'agent', label: sel.agentName, description: `被测智能体（${composition}）` },
+  ];
+  const edges: { source: string; target: string; relation: string }[] = [];
+  for (const skill of sel.skills ?? []) {
+    const skillId = `${sel.agentId}:skill:${skill.id}`;
+    nodes.push({ id: skillId, kind: 'skill', label: skill.name ?? skill.id, description: skill.description ?? '' });
+    edges.push({ source: sel.agentId, target: skillId, relation: 'includes_skill' });
+    for (const toolName of skill.tools ?? []) {
+      const toolId = `${sel.agentId}:tool:${toolName}`;
+      if (!nodes.some((n) => n.id === toolId)) {
+        nodes.push({ id: toolId, kind: 'tool', label: toolName, description: `工具：${toolName}` });
+      }
+      edges.push({ source: skillId, target: toolId, relation: 'includes_tool' });
+    }
   }
+  for (const tool of sel.tools ?? []) {
+    const name = tool?.function?.name ?? '';
+    if (!name) continue;
+    const toolId = `${sel.agentId}:tool:${name}`;
+    if (!nodes.some((n) => n.id === toolId)) {
+      nodes.push({ id: toolId, kind: 'tool', label: name, description: tool?.function?.description ?? '' });
+      edges.push({ source: sel.agentId, target: toolId, relation: 'includes_tool' });
+    }
+  }
+  return { composition, nodes, edges };
 }
+
 async function confirmTarget() {
-  if (!selected.value) {
-    error.value = '请选择智能体及已登记版本。云虾分支必须匹配服务端返回的选项。';
+  if (!selection.value) {
+    error.value = '请选择智能体、版本（abcclaw 还需分支地址）。';
     return;
   }
   const ticket = ++contextSequence;
-  pinned.value = clone(selected.value);
+  const sel = selection.value;
+  const m: Mode = sel.typeGroup === 'abcclaw' ? 'cloudshrimp' : (sel.platformArrangeType as Mode) || 'base';
+  const topology = buildTopologyFromSelection(sel, m);
+  pinned.value = {
+    descriptor: {
+      ref: {
+        source_id: 'platform',
+        target_type: 'agent',
+        external_target_id: sel.agentId,
+        external_version_id: sel.agentVersion,
+      },
+      content_sha256: '',
+      display_name: sel.agentName,
+      skills: (sel.skills ?? []).map((s) => ({
+        external_skill_id: s.id,
+        external_version_id: 'v1',
+        name: s.name ?? s.id,
+        description: s.description ?? '',
+        tools: [],
+        prompt: null,
+      })),
+      tools: (sel.tools ?? []).map((t) => ({
+        name: t?.function?.name ?? '',
+        description: t?.function?.description ?? '',
+        input_schema: {},
+      })),
+      metadata: { mode: m, topology },
+    } as unknown as Descriptor,
+    snapshot: { invocation_config: { mode: m } },
+    git_branch_url: null,
+  };
+  if (sel.localTarget) pinned.value.descriptor = sel.localTarget.descriptor as Descriptor;
   error.value = '';
-  tab.value = 'prompt';
+  tab.value = 'graph';
   runsLoading.value = true;
   runsError.value = '';
   runs.value = [];
   try {
     const all = await request<EvaluationRun[]>('/runs?limit=200');
     if (ticket !== contextSequence) return;
-    const target = pinned.value!.descriptor.ref;
-    runs.value = all.filter((r) => {
-      const ref = r.manifest.target.ref;
-      return (
-        ref.source_id === target.source_id &&
-        ref.target_type === target.target_type &&
-        ref.external_target_id === target.external_target_id &&
-        ref.external_version_id === target.external_version_id
-      );
-    });
+    runs.value = all.filter((r) => matchesAnnotationTarget(r, {
+      ...sel, loginMode: auth.loginMode,
+      ...(sel.localTarget ? { localExecution: { sourceId: sel.localTarget.descriptor.ref.source_id,
+        adapterType: sel.localTarget.adapter_type } } : {}),
+    }));
   } catch {
     if (ticket === contextSequence)
-      runsError.value = '历史评测记录读取失败，不能据此判断没有会话。';
+      runsError.value = '历史测评记录读取失败，不能据此判断没有会话。';
   } finally {
     if (ticket === contextSequence) runsLoading.value = false;
   }
@@ -224,16 +225,14 @@ async function loadTrace() {
 function autoDescription() {
   if (descriptor.value)
     description.value =
-      `用于评测${modeNames[mode.value]}智能体「${descriptor.value.display_name}」的 ${descriptor.value.ref.external_version_id} 版本，核查回答质量、执行过程与工具调用。`.slice(
+      `用于测评智能体「${descriptor.value.display_name}」的 ${descriptor.value.ref.external_version_id} 版本，核查回答质量、执行过程与工具调用。`.slice(
         0,
         512,
       );
 }
 function validate() {
   error.value = '';
-  if (!name.value.trim()) error.value = '请输入数据集名称。';
-  else if (!description.value.trim()) error.value = '请输入数据集描述。';
-  else if (!tags.value.length) error.value = '请至少选择或输入一个场景标签。';
+  if (!name.value.trim()) error.value = '请输入测评集名称。';
   return !error.value;
 }
 async function create(withImport: boolean) {
@@ -257,14 +256,13 @@ function close() {
     return;
   emit('close');
 }
-// 关联智能体配置待实现：不自动读取目录，控件已整体禁用。
 </script>
 
 <template>
   <el-dialog
     :model-value="true"
-    title="创建数据集"
-    width="min(1060px,96vw)"
+    title="创建测评集"
+    width="min(800px,96vw)"
     top="3vh"
     class="dataset-create-v2"
     :close-on-click-modal="false"
@@ -273,75 +271,75 @@ function close() {
     :close-on-press-escape="!saving"
   >
     <template v-if="true">
-      <h3 class="pending-heading">
-        <span class="step-number">01</span>关联智能体<small>待实现</small>
-      </h3>
-      <fieldset class="pending-section" disabled aria-label="关联智能体（待实现，已禁用）">
-      <div class="target-fields" :class="{ cloud: mode === 'cloudshrimp' }">
-        <label
-          >智能体模式 <em>*</em
-          ><select v-model="mode" aria-label="数据集智能体模式">
-            <option value="base">基础编排 · Dify</option>
-            <option value="workflow">工作流 · Dify</option>
-            <option value="cloudshrimp">云虾 · DeepAgent</option>
-          </select></label
-        >
-        <label
-          >智能体 ID / 名称 <em>*</em
-          ><select v-model="agentId" aria-label="数据集智能体" :disabled="loading">
-            <option value="">请选择智能体</option>
-            <option
-              v-for="t in agents"
-              :key="t.descriptor.ref.external_target_id"
-              :value="t.descriptor.ref.external_target_id"
-            >
-              {{ t.descriptor.ref.external_target_id }} · {{ t.descriptor.display_name }}
-            </option>
-          </select></label
-        >
-        <label v-if="mode === 'cloudshrimp'"
-          >Git 仓库分支地址<input
-            v-model="branch"
-            aria-label="数据集 Git 分支"
-            list="dataset-branches"
-            placeholder="填写或选择已登记分支"
-            :disabled="!agentId || !branches.length" /><datalist id="dataset-branches">
-            <option v-for="b in branches" :key="b" :value="b" /></datalist
-        ></label>
-        <label
-          >智能体版本 <em>*</em
-          ><select v-model="version" aria-label="数据集智能体版本" :disabled="!agentId">
-            <option value="">请选择版本</option>
-            <option
-              v-for="t in versionTargets"
-              :key="t.descriptor.content_sha256"
-              :value="t.descriptor.ref.external_version_id"
-            >
-              {{ t.descriptor.ref.external_version_id }}
-            </option>
-          </select></label
-        >
-      </div>
-      <p v-if="mode === 'cloudshrimp' && agentId && !branches.length" class="warning">
-        当前部署未提供 Git 分支；只能预览当前部署版本，不能确认分支绑定。本演示不会虚构客户分支。
-      </p>
-      <p v-if="loadError" role="alert" class="warning">{{ loadError }}</p>
-      <div class="target-actions">
-        <button type="button" class="secondary" :disabled="loading" @click="loadTargets">
-          {{ loading ? '读取目录中…' : '刷新智能体目录' }}</button
-        ><button
-          type="button"
-          class="primary"
-          :disabled="!selected || loading || runsLoading"
-          @click="confirmTarget"
-        >
-          {{
-            runsLoading ? '读取上下文中…' : pinned ? '重新读取定义与会话' : '确认并读取定义与会话'
-          }}
+      <h3><span class="step-number">01</span>测评集名称</h3>
+      <label
+        >头像 &amp; 测评集名称 <em>*</em>
+        <div class="name-row">
+          <select v-model="icon" aria-label="测评集头像">
+            <option>🗂️</option>
+            <option>💬</option>
+            <option>🤖</option>
+            <option>📋</option></select
+          ><input
+            v-model="name"
+            maxlength="128"
+            aria-label="测评集名称"
+            placeholder="例如：贷款智能体·高风险申请回归集"
+          /></div
+      ></label>
+      <div class="description-title">
+        <label for="v2-dataset-description">测评集描述（选填）</label
+        ><button type="button" class="text-button" :disabled="!descriptor" @click="autoDescription">
+          ✦ 按智能体信息填写
         </button>
       </div>
-      </fieldset>
-      <p class="pending-note">关联智能体配置待实现；当前创建数据集不依赖该配置。</p>
+      <input
+        type="text"
+        id="v2-dataset-description"
+        v-model="description"
+        maxlength="512"
+        placeholder="请简要说明测评内容与业务场景"
+      />
+      <div class="counter">{{ description.length }} / 512 · 自动填写使用元数据，不调用模型</div>
+      <label class="tags-label"
+        >场景标签（选填）
+        <el-select
+          v-model="tags"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          placeholder="选择标签，或输入后按回车新增"
+          aria-label="测评集场景标签"
+          ><el-option
+            v-for="t in ['贷款申请', '风险审核', '进度查询', '工具调用', '多轮对话', '安全合规']"
+            :key="t"
+            :label="t"
+            :value="t" /></el-select
+      ></label>
+      <h3><span class="step-number">02</span>关联智能体</h3>
+      <AgentTargetPicker
+        ref="platformPicker"
+        class="full"
+        :directory="platformDirectory"
+        :token="platformToken"
+        :team-id="platformTeamId"
+        :disabled="saving"
+        @selection-change="receiveSelection"
+      />
+      <p class="muted">
+        选择智能体后自动加载版本；abcclaw 类型需先选分支地址再选版本。
+      </p>
+      <div class="target-actions">
+        <button
+          type="button"
+          class="primary"
+          :disabled="!selection || saving"
+          @click="confirmTarget"
+        >
+          {{ saving ? '处理中…' : pinned ? '重新读取' : 'Agent定义与会话样例' }}
+        </button>
+      </div>
       <section v-if="descriptor" class="definition" aria-label="关联智能体只读信息">
         <div class="definition-title">
           <b>{{ descriptor.display_name }} · {{ descriptor.ref.external_version_id }}</b
@@ -350,9 +348,7 @@ function close() {
         <div class="context-tabs" role="tablist">
           <button
             v-for="t in [
-              { id: 'prompt', name: '提示词' },
-              { id: 'skills', name: 'Skill / Tool' },
-              { id: 'nodes', name: '节点结构' },
+              { id: 'graph', name: '智能体图谱' },
               { id: 'sessions', name: '已有会话' },
             ]"
             :key="t.id"
@@ -365,59 +361,25 @@ function close() {
           </button>
         </div>
         <div class="context-body">
-          <template v-if="tab === 'prompt'"
-            ><h4>{{ mode === 'workflow' ? '工作流服务提供的提示词' : '智能体系统提示词' }}</h4>
-            <pre>{{ descriptor.prompt || '服务端未提供提示词' }}</pre>
-            <template v-if="descriptor.metadata.summary_prompt"
-              ><h4>回答汇总提示词</h4>
-              <pre>{{ descriptor.metadata.summary_prompt }}</pre>
-            </template>
-            <p v-if="mode === 'workflow'" class="note">
-              此处不是全部节点提示词；未提供的节点提示词不会自动补写。
-            </p></template
-          >
-          <template v-else-if="tab === 'skills'"
-            ><h4>Skill · {{ descriptor.skills.length }}</h4>
-            <article v-for="s in descriptor.skills" :key="s.external_skill_id">
-              <b>{{ s.name }}</b>
-              <p>{{ s.description || '未提供描述' }}</p>
-              <details v-if="s.prompt">
-                <summary>Skill 提示词（只读）</summary>
-                <pre>{{ s.prompt }}</pre>
-              </details>
-            </article>
-            <p v-if="!descriptor.skills.length" class="note">该版本未声明 Skill。</p>
-            <h4>Tool · {{ descriptor.tools?.length ?? 0 }}</h4>
-            <article v-for="(t, i) in descriptor.tools" :key="i">
-              <b>{{ t.name }}</b>
-              <p>{{ t.description || '未提供描述' }}</p>
-            </article></template
-          >
-          <template v-else-if="tab === 'nodes'"
-            ><article v-for="node in nodes" :key="node.id">
-              <b>{{ node.kind }} · {{ node.label }}</b>
-              <p>{{ node.description || '未提供描述' }}</p>
-              <pre v-if="node.prompt">{{ node.prompt }}</pre>
-              <small v-else-if="node.kind === 'workflow'">未提供独立节点提示词</small>
-            </article>
-            <p v-if="!nodes.length">服务端未提供节点结构。</p></template
-          >
+          <template v-if="tab === 'graph'">
+            <TargetStructure :descriptor="descriptor" hide-source />
+          </template>
           <template v-else>
             <p class="note">
-              从最近 200 条评测中按来源、应用 ID
-              与版本匹配。这里是已有评测会话，不等同于客户平台全部在线会话；复制到新版的历史记录也不代表新版已重跑。历史运行使用当时的定义快照，同一版本名不代表与当前定义摘要相同。
+              从最近 200 条测评中按来源、应用 ID
+              与版本匹配。这里是已有测评会话，不等同于客户平台全部在线会话；复制到新版的历史记录也不代表新版已重跑。历史运行使用当时的定义快照，同一版本名不代表与当前定义摘要相同。
             </p>
             <p v-if="activeRun" class="fingerprint">
               历史目标摘要：{{ activeRun.manifest.target.descriptor_sha256 }}
             </p>
-            <p v-if="runsLoading" role="status">正在读取历史评测…</p>
+            <p v-if="runsLoading" role="status">正在读取历史测评…</p>
             <p v-else-if="runsError" role="alert">{{ runsError }}</p>
-            <p v-else-if="!runs.length">暂无匹配的历史评测会话。</p>
+            <p v-else-if="!runs.length">暂无匹配的历史测评会话。</p>
             <template v-else
               ><div class="session-selects">
                 <label
-                  >来源评测<select v-model="runId" aria-label="来源评测">
-                    <option value="">请选择评测</option>
+                  >来源测评<select v-model="runId" aria-label="来源测评">
+                    <option value="">请选择测评</option>
                     <option v-for="r in runs" :key="r.id" :value="r.id">
                       {{ r.id.slice(0, 8) }} · {{ r.status }} · {{ r.created_at }}
                     </option>
@@ -454,52 +416,6 @@ function close() {
         </div>
         <p class="fingerprint">定义摘要：{{ descriptor.content_sha256 }}</p>
       </section>
-      <h3><span class="step-number">02</span>数据集基本信息</h3>
-      <label
-        >头像 &amp; 数据集名称 <em>*</em>
-        <div class="name-row">
-          <select v-model="icon" aria-label="数据集头像">
-            <option>🗂️</option>
-            <option>💬</option>
-            <option>🤖</option>
-            <option>📋</option></select
-          ><input
-            v-model="name"
-            maxlength="128"
-            aria-label="数据集名称"
-            placeholder="例如：贷款智能体·高风险申请回归集"
-          /></div
-      ></label>
-      <div class="description-title">
-        <label for="v2-dataset-description">描述 <em>*</em></label
-        ><button type="button" class="text-button" :disabled="!descriptor" @click="autoDescription">
-          ✦ 按智能体信息填写
-        </button>
-      </div>
-      <textarea
-        id="v2-dataset-description"
-        v-model="description"
-        maxlength="512"
-        rows="3"
-        placeholder="请简要说明评测内容与业务场景"
-      />
-      <div class="counter">{{ description.length }} / 512 · 自动填写使用元数据，不调用模型</div>
-      <label class="tags-label"
-        >场景标签 <em>*</em
-        ><el-select
-          v-model="tags"
-          multiple
-          filterable
-          allow-create
-          default-first-option
-          placeholder="选择标签，或输入后按回车新增"
-          aria-label="数据集场景标签"
-          ><el-option
-            v-for="t in ['贷款申请', '风险审核', '进度查询', '工具调用', '多轮对话', '安全合规']"
-            :key="t"
-            :label="t"
-            :value="t" /></el-select
-      ></label>
       <h3>变量定义 <span class="readonly-chip">自动读取 · 不可编辑</span></h3>
       <p v-if="!descriptor" class="empty-context">确认智能体版本后自动呈现。</p>
       <template v-else
@@ -528,10 +444,10 @@ function close() {
     <template #footer
       ><p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <div class="footer-actions">
-        <span>关联信息不随数据集保存</span
+        <span>关联信息不随测评集保存</span
         ><button type="button" class="secondary" :disabled="saving" @click="close">取消</button
         ><button type="button" class="secondary" :disabled="saving" @click="create(false)">
-          创建空数据集</button
+          创建空测评集</button
         ><button type="button" class="primary" :disabled="saving" @click="create(true)">
           {{ saving ? '正在保存…' : '创建并导入' }}
         </button>
@@ -978,5 +894,11 @@ th {
   .wizard-steps {
     gap: 10px;
   }
+}
+</style>
+
+<style>
+.el-overlay .el-dialog.dataset-create-v2 .el-dialog__body {
+  max-height: 68vh;
 }
 </style>

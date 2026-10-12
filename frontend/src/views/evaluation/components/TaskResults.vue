@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
+import { readTaskLinks } from '../utils/task-links';
 const router = useRouter();
 import { shallowRef, computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
@@ -23,6 +24,8 @@ import {
 } from '../utils/task-report';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import RerunDialog from './RerunDialog.vue';
+import TraceExplorer from './TraceExplorer.vue';
+import TaskStaticAnalysis from './TaskStaticAnalysis.vue';
 import { sameJson } from '../utils/report-presentation';
 import { taskTitle } from '../utils/dashboard-data';
 const props = defineProps<{ id: string; returnPage?: string }>(),
@@ -32,7 +35,7 @@ async function writeback() {
   if (!sample.value || writing.value) return;
   try {
     await ElMessageBox.confirm(
-      '将本次样本快照写回原评测集草稿？同 ID 草稿样本将被替换，已发布版本和历史结果不变。',
+      '将本次样本快照写回原测评集草稿？同 ID 草稿样本将被替换，已发布版本和历史结果不变。',
       '回写失败样本',
       { confirmButtonText: '确认回写', cancelButtonText: '取消' },
     );
@@ -53,7 +56,7 @@ const progress = ref<RunProgress | null>(null),
   data = shallowRef<RunSamples | null>(null),
   report = shallowRef<Report | null>(null),
   error = ref(''),
-  tab = ref('results'),
+  tab = ref(router.currentRoute.value.query.tab === 'static' ? 'static' : 'results'),
   rerun = ref(false);
 const sampleId = ref(location.hash.match(/\/samples\/([^?]+)/)?.[1] ?? ''),
   turnIndex = ref(0),
@@ -217,7 +220,7 @@ function exportRows() {
         traceSeconds(traces.value[c.id]),
       ]),
     ],
-    `评测结果-${props.id}.csv`,
+    `测评结果-${props.id}.csv`,
   );
 }
 onMounted(load);
@@ -234,7 +237,7 @@ watch(sampleId, () => {
 <template>
   <div class="task-results">
     <div class="breadcrumbs">
-      <button class="link" @click="emit('navigate', 'tasks')">评测任务</button><span>/</span
+      <button class="link" @click="emit('navigate', 'tasks')">测评任务</button><span>/</span
       ><button class="link" @click="back">任务详情</button
       ><template v-if="sampleId"><span>/</span><span>样本详情</span></template>
     </div>
@@ -246,7 +249,15 @@ watch(sampleId, () => {
         <header class="task-hero">
           <div class="hero-icon">{{ progress.status === 'completed' ? '✓' : '◷' }}</div>
           <div>
-            <h1>{{ taskTitle(data.run) }}</h1>
+            <h1>
+              {{
+                taskTitle(
+                  data.run,
+                  undefined,
+                  readTaskLinks().find((t) => t.runIds.includes(data?.run.id ?? ''))?.name,
+                )
+              }}
+            </h1>
             <p>
               {{ manifest.target.ref.external_version_id }} <span>·</span>
               {{ new Date(progress.created_at).toLocaleString() }}
@@ -269,6 +280,7 @@ watch(sampleId, () => {
             v-for="t in [
               ['results', '样本结果'],
               ['config', '任务配置'],
+              ['static', 'Skill 静态分析'],
             ]"
             :key="t[0]"
             class="tab"
@@ -371,10 +383,8 @@ watch(sampleId, () => {
             </table>
           </div>
           <p v-if="!filtered.length" class="empty">暂无匹配样本</p>
-          <p v-if="columns.some((c) => c.criterion)" class="muted">
-            LLM 未返回独立维度分数，显示为“—”。
-          </p>
         </template>
+        <TaskStaticAnalysis v-else-if="tab === 'static'" :run-ids="[id]" />
         <section v-else-if="tab === 'config'" class="config-cards">
           <article class="card">
             <h2>被测智能体</h2>
@@ -385,7 +395,7 @@ watch(sampleId, () => {
                 {{ manifest.target.ref.external_version_id }}
               </p>
             </div>
-            <h3>评测数据集</h3>
+            <h3>测评集</h3>
             <div class="config-block">
               <a class="link" :href="'#datasets/' + manifest.dataset.dataset_id">{{
                 manifest.dataset.dataset_name
@@ -410,6 +420,20 @@ watch(sampleId, () => {
               <p v-if="s.config?.model">
                 {{ s.config.model.provider_id }} · {{ s.config.model.model_id }}
               </p>
+              <p v-if="s.kind === 'llm_judge'">
+                通过分数 {{ Number(s.config.pass_threshold ?? 0.8) * 100 }} / 100
+              </p>
+              <dl
+                v-if="s.implementation_id === 'answer_quality' && s.implementation_version === '2'"
+              >
+                <template v-for="dimension in s.config.dimensions" :key="dimension.id">
+                  <dt>{{ dimension.name }} · {{ dimension.weight }}%</dt>
+                  <dd>
+                    {{ dimension.description }}
+                    <pre>{{ dimension.prompt }}</pre>
+                  </dd>
+                </template>
+              </dl>
               <dl v-if="s.config?.rubric">
                 <template v-for="(text, key) in s.config.rubric" :key="key"
                   ><dt>{{ key }}</dt>
@@ -430,7 +454,7 @@ watch(sampleId, () => {
       <template v-else-if="sample">
         <header class="sample-head">
           <div>
-            <h1>样本评测详情</h1>
+            <h1>样本测评详情</h1>
             <p>{{ sample.name }} · {{ sample.turns.length }} 轮对话</p>
           </div>
           <span class="badge info">{{ statusLabel(summary(sample.id).outcome) }}</span
@@ -473,8 +497,8 @@ watch(sampleId, () => {
                 </button>
               </div>
             </header>
-            <div class="conversation-body" :class="{ 'single-turn': !isMultiTurn }">
-              <aside v-if="isMultiTurn">
+            <div class="conversation-body">
+              <aside>
                 <h4>轮次目录</h4>
                 <button
                   v-for="(turn, i) in sample.turns"
@@ -496,7 +520,7 @@ watch(sampleId, () => {
                   {{ caseResults(sample.id).length ? '正在读取执行轨迹…' : '尚无执行轨迹' }}
                 </p>
                 <article v-for="turn in shownTurns" :key="turn.id" class="conversation-turn">
-                  <h3 v-if="isMultiTurn">第 {{ sample.turns.indexOf(turn) + 1 }} 轮</h3>
+                  <h3>第 {{ sample.turns.indexOf(turn) + 1 }} 轮</h3>
                   <h4>用户输入</h4>
                   <pre class="message user">{{
                     displayValue(trace?.turn_outcomes?.[turn.id]?.input ?? turn.input)
@@ -535,7 +559,7 @@ watch(sampleId, () => {
             </div>
           </section>
           <aside class="evaluation-panel">
-            <h2>评测结果</h2>
+            <h2>测评结果</h2>
             <section class="score-box">
               <span>综合得分</span
               ><strong>{{ score(summary(sample.id).score) }}<small>/100</small></strong
@@ -547,7 +571,7 @@ watch(sampleId, () => {
             </section>
             <section class="dimension-bars">
               <h3>
-                评分维度 <small>{{ columns.length }} 项</small>
+                评估器得分 <small>{{ columns.length }} 项</small>
               </h3>
               <div v-for="col in columns" :key="col.key">
                 <p>
@@ -569,6 +593,16 @@ watch(sampleId, () => {
             </details>
           </aside>
         </div>
+        <TraceExplorer v-if="trace" :key="trace.trace_id + ':' + sample.id" :trace="trace" />
+        <section v-else class="trace-status-panel" aria-label="执行轨迹追踪">
+          <h2>执行轨迹追踪</h2>
+          <p v-if="traceErrors[sample.id]" class="notice error" role="alert">
+            Trace 读取失败：{{ traceErrors[sample.id] }}
+          </p>
+          <p v-else class="muted" role="status">
+            {{ caseResults(sample.id).length ? '正在读取完整 Trace…' : '尚无执行轨迹' }}
+          </p>
+        </section>
         <footer class="sample-footer">
           <span>耗时 {{ formatTime(traceSeconds(trace)) }}</span
           ><span>轮次 {{ sample.turns.length }}</span
@@ -589,6 +623,18 @@ watch(sampleId, () => {
   </div>
 </template>
 <style scoped>
+.trace-status-panel {
+  min-width: 0;
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #dfe8e5;
+  border-radius: 14px;
+  background: white;
+}
+.trace-status-panel h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
 .breadcrumbs {
   display: flex;
   gap: 12px;
@@ -755,7 +801,7 @@ progress::-webkit-progress-value {
 }
 .conversation-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(310px, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(372px, 1.2fr);
   gap: 20px;
 }
 .conversation-panel,
@@ -791,9 +837,6 @@ progress::-webkit-progress-value {
   background: #f8faf9;
   border-right: 1px solid #e8edea;
   overflow: auto;
-}
-.conversation-body.single-turn {
-  grid-template-columns: minmax(0, 1fr);
 }
 .conversation-body > aside button {
   border: 0;

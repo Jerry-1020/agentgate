@@ -164,6 +164,15 @@ def archive_dataset(dataset_id: str, dependencies: Dependencies):
         raise_not_found(error)
 
 
+@router.delete("/{dataset_id}/record")
+def delete_dataset_record(dataset_id: str, dependencies: Dependencies):
+    try:
+        dataset = dependencies.datasets.delete_record(dataset_id)
+    except ValueError as error:
+        raise_unprocessable(error)
+    return {"deleted": dataset.id}
+
+
 @router.post("/{dataset_id}/copy", status_code=201)
 def copy_dataset(
     dataset_id: str,

@@ -28,6 +28,7 @@ from .contract import JudgeContractError, ParsedVerdict, parse_verdict
 from .model_protocol import (
     JudgeModelClient,
     JudgeModelInvalidResponse,
+    JudgeRequest,
     JudgeResponse,
     request_fingerprint,
 )
@@ -289,21 +290,7 @@ class AnswerQualityJudge:
             )
 
         client = self.model_clients[config.provider_id]
-        request = build_judge_request(
-            model_id=config.model_id,
-            instruction=config.instruction,
-            rubric=config.rubric,
-            case=case,
-            trace=trace,
-            input_selection=config.input_selection,
-            pass_threshold=config.pass_threshold,
-            temperature=config.temperature,
-            seed=config.seed,
-            max_output_tokens=config.max_output_tokens,
-            timeout_seconds=config.timeout_seconds,
-            max_input_chars=config.max_input_chars,
-            redact=redact_value,
-        )
+        request = build_answer_quality_request(spec, case, trace)
         deadline = monotonic() + config.timeout_seconds
         attempts: list[JudgeRecord] = []
         # One correction at most, within the original deadline. Never normalize
@@ -327,7 +314,11 @@ class AnswerQualityJudge:
                     exc.judge_record = attempts[-1]
                 raise
             record = _judge_record(config, request_fingerprint(request), response).model_copy(
-                update={"previous_attempts": tuple(attempts)}
+                update={
+                    "previous_attempts": tuple(attempts),
+                    "request_system_prompt": request.system_prompt,
+                    "request_user_prompt": request.user_prompt,
+                }
             )
             try:
                 if response.truncated:
@@ -424,6 +415,26 @@ def _judge_record(
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         latency_ms=response.latency_ms,
+    )
+
+
+def build_answer_quality_request(spec: EvaluatorSpec, case: Case, trace: Trace) -> JudgeRequest:
+    """Render the same request for execution and historical evidence inspection."""
+    config = _AnswerQualityConfig.from_spec(spec)
+    return build_judge_request(
+        model_id=config.model_id,
+        instruction=config.instruction,
+        rubric=config.rubric,
+        case=case,
+        trace=trace,
+        input_selection=config.input_selection,
+        pass_threshold=config.pass_threshold,
+        temperature=config.temperature,
+        seed=config.seed,
+        max_output_tokens=config.max_output_tokens,
+        timeout_seconds=config.timeout_seconds,
+        max_input_chars=config.max_input_chars,
+        redact=redact_value,
     )
 
 

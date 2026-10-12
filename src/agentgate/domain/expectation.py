@@ -202,8 +202,37 @@ class PolicyExpectation(_ExpectationBase):
         return require_non_blank(value, "Policy id")
 
 
+class ExecutionPathExpectation(_ExpectationBase):
+    """Exact per-turn execution path, with Skill-owned tool boundaries."""
+
+    kind: Literal["execution_path"] = "execution_path"
+    scope: Literal["workflow", "tool", "skill"]
+    expected: tuple[str, ...]
+    allowed_tools: tuple[str, ...] | None = None
+
+    @field_validator("expected", "allowed_tools")
+    @classmethod
+    def validate_names(cls, value):
+        if value is not None:
+            for name in value:
+                require_non_blank(name, "Execution path item")
+        return value
+
+    @model_validator(mode="after")
+    def validate_scope(self):
+        if self.scope != "tool" and not self.expected:
+            raise ValueError("workflow and skill paths require expected nodes")
+        if self.scope == "skill":
+            if len(self.expected) != 1 or self.allowed_tools is None:
+                raise ValueError("skill check requires one Skill and explicit allowed tools")
+        elif self.allowed_tools is not None:
+            raise ValueError("allowed_tools only applies to Skill execution")
+        return self
+
+
 Expectation = Annotated[
-    SkillRouteExpectation
+    ExecutionPathExpectation
+    | SkillRouteExpectation
     | ToolCallExpectation
     | ToolArgumentExpectation
     | StateExpectation

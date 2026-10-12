@@ -21,11 +21,17 @@ class EvaluationTask(DomainModel):
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     kind: EvaluationTaskKind
+    name: str | None = Field(default=None, max_length=128)
     created_at: datetime = Field(default_factory=utcnow)
     run_ids: tuple[str, ...]
     static_report_ids: tuple[str, ...] = ()
     git_commit_refs: tuple[str, ...] = ()
     credential_id: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        return require_non_blank(value, "task name").strip() if value is not None else None
 
     @field_validator("id", "credential_id")
     @classmethod

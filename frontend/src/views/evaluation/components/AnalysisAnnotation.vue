@@ -23,7 +23,7 @@ async function save() {
   try {
     await ElMessageBox.confirm(
       `将“${props.caseName}”及人工备注加入“${props.datasetName}”草稿。同 ID 用例将被本次运行快照覆盖；已发布版本及历史结果不变。`,
-      '加入评测集草稿',
+      '加入测评集草稿',
       { type: 'warning', confirmButtonText: '确认加入', cancelButtonText: '取消' },
     );
     const source = await request<{ case: EvaluationCase }>(
@@ -63,12 +63,12 @@ async function save() {
     />
     <p class="muted">样本级备注，将随用例保存至“{{ datasetName }}”草稿；不会修改期望值。</p>
     <button class="primary" :disabled="busy || !modelValue.trim()" @click="save">
-      {{ busy ? '处理中…' : '加入评测集草稿' }}
+      {{ busy ? '处理中…' : '加入测评集草稿' }}
     </button>
     <p v-if="savedDataset && savedNote === modelValue.trim()" role="status">
       已加入草稿 ·
       <a class="link" :href="'#datasets/' + encodeURIComponent(savedDataset) + '?version=draft'"
-        >查看评测集</a
+        >查看测评集</a
       >
     </p>
     <p v-if="error" role="alert">{{ error }}</p>

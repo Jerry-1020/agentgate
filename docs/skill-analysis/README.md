@@ -119,3 +119,17 @@ this process-level POC configuration without changing the application contract.
 
 The [archived behavior plan](../history/planning-v1/skill-static-analysis-plan.md)
 contains broader research ideas, but its file map and API paths are not authoritative.
+
+## UI entry points
+
+Task results expose a **Skill 静态分析** tab using the exact persisted descriptor
+from that run. Running analysis saves the report and associates it with the task;
+history, pair relationships, findings, JSON and human reviews use the existing API.
+The pair table includes model confidence, not observed routing accuracy.
+
+New external-mode tasks with a registered local target descriptor can optionally
+analyze it before submission and carry the report association into the new task.
+Changing the selected target clears previous analysis selections. In-bank directory
+targets do not fall back to a local Demo; analysis is available from their persisted
+run descriptor after execution. Fewer than two Skills cannot produce pairwise checks.
+This is explicitly requested analysis, not automatic analysis on every task creation.

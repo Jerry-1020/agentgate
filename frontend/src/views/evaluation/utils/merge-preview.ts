@@ -78,5 +78,5 @@ export function previewSources(sources: MergeSource[]) {
 }
 export const mergeService = {
   available: false as const,
-  reason: '合并服务未接入。当前仅本地预览，不创建评测集。',
+  reason: '合并服务未接入。当前仅本地预览，不创建测评集。',
 };

@@ -36,7 +36,6 @@ from .models import (
     UnknownEvaluator,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
 EvaluatorImplementations = Mapping[tuple[str, str], EvaluatorProtocol]
@@ -147,7 +146,8 @@ def _finalize_evaluation(
     checks = tuple(_finalize_check(item, trace) for item in evaluation.checks)
     applicable = tuple(item for item in checks if item.outcome != Outcome.NOT_APPLICABLE)
     if not applicable:
-        outcome, score, reason = Outcome.NOT_APPLICABLE, None, "该用例没有适用检查"
+        outcome, score = Outcome.NOT_APPLICABLE, None
+        reason = "；".join(dict.fromkeys(item.reason for item in checks)) or "该用例没有适用检查"
     else:
         failed = tuple(item for item in applicable if item.outcome == Outcome.FAIL)
         reviewed = tuple(item for item in applicable if item.outcome == Outcome.REVIEW)
@@ -284,6 +284,30 @@ def _require_case_evaluator(
     return cast(CaseEvaluatorProtocol, implementation)
 
 
+def _output_only_check(spec: EvaluatorSpec, trace: Trace, turn_id: str | None = None) -> CheckDraft | None:
+    """Missing trajectory is unknown evidence, not proof of absent tool/skill use."""
+    if spec.kind == EvaluatorKind.HYBRID:
+        return None  # Compose the actual child results, including skipped checks.
+    if spec.kind == EvaluatorKind.RULE and spec.implementation_id == "final_output":
+        return None
+    if spec.kind == EvaluatorKind.LLM_JUDGE and spec.config.get("input_selection", "final_output") == "final_output":
+        return None
+    missing = [span.attributes.get("agentgate.turn.id") for span in trace.spans
+               if span.operation_type == "turn" and span.attributes.get("inbank.evidence_mode") == "output_only"]
+    if not missing:
+        return None
+    LOGGER.warning(
+        "inbank_evaluation_skipped run_id=%r case_id=%r evaluator_id=%r "
+        "turn_ids=%r reason=trace_unavailable evidence_mode=output_only",
+        trace.run_id, trace.case_id, spec.id, missing,
+    )
+    return CheckDraft(
+        name=spec.name, turn_id=turn_id, outcome=Outcome.NOT_APPLICABLE,
+        reason="Trace 证据不足（output_only），跳过依赖轨迹的检查；不能判定工具或 Skill 是否调用",
+        actual_missing=True,
+    )
+
+
 def execute_evaluators(
     case: Case,
     trace: Trace,
@@ -349,11 +373,10 @@ def execute_evaluators(
             )
             if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
-                case_evaluation = case_implementation.evaluate_case(
-                    spec,
-                    case,
-                    trace,
-                    resolver,
+                skipped = _output_only_check(spec, trace)
+                case_evaluation = (
+                    Evaluation(checks=(skipped,)) if skipped is not None
+                    else case_implementation.evaluate_case(spec, case, trace, resolver)
                 )
                 if not isinstance(case_evaluation, Evaluation):
                     raise TypeError("evaluator returned malformed Evaluation")
@@ -364,6 +387,10 @@ def execute_evaluators(
                 for turn in case.turns:
                     turn_trace = trace.for_turn(turn.id)
                     if not turn_implementation.applies_to(spec, turn):
+                        continue
+                    skipped = _output_only_check(spec, turn_trace, turn.id)
+                    if skipped is not None:
+                        checks.append(skipped)
                         continue
                     turn_evaluation = turn_implementation.evaluate(
                         spec,
@@ -396,7 +423,7 @@ def execute_evaluators(
                 trace.run_id, case.id, spec.id, result.outcome.value,
                 result.score, len(result.checks),
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- Persist isolated evaluator failures at the execution boundary.
             result = _error_result(spec, case, trace, exc)
         finally:
             resolving.discard(spec_id)

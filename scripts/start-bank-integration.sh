@@ -17,4 +17,4 @@ if [ ! -f "$AGENTGATE_MODEL_ENV_FILE" ]; then
   echo "缺少模型配置：复制 .env.example 为 .env 后填写有效模型配置，或设置 AGENTGATE_MODEL_ENV_FILE。"
   exit 1
 fi
-exec .venv/bin/python scripts/start-integration.py --with-bank-agents
+exec .venv/bin/python scripts/start-integration.py --with-bank-agents "$@"

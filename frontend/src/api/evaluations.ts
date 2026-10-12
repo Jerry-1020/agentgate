@@ -41,6 +41,7 @@ export interface EvaluatorDetail {
   draft: Definition | null;
 }
 export interface TargetDescriptor {
+  tools?: { name: string; description?: string }[];
   ref: {
     source_id: string;
     target_type: string;
@@ -51,6 +52,7 @@ export interface TargetDescriptor {
   content_sha256: string;
   prompt?: string;
   skills: {
+    tools?: { name: string }[];
     external_skill_id: string;
     external_version_id: string | null;
     name: string;
@@ -104,8 +106,16 @@ export async function request<T>(
   timeoutMs = 30000,
 ): Promise<T> {
   if (method === 'POST') {
-    if (['/evaluations', '/bank-evaluations', '/stability-experiments'].includes(path))
-      assertLocallyEnabled((body as { evaluator_ids?: string[] })?.evaluator_ids ?? []);
+    if (['/evaluations', '/bank-evaluations', '/stability-experiments'].includes(path)) {
+      const selection = body as {
+        evaluator_ids?: string[];
+        evaluator_refs?: { evaluator_id: string }[];
+      };
+      assertLocallyEnabled([
+        ...(selection?.evaluator_ids ?? []),
+        ...(selection?.evaluator_refs ?? []).map((ref) => ref.evaluator_id),
+      ]);
+    }
     if (path === '/run-comparisons')
       assertLocallyEnabled(
         ((body as { evaluators?: { id: string }[] })?.evaluators ?? []).map((e) => e.id),

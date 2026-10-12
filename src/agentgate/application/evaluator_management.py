@@ -31,6 +31,7 @@ from agentgate.evaluator.executor import (
     execute_evaluators,
 )
 from agentgate.evaluator.judge import AnswerQualityJudge, JudgeModelClient
+from agentgate.evaluator.judge.dimension_quality import DimensionQualityJudge
 from agentgate.evaluator.versioning import (
     clone_evaluator_version_to_draft,
     create_evaluator_draft,
@@ -54,6 +55,7 @@ from agentgate.evaluator.rule import (
     SkillRoutingEvaluator,
     ToolArgumentsEvaluator,
 )
+from agentgate.evaluator.rule.execution import ExecutionPathEvaluator
 from agentgate.evaluator.rule.json_schema import validate_json_schema
 from agentgate.evaluator.rule.operators import resolve_condition_operator
 from agentgate.evaluator.rule.policy import validate_policy_id
@@ -696,6 +698,7 @@ _BUILTIN_EVALUATOR_SPECS = (
 )
 
 _BUILTIN_IMPLEMENTATIONS = {
+    ("execution_path", "1"): ExecutionPathEvaluator(),
     ("skill_routing", "1"): SkillRoutingEvaluator(),
     ("required_tool", "1"): RequiredToolEvaluator(),
     ("forbidden_tool", "1"): ForbiddenToolEvaluator(),
@@ -770,6 +773,9 @@ def build_default_evaluator_management(
             ),
         )
         implementations[("answer_quality", "1")] = AnswerQualityJudge(
+            {judge_client.provider_id: judge_client}
+        )
+        implementations[("answer_quality", "2")] = DimensionQualityJudge(
             {judge_client.provider_id: judge_client}
         )
 

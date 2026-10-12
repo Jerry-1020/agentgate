@@ -8,7 +8,16 @@ export interface EvaluationRun {
   manifest: {
     selected_case_ids?: string[] | null;
     primary_evaluator_ids: string[];
+    evaluator_specs?: {
+      id: string;
+      name: string;
+      kind: string;
+      version: string;
+      content_sha256: string;
+    }[];
     target: {
+      adapter_type?: string;
+      invocation_config?: Record<string, unknown>;
       descriptor_sha256: string;
       display_name: string;
       ref: {

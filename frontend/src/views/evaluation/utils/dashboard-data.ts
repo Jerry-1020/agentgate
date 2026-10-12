@@ -9,30 +9,21 @@ export function targetLabel(type: string) {
     )[type] || type
   );
 }
-export function taskTitle(run: EvaluationRun, kind?: string) {
+export function taskTitle(run: EvaluationRun, _kind?: string, name?: string | null) {
+  if (name) return name;
   const app =
     run.manifest.target.display_name === 'Loan Agent'
       ? '贷款智能体'
       : run.manifest.target.display_name;
-  const specs = (run.manifest as any).evaluator_specs ?? [];
-  const kinds = new Set(
-    specs
-      .filter((s: any) => run.manifest.primary_evaluator_ids.includes(s.id))
-      .map((s: any) => s.kind),
+  const date = new Date(run.created_at);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai',
+    month: 'numeric',
+    day: '2-digit',
+  }).formatToParts(date);
+  return (
+    app + parts.find((p) => p.type === 'month')!.value + parts.find((p) => p.type === 'day')!.value
   );
-  const mode =
-    kind === 'ab'
-      ? 'A/B 对比'
-      : kind === 'stability'
-        ? '稳定性测试'
-        : kinds.has('hybrid') || kinds.size > 1
-          ? '综合评测'
-          : kinds.has('llm_judge')
-            ? 'LLM 评测'
-            : kinds.has('rule')
-              ? '规则评测'
-              : '评测';
-  return `${app} · ${mode} · ${run.id.slice(0, 8)}`;
 }
 export function periodRuns(runs: EvaluationRun[], days: number, type: string, now = new Date()) {
   const start = new Date(now);

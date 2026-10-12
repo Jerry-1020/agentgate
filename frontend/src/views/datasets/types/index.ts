@@ -34,6 +34,14 @@ export type Expectation =
   | (ExpectationBase & { kind: 'output'; path: string | null });
 
 export type SerializedExpectation =
+  | {
+      id: string;
+      name: string | null;
+      kind: 'execution_path';
+      scope: 'workflow' | 'tool' | 'skill';
+      expected: string[];
+      allowed_tools: string[] | null;
+    }
   | Expectation
   | { id: string; name: string | null; kind: 'skill_route'; condition: Condition }
   | {

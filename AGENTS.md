@@ -1,5 +1,27 @@
 # AgentGate Project Instructions
 
+## Core Design Principle: In-Bank vs External Mode Split
+
+ALL operations involving tested agents MUST differentiate between 行内 (in-bank) and
+行外 (external) login modes. This applies to:
+
+- Agent directory queries (listing, versions, branches)
+- Evaluation submission (single task, A/B test, stability)
+- Agent graph/topology reading
+- Dataset creation agent association
+- Any future feature that reads, displays, or executes against a tested agent
+
+**Data source routing:**
+- 行外 Login → `localAgentDirectory` (local mock, default `http://127.0.0.1:8119`)
+- 行内 Login → `agentDirectory` (configured in-bank gateway origin)
+
+**Token routing:**
+- 行外 → synthetic token `'local'`
+- 行内 → real session token from the auth store
+
+When implementing any new feature that touches tested agents, always check both modes.
+Never hardcode a single data source for agent operations.
+
 ## Architecture And Refactor Workflow
 
 For each top-level package, folder, or module being designed or refactored, use these

@@ -6,7 +6,7 @@ test('metadata editing and explicit copy source preserve published snapshots',as
  let copied=''
  try{
   await page.goto('/#datasets/'+id)
-  await expect(page.getByRole('button',{name:'复制评测集',exact:true})).toBeDisabled()
+  await expect(page.getByRole('button',{name:'复制测评集',exact:true})).toBeDisabled()
   const published=await request.post('/api/datasets/'+id+'/drafts/publish',{headers:{'If-Match':seed.draft.content_sha256}})
   expect(published.ok()).toBeTruthy()
   const snapshot=(await published.json()).data
@@ -17,7 +17,7 @@ test('metadata editing and explicit copy source preserve published snapshots',as
   await expect(page.getByRole('dialog')).not.toBeVisible()
   expect((await(await request.get('/api/datasets/'+id)).json()).data.dataset.name).toBe('已修改基本信息-'+id)
   expect((await(await request.get('/api/datasets/'+id+'/versions/1')).json()).data).toEqual(snapshot)
-  await page.getByRole('button',{name:'复制评测集',exact:true}).click()
+  await page.getByRole('button',{name:'复制测评集',exact:true}).click()
   await expect(page.getByLabel('复制来源版本')).toHaveValue('1')
   const response=page.waitForResponse(r=>r.url().endsWith('/datasets/'+id+'/copy')&&r.request().method()==='POST')
   await page.getByTestId('submit-dataset').click()
@@ -45,7 +45,7 @@ test('AB submits selected historical evaluator version, not latest',async({page,
   expect((await request.patch('/api/evaluators/'+id,{data:{enabled:true}})).ok()).toBeTruthy()
   await page.goto('/#experiments')
   await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
-  await page.getByLabel('共同评测集',{exact:true}).selectOption('loan-risk-policy')
+  await page.getByLabel('共同测评集',{exact:true}).selectOption('loan-risk-policy')
   await expect(page.getByLabel('发布版本',{exact:true})).toHaveValue('1')
   await page.getByLabel(name,{exact:true}).check()
   await page.getByLabel(name+'的评估版本',{exact:true}).selectOption(first.version)

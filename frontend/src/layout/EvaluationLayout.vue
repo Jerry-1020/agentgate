@@ -2,10 +2,10 @@
 defineProps<{ page: string; online: boolean | null; authLabel: string }>();
 defineEmits<{ logout: [] }>();
 const navigation = [
-  ['overview', '评测总览'],
-  ['datasets', '评测集'],
+  ['overview', '测评总览'],
+  ['datasets', '测评集'],
   ['evaluators', '评估器'],
-  ['tasks', '评测任务'],
+  ['tasks', '测评任务'],
   ['annotations', '人工标注'],
 ];
 </script>
@@ -15,7 +15,7 @@ const navigation = [
     :class="{ 'review-layout': ['annotations', 'evaluators'].includes(page) }"
   >
     <header class="topbar">
-      <div class="brand">智能体评测中心</div>
+      <div class="brand">智能体测评中心</div>
       <div class="topbar-right">
         <span class="mode-chip">{{ authLabel }}</span>
         <button type="button" class="logout-btn" @click="$emit('logout')">登出 Logout</button>
@@ -23,7 +23,6 @@ const navigation = [
     </header>
     <div class="shell">
       <aside class="sidebar">
-        <div class="nav-group">评测与资产</div>
         <RouterLink
           v-for="item in navigation"
           :key="item[0]"
@@ -34,7 +33,7 @@ const navigation = [
         >
         <div class="nav-group sidebar-status">
           连接状态：{{
-            online === null ? '正在连接服务…' : online ? '评测后端已连接' : '服务未连接'
+            online === null ? '正在连接服务…' : online ? '测评后端已连接' : '服务未连接'
           }}
         </div>
       </aside>

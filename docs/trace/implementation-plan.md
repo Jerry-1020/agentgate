@@ -416,3 +416,31 @@ Status: implemented; 361 tests passing
 | `integration/p1-new` | Reject; it contains no Trace redaction implementation. |
 | Current refactor | Reuse immutable `Trace`, `TraceSpan`, and `FrozenJsonObject` contracts and the application read boundary. |
 | From scratch | Implement recursive key and text redaction, checksum-aware card masking, immutable protected views, and ResultReader/FastAPI integration. |
+
+
+### 2026-09-29 · Sample Trace explorer
+
+Implemented in the sample detail view below the evaluation panels. TaskResults retains request, cache and loading/error ownership. TraceExplorer renders the parent-child execution graph and read-only CodeMirror JSON, with selection, unfolding, scrolling and span highlighting. trace-presentation builds a deterministic display forest, calculates timing from recorded timestamps, and uses the JSON syntax tree to locate direct objects in the top-level spans array. Source objects and array order are unchanged.
+
+Missing parents remain visible as roots. Cycles are broken for display without dropping nodes; invalid or missing timing stays unavailable. Focused coverage includes 6,000-level chains, repeated nested span_id fields, escaped/Unicode text and unknown JSON fields. 17 related unit tests, typecheck, lint and production build passed. Browser checks passed with the actual component and utility, plus an existing sample in the local application. No backend contracts or trace collection behavior changed.
+
+## HTTP Trace reporting for six local targets — 2026-10-08
+
+User-approved autonomous Goal: six targets actively report complete evidence to a separately stored Trace Server, with explicit simulation provenance and preserved in-bank/external routing.
+
+Baseline assessment: `goal/p1-demo` supplies the real-instrumentation and transport/normalization separation; `integration/p1-new` contains external trace/ingestion concepts but no six-target HTTP bundle delivery suitable for this stack. The current branch's SDK normalization, Trace Server read adapter and original vendor file backend are reused. New code adds a bounded authenticated upload bridge; original vendor SDK/server sources are unchanged. The branch was created from updated `refactor-1` and fast-forwarded to the already delivered local integration before this feature's changes.
+
+Ownership:
+
+- `tested-agents/src/bank_agents/reporting.py`: upload a completed bundle, bounded retry, verify SHA256/identity/count acknowledgement; no business retries. `telemetry.py` calls it after original SDK flush and retains local spool.
+- `scripts/agent-platform-mock/telemetry.py`: explicit synthetic echo trace structure and local spool; cannot claim LLM/tool execution. The peer emits the acknowledged trace ID before its terminal SSE frame, including simulated failures.
+- `integrations/observability/trace_ingestion.py`: authenticate upload/query, validate event identities and relationships, reject false provenance, atomically publish SDK events and LLM attachments, idempotent immutable trace IDs. It extends the provided query server rather than replacing its protocol.
+- `scripts/trace-server.py`: compose original query application and ingestion at one listening port. HTTP transport is `agentgate.trace-bundle.v1`, a project extension, not OTLP or a claim about the customer's unmodified ingestion API.
+- Existing target adapters own correlation and normalization. The configured local mock path requires uploaded evidence; in-bank target selection and session tokens remain separate. Unconfigured legacy standalone mock unit fixtures can still return their original shallow local turn records; the full launcher enables strict reported-trace mode.
+- `scripts/verify-trace-reporting.py`: create six new local tasks, verify nine turn-level traces and explicit simulation, and save IDs/results for independent acceptance. It accepts only local external-mode APIs.
+
+Verification record and deployment instructions: [Trace reporting](trace-reporting.md). Full regression and six-target acceptance must pass before completion; original failed development attempts remain in the local task history.
+
+## In-bank HTTP evidence integration — 2026-10-08
+
+Under the explicitly authorized Goal, ChatABC and Yunxia now use the existing Trace Server query client and SDK normalizer instead of constructing output-only records. Ownership, source-baseline assessment and verification are recorded in [the in-bank implementation plan](../inbank-evidence-implementation.md); the required runtime/query contract and deployment limits are in [acceptance instructions](../inbank-evidence-acceptance.md). The user deferred in-bank static Skill definitions, which are not inferred from execution evidence or local mock capabilities.

@@ -1,4 +1,6 @@
 """Per-request Collector instances use the customer's actual SDK file exporter."""
+import os
+from .reporting import report_file
 from contextlib import contextmanager
 from pathlib import Path
 from time import monotonic
@@ -58,3 +60,5 @@ class Evidence:
         self.collector.shutdown()
         if not self.path.is_file():
             raise RuntimeError("SDK evidence export is missing")
+        if os.environ.get("TRACE_REPORT_URL"):
+            report_file(self.path)

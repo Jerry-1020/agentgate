@@ -14,6 +14,7 @@ Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
 class TaskAssociationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: EvaluationTaskKind
+    name: str | None = None
     run_ids: tuple[str, ...]
     static_report_ids: tuple[str, ...] = ()
 
@@ -40,3 +41,12 @@ def save_task(task_id: str, body: TaskAssociationRequest, dependencies: Dependen
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/{task_id}")
+def delete_task(task_id: str, dependencies: Dependencies):
+    try:
+        dependencies.repository.delete_task_record(task_id, user_team_id="")
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"deleted": task_id}

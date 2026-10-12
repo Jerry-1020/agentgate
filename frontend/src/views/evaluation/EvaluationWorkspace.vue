@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <header class="topbar">
-      <div class="brand">智能体评测中心 <small>版本化评测 · 结果分析 · 持续回归</small></div>
+      <div class="brand">智能体测评中心 <small>版本化测评 · 结果分析 · 持续回归</small></div>
       <div class="user">
         研发工作台 管理员
         <span :class="['engine-state', engineOnline ? 'online' : 'offline']">{{
@@ -11,7 +11,7 @@
     </header>
     <div class="shell">
       <aside class="sidebar">
-        <div class="nav-group">评测工作台</div>
+        <div class="nav-group">测评工作台</div>
         <button
           v-for="item in primaryNav"
           :key="item.key"
@@ -34,27 +34,27 @@
         <section v-if="page === 'overview'" class="page">
           <div class="page-head">
             <div>
-              <h1 class="page-title">评测总览</h1>
+              <h1 class="page-title">测评总览</h1>
               <div class="page-sub">掌握目标资产、任务执行与质量趋势</div>
             </div>
             <div class="actions">
-              <button class="secondary" @click="go('datasets')">管理评测集</button
-              ><button class="primary" @click="go('create')">新建评测任务</button>
+              <button class="secondary" @click="go('datasets')">管理测评集</button
+              ><button class="primary" @click="go('create')">新建测评任务</button>
             </div>
           </div>
           <div class="grid metric-grid">
             <div class="card metric">
-              <div class="metric-label">已接入评测目标</div>
+              <div class="metric-label">已接入测评目标</div>
               <div class="metric-value">24</div>
               <div class="muted">16 个 Agent · 8 个 Skill</div>
             </div>
             <div class="card metric">
-              <div class="metric-label">评测集 / 用例</div>
+              <div class="metric-label">测评集 / 用例</div>
               <div class="metric-value">12 <span class="muted">/ 428</span></div>
               <div class="up">本周新增 36 条用例</div>
             </div>
             <div class="card metric">
-              <div class="metric-label">今日评测任务</div>
+              <div class="metric-label">今日测评任务</div>
               <div class="metric-value">8</div>
               <div class="muted">运行中 2 · 等待中 1</div>
             </div>
@@ -92,8 +92,8 @@
           <section class="card" style="margin-top: 16px">
             <div class="toolbar">
               <div>
-                <h2 class="section-title">最近评测任务</h2>
-                <p class="section-note">任务创建时锁定目标、评测集和评估器版本</p>
+                <h2 class="section-title">最近测评任务</h2>
+                <p class="section-note">任务创建时锁定目标、测评集和评估器版本</p>
               </div>
               <button class="ghost" @click="go('tasks')">查看全部 →</button>
             </div>
@@ -106,12 +106,12 @@
             <div>
               <h1 class="page-title">评估对象</h1>
               <div class="page-sub">
-                从外部 Agent 平台读取 Agent、Skill 及其版本；评测系统只保存引用与运行快照
+                从外部 Agent 平台读取 Agent、Skill 及其版本；测评系统只保存引用与运行快照
               </div>
             </div>
             <div class="actions">
               <button class="secondary" @click="showToast('已同步外部资产目录。')">同步对象</button
-              ><button class="primary" @click="go('create')">发起评测</button>
+              ><button class="primary" @click="go('create')">发起测评</button>
             </div>
           </div>
           <section class="card">
@@ -126,7 +126,7 @@
                   v-model="targetQuery"
                 />
               </div>
-              <div class="muted">对象版本由 Skill Studio 管理；评测运行时锁定必要快照。</div>
+              <div class="muted">对象版本由 Skill Studio 管理；测评运行时锁定必要快照。</div>
             </div>
             <table class="data-table">
               <thead>
@@ -163,7 +163,7 @@
                         go('create');
                       "
                     >
-                      选择并评测
+                      选择并测评
                     </button>
                     <button class="link" @click="selectedObject = target">查看快照</button>
                   </td>
@@ -177,7 +177,7 @@
               <div class="mini-card">
                 <span class="muted">资产来源</span><b style="font-size: 18px">外部平台</b>
                 <p class="muted">
-                  创建、编辑、发布 Agent/Skill 均在 Skill Studio 完成；评测系统不写回资产。
+                  创建、编辑、发布 Agent/Skill 均在 Skill Studio 完成；测评系统不写回资产。
                 </p>
               </div>
               <div class="mini-card">
@@ -186,7 +186,7 @@
               </div>
               <div class="mini-card">
                 <span class="muted">后续改进</span><b style="font-size: 18px">回归或 A/B</b>
-                <p class="muted">对象更新后选择新版本，复用发布评测集与评估器进行可比验证。</p>
+                <p class="muted">对象更新后选择新版本，复用发布测评集与评估器进行可比验证。</p>
               </div>
             </div>
           </section>
@@ -195,10 +195,10 @@
         <section v-else-if="page === 'tasks'" class="page">
           <div class="page-head">
             <div>
-              <h1 class="page-title">评测任务</h1>
-              <div class="page-sub">创建、跟踪与复核版本化评测任务</div>
+              <h1 class="page-title">测评任务</h1>
+              <div class="page-sub">创建、跟踪与复核版本化测评任务</div>
             </div>
-            <button class="primary" @click="go('create')">新建评测任务</button>
+            <button class="primary" @click="go('create')">新建测评任务</button>
           </div>
           <section class="card">
             <div class="toolbar">
@@ -230,7 +230,7 @@
         <section v-else-if="page === 'create'" class="page">
           <div class="page-head">
             <div>
-              <h1 class="page-title">新建评测任务</h1>
+              <h1 class="page-title">新建测评任务</h1>
               <div class="page-sub">分步配置，提交后形成不可变的运行清单</div>
             </div>
             <button class="secondary" @click="go('tasks')">返回任务列表</button>
@@ -251,13 +251,13 @@
             </aside>
             <section class="card">
               <template v-if="createStep === 1"
-                ><h2 class="section-title">选择评测对象及版本</h2>
+                ><h2 class="section-title">选择测评对象及版本</h2>
                 <p class="section-note">
                   对象来自外部资产平台，本系统仅保存 ID、版本 ID 与必要快照。
                 </p>
                 <div class="form-grid">
                   <div class="field">
-                    <label>评测对象类型</label>
+                    <label>测评对象类型</label>
                     <div class="choice-grid">
                       <button
                         :class="['choice', { selected: targetType === 'Agent' }]"
@@ -281,7 +281,7 @@
                     ><small>{{ selectedTarget.description }}</small>
                   </div>
                   <div class="field full">
-                    <label>评测快照</label>
+                    <label>测评快照</label>
                     <div class="callout">
                       将记录：{{ selectedTarget.id }} · {{ selectedTarget.version }} ·
                       Prompt、工具定义与必要配置快照。历史任务不会随外部资产更新而改变。
@@ -290,8 +290,8 @@
                 </div></template
               >
               <template v-else-if="createStep === 2"
-                ><h2 class="section-title">选择评测集版本</h2>
-                <p class="section-note">评测集包含单轮/多轮 Case、预期结果、标签和难度。</p>
+                ><h2 class="section-title">选择测评集版本</h2>
+                <p class="section-note">测评集包含单轮/多轮 Case、预期结果、标签和难度。</p>
                 <div class="grid" style="grid-template-columns: repeat(3, 1fr)">
                   <button
                     v-for="dataset in datasets"
@@ -306,14 +306,14 @@
                   </button>
                 </div>
                 <div class="callout" style="margin-top: 16px">
-                  未找到合适评测集？请进入“评测集”手动创建草稿、导入或维护
+                  未找到合适测评集？请进入“测评集”手动创建草稿、导入或维护
                   Case，发布新版本后返回此处选择。
                 </div></template
               >
               <template v-else-if="createStep === 3"
                 ><h2 class="section-title">选择评估器与执行配置</h2>
                 <p class="section-note">
-                  当前任务仅可选择已由评测引擎加载的规则评估器；模型 Key 仅在 LLM
+                  当前任务仅可选择已由测评引擎加载的规则评估器；模型 Key 仅在 LLM
                   评估器接入后才需要配置。
                 </p>
                 <div class="form-grid">
@@ -368,14 +368,14 @@
                 <p class="section-note">请确认以下运行清单。提交后版本引用将被锁定。</p>
                 <div class="grid" style="grid-template-columns: 1fr 1fr">
                   <div class="mini-card">
-                    <span class="muted">评测对象</span
+                    <span class="muted">测评对象</span
                     ><b style="font-size: 18px">{{ selectedTarget.name }}</b>
                     <div class="version-line">
                       {{ selectedTarget.type }} · {{ selectedTarget.version }}
                     </div>
                   </div>
                   <div class="mini-card">
-                    <span class="muted">评测集</span
+                    <span class="muted">测评集</span
                     ><b style="font-size: 18px">{{ selectedDataset.name }}</b>
                     <div class="version-line">
                       {{ selectedDataset.version }} · {{ selectedDataset.cases }} 条 Case
@@ -394,7 +394,7 @@
                   </div>
                 </div>
                 <div class="notice" style="margin-top: 16px">
-                  运行清单将包含目标快照、评测集版本、评估器版本和执行参数。当前规则评估不传递模型
+                  运行清单将包含目标快照、测评集版本、评估器版本和执行参数。当前规则评估不传递模型
                   Key。
                 </div></template
               >
@@ -410,7 +410,7 @@
         <section v-else-if="page === 'datasets'" class="page">
           <div class="page-head">
             <div>
-              <h1 class="page-title">评测集</h1>
+              <h1 class="page-title">测评集</h1>
               <div class="page-sub">以草稿、发布版本和内容 Hash 管理可复现的测试资产</div>
             </div>
             <div class="actions">
@@ -418,7 +418,7 @@
                 class="primary"
                 @click="showToast('请选择 JSON 或 Excel 文件；导入后会进入字段映射与草稿校验。')"
               >
-                导入评测集
+                导入测评集
               </button>
             </div>
           </div>
@@ -426,10 +426,10 @@
             <div class="toolbar">
               <div>
                 <h2 class="section-title">
-                  评测集与版本
+                  测评集与版本
                   <span class="muted">{{ activeDatasetVersion.cases.length }} 条用例</span>
                 </h2>
-                <p class="section-note">历史评测任务仅关联发布版本，草稿修改不会影响既有结果。</p>
+                <p class="section-note">历史测评任务仅关联发布版本，草稿修改不会影响既有结果。</p>
               </div>
               <div class="actions">
                 <button
@@ -449,7 +449,7 @@
             </div>
             <div class="form-grid version-fields">
               <div class="field">
-                <label>评测集</label
+                <label>测评集</label
                 ><select class="input" v-model="selectedCollectionId" @change="selectCollection">
                   <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
                     {{ dataset.name }}
@@ -496,7 +496,7 @@
               />
             </div>
             <div v-else class="notice version-notice">
-              已发布版本不可修改。评测任务引用的正是这些不可变版本，因此历史结果可复现。
+              已发布版本不可修改。测评任务引用的正是这些不可变版本，因此历史结果可复现。
             </div>
           </section>
           <section class="dataset-editor">
@@ -656,7 +656,7 @@
             <div>
               <h1 class="page-title">评估器</h1>
               <div class="page-sub">
-                围绕评测集期望与运行 Trace 判定结果；页面只展示当前引擎真实支持的能力。
+                围绕测评集期望与运行 Trace 判定结果；页面只展示当前引擎真实支持的能力。
               </div>
             </div>
           </div>
@@ -667,7 +667,7 @@
                   规则评估器 <span class="badge success">已实现并可执行</span>
                 </h2>
                 <p class="section-note">
-                  固定规则从评测集的 Case 期望读取约束，并在每一轮对话的 Trace
+                  固定规则从测评集的 Case 期望读取约束，并在每一轮对话的 Trace
                   中查找路由、工具调用、参数、终态与输出证据。
                 </p>
               </div>
@@ -756,7 +756,7 @@
             <h2 class="section-title">评估如何运行</h2>
             <div class="mini-cards">
               <div class="mini-card">
-                <span class="muted">输入</span><b style="font-size: 18px">评测集期望</b>
+                <span class="muted">输入</span><b style="font-size: 18px">测评集期望</b>
                 <p class="muted">
                   每条 Case 定义应路由的 Skill、必需/禁用工具、参数条件、期望终态和策略约束。
                 </p>
@@ -878,7 +878,7 @@
                   <div class="mini-card">
                     <span class="muted">实际输出</span>
                     <p>{{ activeCase.actual }}</p>
-                    <button class="link" @click="showToast('已将此 Case 加入新评测集版本草稿。')">
+                    <button class="link" @click="showToast('已将此 Case 加入新测评集版本草稿。')">
                       写入新版本并加入回归集
                     </button>
                   </div>
@@ -929,7 +929,7 @@
                 </p>
               </div>
               <div class="mini-card">
-                <span class="muted">评测集</span
+                <span class="muted">测评集</span
                 ><b style="font-size: 16px">{{ currentResultTask.dataset.name }}</b>
                 <p class="muted">{{ currentResultTask.dataset.version }}</p>
               </div>
@@ -950,15 +950,15 @@
         <section v-else-if="page === 'experiments'" class="page">
           <div class="page-head">
             <div>
-              <h1 class="page-title">A/B 实验</h1>
+              <h1 class="page-title">A/B试验</h1>
               <div class="page-sub">
-                在同一评测集上对比两组配置；保持其他条件一致，只改动一项资产，才能将差异归因到该变量。
+                在同一测评集上对比两组配置；保持其他条件一致，只改动一项资产，才能将差异归因到该变量。
               </div>
             </div>
             <div class="actions">
               <button class="secondary" @click="resetAbExperiment">重置实验</button
               ><button class="primary" :disabled="!canRunAb" @click="runAbExperiment">
-                运行 A/B 实验
+                运行 A/B试验
               </button>
             </div>
           </div>
@@ -1036,7 +1036,7 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label>评测集</label>
+                  <label>测评集</label>
                   <div class="compound-select">
                     <select class="input" v-model="abA.dataset">
                       <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
@@ -1116,7 +1116,7 @@
                   </div>
                 </div>
                 <div class="field">
-                  <label>评测集</label>
+                  <label>测评集</label>
                   <div class="compound-select">
                     <select class="input" v-model="abB.dataset">
                       <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
@@ -1419,7 +1419,7 @@
     <div v-if="datasetModal" class="modal-backdrop">
       <div class="modal">
         <div class="modal-header">
-          <b>自动生成评测集</b><button class="ghost" @click="datasetModal = false">✕</button>
+          <b>自动生成测评集</b><button class="ghost" @click="datasetModal = false">✕</button>
         </div>
         <div class="modal-body">
           <div class="field">
@@ -1454,7 +1454,7 @@
             </div>
           </div>
           <div class="notice" style="margin-top: 16px">
-            当前选择：{{ datasetGenerationScope }}。生成后创建评测集草稿，不影响已发布版本。
+            当前选择：{{ datasetGenerationScope }}。生成后创建测评集草稿，不影响已发布版本。
           </div>
         </div>
         <div class="modal-footer">
@@ -1466,7 +1466,7 @@
     <div v-if="abModal" class="modal-backdrop">
       <div class="modal ab-modal">
         <div class="modal-header">
-          <b>创建 A/B 实验</b><button class="ghost" @click="abModal = false">✕</button>
+          <b>创建 A/B试验</b><button class="ghost" @click="abModal = false">✕</button>
         </div>
         <div class="modal-body">
           <div class="form-grid">
@@ -1475,7 +1475,7 @@
               ><input
                 class="input"
                 v-model="abName"
-                placeholder="例如：客户服务主智能体发布前 A/B 实验"
+                placeholder="例如：客户服务主智能体发布前 A/B试验"
               />
             </div>
             <div class="field">
@@ -1491,7 +1491,7 @@
               </select>
             </div>
             <div class="field">
-              <label>评测集</label
+              <label>测评集</label
               ><select class="input" v-model="abDataset">
                 <option>核心业务回归集 · v1.4</option>
                 <option>路由与工具调用集 · v2.1</option>
@@ -1560,7 +1560,7 @@
           </div>
           <div class="notice" style="margin-top: 16px">
             A/B
-            实验将锁定智能体、两个版本、技能范围、评测集、评估器及运行策略；结果包含指标差异、Case
+            实验将锁定智能体、两个版本、技能范围、测评集、评估器及运行策略；结果包含指标差异、Case
             差异和发布结论。
           </div>
         </div>
@@ -1573,7 +1573,7 @@
     <div v-if="selectedTaskDetail" class="modal-backdrop">
       <div class="modal">
         <div class="modal-header">
-          <b>评测任务详情</b><button class="ghost" @click="selectedTaskDetail = null">✕</button>
+          <b>测评任务详情</b><button class="ghost" @click="selectedTaskDetail = null">✕</button>
         </div>
         <div class="modal-body">
           <div class="grid" style="grid-template-columns: 1fr 1fr">
@@ -1586,11 +1586,11 @@
               <p class="muted">{{ selectedTaskDetail.config }}</p>
             </div>
             <div class="mini-card">
-              <span class="muted">评测对象</span><b>{{ selectedTaskDetail.target.name }}</b>
+              <span class="muted">测评对象</span><b>{{ selectedTaskDetail.target.name }}</b>
               <p class="muted">{{ selectedTaskDetail.target.version }}</p>
             </div>
             <div class="mini-card">
-              <span class="muted">评测集 / 评估器</span><b>{{ selectedTaskDetail.dataset.name }}</b>
+              <span class="muted">测评集 / 评估器</span><b>{{ selectedTaskDetail.dataset.name }}</b>
               <p class="muted">
                 {{ selectedTaskDetail.dataset.version }} ·
                 {{ selectedTaskDetail.evaluator.version }}
@@ -1709,10 +1709,10 @@
             </div>
           </div>
           <div class="callout" style="margin-top: 16px">
-            <b>提交评测时的快照内容</b>
+            <b>提交测评时的快照内容</b>
             <p>
               对象 ID、版本
-              ID、Prompt、工具定义、输入输出定义及必要运行配置。该快照仅用于可复现评测，不会写回外部资产平台。
+              ID、Prompt、工具定义、输入输出定义及必要运行配置。该快照仅用于可复现测评，不会写回外部资产平台。
             </p>
           </div>
         </div>
@@ -1726,7 +1726,7 @@
               go('create');
             "
           >
-            选择并评测
+            选择并测评
           </button>
         </div>
       </div>
@@ -1927,7 +1927,7 @@
               :class="['tab', { active: ruleDetailTab === 'source' }]"
               @click="ruleDetailTab = 'source'"
             >
-              评测引擎源码
+              测评引擎源码
             </button>
           </div>
           <template v-if="activeRuleDefinition"
@@ -1941,7 +1941,7 @@
               </div>
               <div class="rule-detail-grid">
                 <section>
-                  <h3>评测集提供的期望</h3>
+                  <h3>测评集提供的期望</h3>
                   <p>{{ activeRuleDefinition.expectation }}</p>
                 </section>
                 <section>
@@ -1969,13 +1969,13 @@ fail: {{ activeRuleDefinition.failure }}</pre
                 >
               </section>
               <div class="notice">
-                规则本身由评测引擎内置；业务期望配置在评测集 Case 中，修改后需发布新版本再发起评测。
+                规则本身由测评引擎内置；业务期望配置在测评集 Case 中，修改后需发布新版本再发起测评。
               </div></template
             >
             <section v-else class="rule-source">
               <div class="toolbar">
                 <div>
-                  <h3>评测引擎源码</h3>
+                  <h3>测评引擎源码</h3>
                   <p v-if="ruleSourcePath" class="section-note">{{ ruleSourcePath }}</p>
                 </div>
                 <span v-if="ruleSourceLoading" class="muted">正在读取源码…</span>
@@ -2014,24 +2014,24 @@ import TaskTable from '../../components/TaskTable.vue';
 
 const page = ref('overview');
 const engineOnline = ref(false);
-const engineMessage = ref('正在连接评测引擎');
+const engineMessage = ref('正在连接测评引擎');
 const targets = ref<VersionedTarget[]>(mockTargets);
 const primaryNav = [
   { key: 'overview', label: '总览' },
-  { key: 'datasets', label: '评测集' },
+  { key: 'datasets', label: '测评集' },
   { key: 'evaluators', label: '评估器' },
-  { key: 'tasks', label: '评测任务' },
+  { key: 'tasks', label: '测评任务' },
 ];
 const analysisNav = [
   { key: 'results', label: '结果中心' },
-  { key: 'experiments', label: 'A/B 实验' },
+  { key: 'experiments', label: 'A/B试验' },
   { key: 'optimizer', label: '调优中心' },
   { key: 'analysis', label: 'Skill 静态分析' },
 ];
 const tasks = ref<EvalTask[]>([...initialTasks]);
 const taskQuery = ref('');
 const taskFilter = ref('');
-const steps = ['目标与版本', '评测集版本', '评估器与执行', '确认提交'];
+const steps = ['目标与版本', '测评集版本', '评估器与执行', '确认提交'];
 const createStep = ref(1);
 const targetType = ref<'Agent' | 'Skill'>('Agent');
 const selectedTargetId = ref('a-1');
@@ -2078,7 +2078,7 @@ const abSkillIds = ref<string[]>(['s-1', 's-2']);
 const abRunMode = ref<'立即执行' | '预约执行'>('立即执行');
 const abGate = ref('通过率不低于基线且 P0 全通过');
 const abExperiment = ref({
-  name: '客户服务主智能体发布前 A/B 实验',
+  name: '客户服务主智能体发布前 A/B试验',
   target: '客户服务主智能体',
   skills: '订单查询 Skill、风险提示 Skill',
   dataset: '核心业务回归集 · v1.4',
@@ -2417,7 +2417,7 @@ const optimizerClusters = ref([
     summary: '相近描述的 Skill 被错误路由，导致工具未调用。',
     cause: '当前 Prompt 中两个查询类 Skill 的触发边界重叠，目标描述缺少排他条件。',
     suggestion:
-      '补充两个 Skill 的适用条件与兜底规则；保留本次 3 条失败 Case，形成新的回归评测集版本。',
+      '补充两个 Skill 的适用条件与兜底规则；保留本次 3 条失败 Case，形成新的回归测评集版本。',
   },
   {
     id: 'response-fields',
@@ -2445,7 +2445,7 @@ const staticFindings = computed(() => {
       label: 'Prompt 不匹配',
       title: '输出字段约束',
       detail: '主 Prompt 要求关键字段，但 Skill 输出定义未明确覆盖全部异常分支。',
-      action: '已生成字段补充建议，可加入回归评测集。',
+      action: '已生成字段补充建议，可加入回归测评集。',
     },
     {
       level: 'info',
@@ -2482,8 +2482,8 @@ const selectedEvaluator = computed(
 );
 const evaluatorExecutionHint = computed(() =>
   selectedEvaluator.value?.kind === '规则'
-    ? `已接入：${selectedEvaluator.value.coverage}。运行时由评测引擎读取 Case 期望与 Trace 进行确定性判定。`
-    : '该评估器类型尚未接入实际执行，不能用于提交评测任务。',
+    ? `已接入：${selectedEvaluator.value.coverage}。运行时由测评引擎读取 Case 期望与 Trace 进行确定性判定。`
+    : '该评估器类型尚未接入实际执行，不能用于提交测评任务。',
 );
 const filteredTasks = computed(() =>
   tasks.value.filter(
@@ -2520,7 +2520,7 @@ function getRuleDefinition(item: Evaluator): RuleDefinition {
       implementationId: item.id,
       operator: '引擎固定规则',
       severity: item.coverage.includes('阻断') ? '阻断' : '标准',
-      expectation: '由评测集 Case 的对应期望字段提供。',
+      expectation: '由测评集 Case 的对应期望字段提供。',
       evidence: '由运行 Trace 提供。',
       passCondition: '实际运行结果满足该项期望。',
       failure: '记录期望、实际值与关联 Trace 证据。',
@@ -2555,9 +2555,9 @@ const abDifferences = computed(() => {
     changes.push(
       `技能版本（${skillVersionChanges.map((id) => skillTargets.value.find((skill) => skill.id === id)?.name || id).join('、')}）`,
     );
-  if (base.dataset !== candidate.dataset) changes.push('评测集');
+  if (base.dataset !== candidate.dataset) changes.push('测评集');
   if (base.datasetVersion !== candidate.datasetVersion)
-    changes.push(`评测集版本 ${base.datasetVersion} → ${candidate.datasetVersion}`);
+    changes.push(`测评集版本 ${base.datasetVersion} → ${candidate.datasetVersion}`);
   if (
     JSON.stringify([...base.evaluatorIds].sort()) !==
     JSON.stringify([...candidate.evaluatorIds].sort())
@@ -2657,7 +2657,7 @@ async function openRuleDefinition(item: Evaluator) {
     ruleSource.value = source.source;
     ruleSourcePath.value = source.source_path;
   } catch {
-    ruleSourceError.value = '未能从评测引擎读取源码。请确认 Python BFF 与 AgentGate 引擎均已启动。';
+    ruleSourceError.value = '未能从测评引擎读取源码。请确认 Python BFF 与 AgentGate 引擎均已启动。';
   } finally {
     ruleSourceLoading.value = false;
   }
@@ -2674,7 +2674,7 @@ function statusClass(status: TaskStatus) {
 function submitTask() {
   if (selectedEvaluator.value.kind !== '规则') {
     createStep.value = 3;
-    showToast('当前评测引擎仅支持规则评估器执行，请选择已接入的规则评估器。');
+    showToast('当前测评引擎仅支持规则评估器执行，请选择已接入的规则评估器。');
     return;
   }
   const task: EvalTask = {
@@ -2727,7 +2727,7 @@ function generateDatasetDraft() {
   };
   datasetVersions.value.unshift(draft);
   selectedDatasetVersionId.value = draft.id;
-  showToast(`已按“${datasetGenerationScope.value}”生成评测集草稿。`);
+  showToast(`已按“${datasetGenerationScope.value}”生成测评集草稿。`);
 }
 function makeCompositeChildren(): CompositeChild[] {
   return availableChildEvaluators.value.slice(0, 2).map((item, index) => ({
@@ -2951,7 +2951,7 @@ function runAbExperiment() {
     tone: newFail === 0 && candidatePass >= basePass ? 'success' : 'warn',
   };
   abRan.value = true;
-  showToast(`A/B 实验已完成：受控变量为${variable}。`);
+  showToast(`A/B试验已完成：受控变量为${variable}。`);
 }
 function toggleAbSkill(id: string) {
   abSkillIds.value = abSkillIds.value.includes(id)
@@ -2973,8 +2973,8 @@ function createAbExperiment() {
     .map((item) => item.name)
     .join('、');
   abExperiment.value = {
-    name: abName.value.trim() || `${target?.name || '评测对象'} A/B 实验`,
-    target: target?.name || '评测对象',
+    name: abName.value.trim() || `${target?.name || '测评对象'} A/B试验`,
+    target: target?.name || '测评对象',
     skills,
     dataset: abDataset.value,
     evaluator: abEvaluator.value,
@@ -2990,7 +2990,7 @@ function createAbExperiment() {
     status: '通过',
   };
   abModal.value = false;
-  showToast(`A/B 实验已${abRunMode.value === '立即执行' ? '创建并开始运行' : '创建并预约'}。`);
+  showToast(`A/B试验已${abRunMode.value === '立即执行' ? '创建并开始运行' : '创建并预约'}。`);
 }
 function toggleAnalysisScope(scope: string) {
   selectedAnalysisScopes.value = selectedAnalysisScopes.value.includes(scope)
@@ -3123,10 +3123,10 @@ onMounted(async () => {
       abB.value.evaluatorIds = [...evaluatorIds];
     }
     engineOnline.value = true;
-    engineMessage.value = `评测引擎已连接 · ${remoteTargets.length} 个评估对象`;
+    engineMessage.value = `测评引擎已连接 · ${remoteTargets.length} 个评估对象`;
   } catch {
     engineOnline.value = false;
-    engineMessage.value = '评测引擎未连接（当前仍可浏览本地演示数据）';
+    engineMessage.value = '测评引擎未连接（当前仍可浏览本地演示数据）';
   }
 });
 </script>

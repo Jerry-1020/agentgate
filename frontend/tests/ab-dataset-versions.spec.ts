@@ -8,13 +8,13 @@ test('AB waits for initial catalogs before enabling dataset selection and does n
   await page.goto('/#experiments')
   await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
   await expect.poll(()=>waiting).toBeGreaterThan(0)
-  await expect(page.getByLabel('共同评测集',{exact:true})).toBeDisabled()
+  await expect(page.getByLabel('共同测评集',{exact:true})).toBeDisabled()
   await expect(page.getByRole('button',{name:'创建并运行两侧任务'})).toBeDisabled()
   release()
-  await expect(page.getByLabel('共同评测集',{exact:true})).toBeEnabled()
-  await page.getByLabel('共同评测集',{exact:true}).selectOption('loan-risk-policy')
+  await expect(page.getByLabel('共同测评集',{exact:true})).toBeEnabled()
+  await page.getByLabel('共同测评集',{exact:true}).selectOption('loan-risk-policy')
   await expect(page.getByLabel('发布版本',{exact:true})).toHaveValue('1')
-  await expect(page.getByLabel('共同评测集',{exact:true})).toHaveValue('loan-risk-policy')
+  await expect(page.getByLabel('共同测评集',{exact:true})).toHaveValue('loan-risk-policy')
  }finally{release()}
 })
 
@@ -34,7 +34,7 @@ test('AB lists three real published dataset versions and submits the exact selec
   }
   await page.goto('/#experiments')
   await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
-  await page.getByLabel('共同评测集',{exact:true}).selectOption(id)
+  await page.getByLabel('共同测评集',{exact:true}).selectOption(id)
   const versions=page.getByLabel('发布版本',{exact:true})
   await expect(versions.locator('option')).toHaveText(['v3 · 3 条 · 最新发布','v2 · 2 条','v1 · 1 条'])
   await expect(versions).toHaveValue('3')

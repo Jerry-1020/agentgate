@@ -39,11 +39,11 @@ export function comparisonIssues(a: EvaluationRun, b: EvaluationRun): Comparison
     m.target.ref.external_target_id,
   ];
   if (!sameJson(target(x), target(y)))
-    add('target', '评测对象不同', '请选择同一智能体或 Skill 的两个运行记录，方案版本可以不同。');
+    add('target', '测评对象不同', '请选择同一智能体或 Skill 的两个运行记录，方案版本可以不同。');
   if (x.dataset.dataset_id !== y.dataset.dataset_id)
-    add('dataset', '评测集不同', '请选择同一评测集、相同内容的发布版本。');
+    add('dataset', '测评集不同', '请选择同一测评集、相同内容的发布版本。');
   else if (!x.dataset.content_sha256 || x.dataset.content_sha256 !== y.dataset.content_sha256)
-    add('dataset-content', '评测集内容不同或快照缺失', '请选择相同内容的评测集版本。');
+    add('dataset-content', '测评集内容不同或快照缺失', '请选择相同内容的测评集版本。');
   const cases = (m: FrozenManifest) =>
     m.selected_case_ids ?? m.dataset.cases?.map((item) => item.id);
   if (!sameJson(cases(x), cases(y)))
@@ -109,9 +109,9 @@ export function comparisonErrorMessage(error: unknown): string {
     'reports use different primary Evaluators':
       '两侧使用的评估器、版本、定义或顺序不同，请重新选择配置一致的任务。',
     'reports reference different Agent or Skill targets':
-      '两侧评测对象不同，请选择同一智能体或 Skill。',
-    'reports reference different Datasets': '两侧评测集不同，请重新选择。',
-    'reports use different Dataset content': '两侧评测集内容不同，请选择相同的发布版本。',
+      '两侧测评对象不同，请选择同一智能体或 Skill。',
+    'reports reference different Datasets': '两侧测评集不同，请重新选择。',
+    'reports use different Dataset content': '两侧测评集内容不同，请选择相同的发布版本。',
     'reports use different ordered Case identities': '两侧执行用例或顺序不同，请选择相同运行范围。',
     'reports use different Metric plans': '两侧指标计算口径不同，暂不能比较。',
     'reports use different release-gate specifications': '两侧通过条件不同，暂不能比较。',

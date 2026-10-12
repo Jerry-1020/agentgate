@@ -51,3 +51,19 @@ test('shared Axios preserves validation details and never retries a timed-out wr
   await expect(httpRequest('/datasets')).rejects.toMatchObject({status:422,detail})
  }finally{http.defaults.adapter=previous}
 })
+
+
+test('execution expectations survive editing and JSON/Excel export-import', async () => {
+ const { toEditorCase, toApiCase } = await import('../src/api/datasets');
+ const raw:any={...blankSample('路径专项'),turns:[{id:'turn-path',input:{txt:'测试'},notes:'',expectations:[
+  {id:'path-1',name:'完整节点',kind:'execution_path',scope:'workflow',expected:['extract','end'],allowed_tools:null},
+  {id:'path-2',name:'实际技能',kind:'execution_path',scope:'skill',expected:['general_help'],allowed_tools:[]},
+ ]}]};
+ const edited=toEditorCase(raw);edited.turns[0].notes='修改备注';
+ expect(toApiCase(edited).turns[0].expectations).toEqual(raw.turns[0].expectations);
+ for (const format of ['json','xlsx'] as const) {
+  const blob=await sampleExportBlob({...version,cases:[edited]},[edited.id],format);
+  const imported=await parseSampleFile({name:'path.'+format,size:blob.size,arrayBuffer:()=>blob.arrayBuffer()});
+  expect(toApiCase(imported[0]).turns[0].expectations).toEqual(raw.turns[0].expectations.map((e:any)=>({...e,id:expect.any(String)})));
+ }
+});

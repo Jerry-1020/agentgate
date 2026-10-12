@@ -114,7 +114,7 @@ async function writeback() {
   const source = sample.value;
   try {
     await ElMessageBox.confirm(
-      '将本次运行中的用例快照写回原评测集草稿？如草稿已有同 ID 用例，将覆盖该用例。已发布版本及历史结果不变。',
+      '将本次运行中的用例快照写回原测评集草稿？如草稿已有同 ID 用例，将覆盖该用例。已发布版本及历史结果不变。',
       '回写失败用例',
       { type: 'warning', confirmButtonText: '确认回写', cancelButtonText: '取消' },
     );
@@ -152,9 +152,9 @@ async function runAction(action: 'cancel' | 'rerun') {
     if (action === 'cancel')
       await ElMessageBox.confirm(
         action === 'cancel'
-          ? '取消当前评测任务？已产生的运行记录将保留。'
-          : '使用原版本快照创建一个新的评测任务？',
-        action === 'cancel' ? '取消评测' : '重新评测',
+          ? '取消当前测评任务？已产生的运行记录将保留。'
+          : '使用原版本快照创建一个新的测评任务？',
+        action === 'cancel' ? '取消测评' : '重新测评',
         { confirmButtonText: '确认', cancelButtonText: '返回' },
       );
     busy.value = true;
@@ -188,7 +188,7 @@ onUnmounted(() => {
   <div class="page-head">
     <div>
       <button class="link" @click="emit('navigate', returnPage)">← {{ '返回任务列表' }}</button>
-      <h1 class="page-title">{{ '评测任务详情' }}</h1>
+      <h1 class="page-title">{{ '测评任务详情' }}</h1>
       <p class="page-sub">{{ id }}</p>
     </div>
     <div class="actions">
@@ -208,7 +208,7 @@ onUnmounted(() => {
   <section v-if="progress" class="task-overview" aria-label="任务结果总览">
     <div class="overview-heading">
       <div>
-        <span class="overview-eyebrow">本次评测</span>
+        <span class="overview-eyebrow">本次测评</span>
         <h2>任务结果总览</h2>
       </div>
       <span
@@ -249,7 +249,7 @@ onUnmounted(() => {
         ><small>{{ progress.target_version }}</small>
       </div>
       <div>
-        <span>评测集版本</span><b>{{ progress.dataset_name }}</b
+        <span>测评集版本</span><b>{{ progress.dataset_name }}</b
         ><small>v{{ progress.dataset_version }}</small>
       </div>
       <div>
@@ -268,7 +268,7 @@ onUnmounted(() => {
     </details>
   </section>
   <details v-if="progress" class="card">
-    <summary>评测对象来源与智能体图谱</summary>
+    <summary>测评对象来源与智能体图谱</summary>
     <TargetStructure :run-id="id" :trace="trace" />
   </details>
   <div v-if="progress?.error" class="notice error">
@@ -280,7 +280,7 @@ onUnmounted(() => {
       progress.status === 'scheduled'
         ? '任务已预约，等待到期调度。'
         : progress.status === 'cancelled'
-          ? '任务已取消，未生成完整评测报告。'
+          ? '任务已取消，未生成完整测评报告。'
           : '任务正在处理，页面每 2 秒查询进度。已完成样本逐条显示，下方每 2 秒更新；最终结论在整批结束后生成。'
     }}
   </div>
@@ -297,7 +297,7 @@ onUnmounted(() => {
   />
   <div v-if="report" class="tabs" aria-label="任务详情内容">
     <button :class="['tab', { active: detailTab === 'results' }]" @click="detailTab = 'results'">
-      评测结果</button
+      测评结果</button
     ><button :class="['tab', { active: detailTab === 'analysis' }]" @click="detailTab = 'analysis'">
       调优分析</button
     ><button :class="['tab', { active: detailTab === 'static' }]" @click="detailTab = 'static'">
@@ -318,7 +318,7 @@ onUnmounted(() => {
           '?version=' +
           evidence.run.manifest.dataset.version
         "
-        >查看本次评测集版本并创建修改草稿 →</a
+        >查看本次测评集版本并创建修改草稿 →</a
       >
     </div>
     <div class="report-layout case-report-layout">

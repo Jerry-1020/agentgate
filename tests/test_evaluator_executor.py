@@ -1,4 +1,5 @@
 import logging
+from unittest.mock import Mock
 
 import pytest
 
@@ -12,11 +13,13 @@ from agentgate.domain import (
     FailureStage,
     JudgeRecord,
     Outcome,
+    OutputExpectation,
     Trace,
     TraceSpan,
 )
 from agentgate.evaluator.executor import execute_evaluators
 from agentgate.evaluator.models import CheckDraft, Evaluation, FailureCandidate
+from agentgate.evaluator.rule.output import FinalOutputEvaluator
 
 
 def evaluator_spec(
@@ -74,6 +77,108 @@ def passing_evaluation(name: str = "check") -> Evaluation:
             ),
         )
     )
+
+
+def output_only_trace() -> Trace:
+    return Trace(
+        trace_id="0" * 32, run_id="run", case_id="case",
+        spans=(TraceSpan(
+            trace_id="0" * 32, span_id="1" * 16, name="inbank.turn",
+            operation_type="turn", sequence=0, status="ok",
+            attributes={"agentgate.turn.id": "turn", "inbank.evidence_mode": "output_only"},
+        ),),
+        final_output={"output": "hello"},
+        turn_outcomes={"turn": {"output": {"output": "hello"}, "state": {}}},
+    )
+
+
+@pytest.mark.parametrize("implementation_id", [
+    "required_tool", "forbidden_tool", "tool_arguments", "skill_routing",
+    "execution_path", "policy_compliance", "final_state",
+])
+def test_output_only_skips_trace_rules_instead_of_claiming_pass_or_fail(implementation_id, caplog):
+    implementation = Mock(
+        kind=EvaluatorKind.RULE, implementation_id=implementation_id, implementation_version="1",
+    )
+    implementation.applies_to.return_value = True
+    result, = execute_evaluators(
+        case(), output_only_trace(), (evaluator_spec("check", implementation_id),),
+        {(implementation_id, "1"): implementation},
+    )
+    implementation.evaluate.assert_not_called()
+    assert result.outcome == Outcome.NOT_APPLICABLE and result.score is None
+    assert result.checks[0].actual_missing is True
+    assert "Trace 证据不足" in result.checks[0].reason
+    assert "inbank_evaluation_skipped" in caplog.text
+
+
+@pytest.mark.parametrize("expected, outcome", [("hello", Outcome.PASS), ("wrong", Outcome.FAIL)])
+def test_output_only_still_evaluates_actual_final_answer(expected, outcome):
+    sample = Case(id="case", name="case", turns=(CaseTurn(
+        id="turn", input={"txt": "hi"}, expectations=(OutputExpectation(
+            id="answer", path="output", condition={"kind": "equals", "expected": expected},
+        ),),
+    ),))
+    result, = execute_evaluators(
+        sample, output_only_trace(), (evaluator_spec("output", "final_output"),),
+        {("final_output", "1"): FinalOutputEvaluator()},
+    )
+    assert result.outcome == outcome
+    assert result.checks[0].actual == "hello"
+
+
+@pytest.mark.parametrize("selection", [None, "final_output", "output_and_tools", "full_trajectory"])
+def test_output_only_judge_requires_requested_evidence(selection):
+    spec = evaluator_spec("judge", "answer_quality", kind=EvaluatorKind.LLM_JUDGE)
+    if selection:
+        spec = EvaluatorSpec(**{
+            **spec.model_dump(exclude={"content_sha256"}),
+            "config": {**spec.config.to_dict(), "input_selection": selection},
+        })
+    implementation = Mock(
+        kind=EvaluatorKind.LLM_JUDGE, implementation_id="answer_quality", implementation_version="1",
+    )
+    implementation.evaluate_case.return_value = passing_evaluation().model_copy(update={
+        "judge_record": JudgeRecord(
+            provider_id="provider", requested_model="model", request_sha256="b" * 64,
+            raw_response="{}",
+        ),
+    })
+    result, = execute_evaluators(
+        case(), output_only_trace(), (spec,), {("answer_quality", "1"): implementation},
+    )
+    if selection in {None, "final_output"}:
+        implementation.evaluate_case.assert_called_once()
+        assert result.outcome == Outcome.PASS
+    else:
+        implementation.evaluate_case.assert_not_called()
+        assert result.outcome == Outcome.NOT_APPLICABLE and result.score is None
+
+
+def test_mixed_evidence_skips_only_missing_turn():
+    first = output_only_trace()
+    sample = Case(id="case", name="case", turns=(
+        CaseTurn(id="turn", input={"txt": "first"}), CaseTurn(id="second", input={"txt": "next"}),
+    ))
+    evidence = Trace(
+        **{**first.model_dump(), "spans": [*first.spans, TraceSpan(
+            trace_id=first.trace_id, span_id="2" * 16, name="trace_sdk.turn", operation_type="turn",
+            sequence=1, status="ok",
+            attributes={"agentgate.turn.id": "second", "inbank.evidence_mode": "trace_server"},
+        )], "turn_outcomes": {**first.turn_outcomes.to_dict(), "second": {"output": {"output": "next"}, "state": {}}}},
+    )
+    implementation = Mock(
+        kind=EvaluatorKind.RULE, implementation_id="required_tool", implementation_version="1",
+    )
+    implementation.applies_to.return_value = True
+    implementation.evaluate.return_value = passing_evaluation()
+    result, = execute_evaluators(
+        sample, evidence, (evaluator_spec("tool", "required_tool"),), {("required_tool", "1"): implementation},
+    )
+    implementation.evaluate.assert_called_once()
+    assert implementation.evaluate.call_args.args[1].id == "second"
+    assert [c.outcome for c in result.checks] == [Outcome.NOT_APPLICABLE, Outcome.PASS]
+    assert result.score == 1.0
 
 
 class PassingEvaluator:

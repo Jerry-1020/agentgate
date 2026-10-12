@@ -6,7 +6,11 @@ export type {
   Criterion,
   ScoringTemplate,
   AnnotationTemplate,
+  AnnotationSection,
   AnnotationTask,
+  AnnotationTarget,
+  MessageAnnotation,
+  ToolAnnotation,
   JudgeDraft,
 } from './modules/review';
 export { copy } from './modules/review';

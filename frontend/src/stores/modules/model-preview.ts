@@ -38,12 +38,12 @@ export function seedSettings(): PreviewCatalog {
   return {
     teams: [
       { id: 'demo-research', name: '研发团队（演示）' },
-      { id: 'demo-quality', name: '质量评测团队（演示）' },
+      { id: 'demo-quality', name: '质量测评团队（演示）' },
     ],
     credentials: [
       {
         id: 'demo-key-shared',
-        name: '评测服务凭据（示例）',
+        name: '测评服务凭据（示例）',
         provider: 'openai-compatible',
         ownerTeamId: 'demo-research',
         allowedTeamIds: ['demo-quality'],

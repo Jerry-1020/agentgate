@@ -87,7 +87,6 @@ def test_submit_rejects_invalid_json() -> None:
 
 
 def test_submit_rejects_http_errors() -> None:
-    # TODO: restore RuntimeError expectation once the BJS mock is removed.
     def opener(*_args, **_kwargs):
         raise HTTPError("https://bjs.example", 503, "unavailable", {}, None)
 
@@ -95,8 +94,8 @@ def test_submit_rejects_http_errors() -> None:
         "https://bjs.example/web/eval/job/bjs/submit", "ai11", opener=opener
     )
 
-    # Mocked: HTTP errors are swallowed and treated as success in test environments.
-    dispatcher.submit("run-123")
+    with pytest.raises(RuntimeError, match="acceptance is unconfirmed"):
+        dispatcher.submit("run-123")
 
 
 def test_submit_rejects_invalid_configuration_and_run_id() -> None:
@@ -119,9 +118,9 @@ def test_cancel_only_logs_because_bjs_has_no_cancel_endpoint(caplog) -> None:
         dispatcher.cancel(" ")
 
 
-@pytest.mark.parametrize("error", [URLError("unreachable"), TimeoutError("timeout")])
+@pytest.mark.parametrize("error", [URLError("private-token"), TimeoutError("private-token"),
+    OSError("private-token"), HTTPError("https://bjs.example/submit", 503, "private-token", None, None)])
 def test_submit_reports_network_failure_without_retry(error):
-    # TODO: restore RuntimeError expectation once the BJS mock is removed.
     calls = []
 
     def opener(*args, **kwargs):
@@ -130,8 +129,9 @@ def test_submit_reports_network_failure_without_retry(error):
 
     dispatcher = BjsJobDispatcher("https://bjs.example/submit", "ai11", opener=opener)
 
-    # Mocked: network failures are swallowed and treated as success in test environments.
-    dispatcher.submit("run-123")
+    with pytest.raises(RuntimeError, match="acceptance is unconfirmed") as caught:
+        dispatcher.submit("run-123")
+    assert "private-token" not in str(caught.value)
     assert calls
     assert len(calls) == 1
 

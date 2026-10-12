@@ -140,3 +140,7 @@ AgentGate 启动示例（dataset_id 使用种子脚本返回的对应模式 ID�
 6. 客户 SDK 默认脱敏启用，但它不是完整敏感数据治理系统；仅使用合成数据，模型请求/Trace 文件仍应按敏感调试数据管理。
 7. 前端创建表单已接入三个真实模型目标；内置 Demo 另行标注。每个新目标目前只有一个版本，不能做版本 A/B。基础/工作流未声明 Skill，静态职责分析不适用。
 8. 规则、LLM、复合、云虾静态分析和真实失败调优均已实际调用；模型可能产生失败、待复核或非法结构，不能把“调用成功”等同“所有案例通过”。具体证据与边界见仓库根目录 `FULLSTACK-ACCEPTANCE-20260917.md`。
+
+### DeepSeek v4 Pro
+
+三个贷款模式共用 LiveModel 连接。设置 `BANK_MODEL_BASE_URL=https://api.deepseek.com`、`BANK_MODEL_NAME=deepseek-v4-pro`，并通过环境注入 `BANK_MODEL_API_KEY`。本次接入使用 `BANK_MODEL_THINKING=disabled`，保持既有 1600 输出 token 预算和工具调用流程；模型仍为 v4 Pro。可选 thinking 设置仅接受 enabled/disabled，不配置时不发送此字段。工具循环保留提供方返回的 reasoning_content，防止默认思考模式后续调用丢失协议字段。密钥不保存到仓库或 Trace。

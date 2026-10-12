@@ -97,3 +97,30 @@ def test_workflow_creation_never_accepts_branch_or_wrong_version():
         )
         client.get("/web/agent_endpoint/deleteAgent", params={"agentName": name})
         assert client.get("/mock/evidence").json()["active_instances"] == 0
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_mock_reports_explicit_simulation_and_preserves_failure(tmp_path,monkeypatch,failed):
+    import json
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]/'tested-agents/src'))
+    import bank_agents.reporting as reporting
+    from agentgate.integrations.observability.trace_ingestion import persist_bundle
+    monkeypatch.setenv('TRACE_REPORT_URL','http://127.0.0.1:8210')
+    monkeypatch.setenv('MOCK_TRACE_SPOOL_DIR',str(tmp_path/'sender'))
+    def upload(events,*,simulated):
+        assert simulated
+        return persist_bundle(tmp_path/'receiver',{'protocol':'agentgate.trace-bundle.v1','provenance':'simulated','events':events})
+    monkeypatch.setattr(reporting,'report_events',upload)
+    with TestClient(load_peer()) as client:
+        created=client.post('/web/agent_endpoint/createAgent?taskId=test',json={'agentId':'agent-workflow','agentVersion':'2.0'}).json()
+        name=created['data']['data']['agentName']
+        session=client.post(f'/agent-api/{name}/chatabc/init_session',json={}).json()['data']['data']['session_id']
+        response=client.post(f'/agent-api/{name}/chatabc/chat',json={'data':{'session_id':session,'txt':'模拟失败' if failed else 'hello'}})
+        assert response.status_code==200 and 'event: trace' in response.text
+        assert ('event: failed' in response.text)==failed
+    traces=list((tmp_path/'receiver').rglob('*.jsonl'));assert len(traces)==1
+    events=list(map(json.loads,traces[0].read_text().splitlines()))
+    root=next(e for e in events if e['event_type']=='trace')
+    assert root['status']==('error' if failed else 'success')
+    assert root['tags']==['simulated','protocol-echo-only']
+    assert len(list((tmp_path/'sender').glob('*.jsonl')))==1

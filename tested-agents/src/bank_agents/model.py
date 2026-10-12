@@ -10,12 +10,17 @@ class LiveModel:
         self.url = os.environ.get("BANK_MODEL_BASE_URL", "").rstrip("/")
         self.key = os.environ.get("BANK_MODEL_API_KEY", "")
         self.name = os.environ.get("BANK_MODEL_NAME", "")
+        self.thinking = os.environ.get("BANK_MODEL_THINKING", "")
+        if self.thinking not in {"", "enabled", "disabled"}:
+            raise ValueError("BANK_MODEL_THINKING must be enabled or disabled")
         if not all((self.url, self.key, self.name)):
             raise ValueError("BANK_MODEL_BASE_URL, BANK_MODEL_API_KEY and BANK_MODEL_NAME are required")
 
     def complete(self, messages, evidence, tools=None, json_mode=False):
         payload = {"model": self.name, "messages": messages, "temperature": 0,
                    "max_tokens": 1600, "stream": False}
+        if self.thinking:
+            payload["thinking"] = {"type": self.thinking}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -42,7 +47,7 @@ class LiveModel:
                 model=self.name, input=payload, output=message, started_at=span["meta"]["started_at"])
             span["output"] = message
             # Only protocol fields are carried into the next model request.
-            return {k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}}
+            return {k: v for k, v in message.items() if k in {"role", "content", "tool_calls", "reasoning_content"}}
 
     def structured(self, prompt, messages, evidence):
         message = self.complete([{"role": "system", "content": prompt}, *messages], evidence, json_mode=True)

@@ -2,7 +2,21 @@
 import { ref, watch } from 'vue';
 import type { Expectation } from '../types/index';
 
-const props = defineProps<{ modelValue: Expectation[]; disabled?: boolean }>();
+type ExpectationKind = Expectation['kind'];
+const props = withDefaults(
+  defineProps<{
+    modelValue: Expectation[];
+    disabled?: boolean;
+    kinds?: ExpectationKind[];
+    compactOutput?: boolean;
+  }>(),
+  { kinds: () => ['state', 'tool_argument', 'output'] },
+);
+const kindLabels: Record<ExpectationKind, string> = {
+  state: '最终状态',
+  tool_argument: '工具参数',
+  output: '最终输出',
+};
 const emit = defineEmits<{ 'update:modelValue': [value: Expectation[]] }>();
 const rows = ref<any[]>([]);
 let syncing = false;
@@ -42,6 +56,11 @@ function add(kind: 'state' | 'tool_argument' | 'output' = 'state') {
   if (kind === 'tool_argument') Object.assign(base, { tool: '', occurrence: 'last' });
   if (kind === 'output') base.path = null;
   rows.value.push(base);
+}
+
+function removeOutput(index: number) {
+  if (props.disabled || rows.value.length <= 1) return;
+  rows.value.splice(index, 1);
 }
 
 function changeKind(index: number, kind: string) {
@@ -100,15 +119,23 @@ function setAllowed(row: any, value: string) {
 
 <template>
   <div class="expectation-editor">
-    <div class="subsection-heading">
+    <h4 v-if="compactOutput" class="output-heading">期望评估方式</h4>
+    <div v-if="!compactOutput" class="subsection-heading">
       <div><b>期望结果</b><small>系统会把每一项期望与真实 Trace、状态或输出比较。</small></div>
-      <el-dropdown v-if="!disabled" trigger="click" @command="add">
+      <el-button
+        v-if="!disabled && kinds.length === 1"
+        size="small"
+        data-testid="add-expectation"
+        @click="add(kinds[0])"
+        >添加期望</el-button
+      >
+      <el-dropdown v-else-if="!disabled" trigger="click" @command="add">
         <el-button size="small" data-testid="add-expectation">添加期望</el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="state">最终状态</el-dropdown-item>
-            <el-dropdown-item command="tool_argument">工具参数</el-dropdown-item>
-            <el-dropdown-item command="output">最终输出</el-dropdown-item>
+            <el-dropdown-item v-for="kind in kinds" :key="kind" :command="kind">{{
+              kindLabels[kind]
+            }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -118,18 +145,17 @@ function setAllowed(row: any, value: string) {
       v-for="(row, index) in rows"
       :key="row.id"
       class="expectation-row"
+      :class="{ 'compact-row': compactOutput }"
       :data-testid="`expectation-${index}`"
     >
-      <div class="expectation-row-head">
+      <div v-if="!compactOutput" class="expectation-row-head">
         <el-select
           :model-value="row.kind"
           :disabled="disabled"
           size="small"
           @update:model-value="changeKind(index, $event)"
         >
-          <el-option label="最终状态" value="state" />
-          <el-option label="工具参数" value="tool_argument" />
-          <el-option label="最终输出" value="output" />
+          <el-option v-for="kind in kinds" :key="kind" :label="kindLabels[kind]" :value="kind" />
         </el-select>
         <el-input
           v-model="row.name"
@@ -141,7 +167,16 @@ function setAllowed(row: any, value: string) {
           >删除</el-button
         >
       </div>
-      <div class="expectation-fields">
+      <el-button
+        v-if="compactOutput && !disabled"
+        class="remove-output"
+        link
+        type="danger"
+        :disabled="rows.length <= 1"
+        @click="removeOutput(index)"
+        >删除</el-button
+      >
+      <div class="expectation-fields" :class="{ 'compact-output': compactOutput }">
         <el-input
           v-if="row.kind === 'tool_argument'"
           v-model="row.tool"
@@ -149,10 +184,24 @@ function setAllowed(row: any, value: string) {
           :data-testid="`expectation-tool-${index}`"
           placeholder="工具名，例如 approve_loan"
         />
+        <label v-if="compactOutput" class="compact-label"
+          >输出路径
+          <el-input
+            v-model="row.path"
+            :disabled="disabled"
+            :data-testid="`expectation-path-${index}`"
+            :aria-label="row.kind === 'output' ? '输出路径' : '字段路径'"
+            :placeholder="
+              row.kind === 'output' ? '输出路径（留空表示完整输出）' : '字段路径，例如 status'
+            "
+          />
+        </label>
         <el-input
+          v-else
           v-model="row.path"
           :disabled="disabled"
           :data-testid="`expectation-path-${index}`"
+          :aria-label="row.kind === 'output' ? '输出路径' : '字段路径'"
           :placeholder="
             row.kind === 'output' ? '输出路径（留空表示完整输出）' : '字段路径，例如 status'
           "
@@ -167,20 +216,24 @@ function setAllowed(row: any, value: string) {
           <el-option label="任意一次通过" value="any" />
           <el-option label="所有调用通过" value="all" />
         </el-select>
-        <el-select
-          :model-value="row.condition.kind"
-          :disabled="disabled"
-          @update:model-value="changeCondition(row, $event)"
-        >
-          <el-option label="等于" value="equals" />
-          <el-option label="数值容差" value="within_tolerance" />
-          <el-option label="数值范围" value="within_range" />
-          <el-option label="正则匹配" value="matches_pattern" />
-          <el-option label="属于集合" value="one_of" />
-          <el-option label="字段不存在" value="must_be_missing" />
-        </el-select>
+        <div class="condition-select">
+          <label v-if="compactOutput">评估方式</label>
+          <el-select
+            :model-value="row.condition.kind"
+            :disabled="disabled"
+            :aria-label="compactOutput ? '评估方式' : '判定方式'"
+            @update:model-value="changeCondition(row, $event)"
+          >
+            <el-option label="等于" value="equals" />
+            <el-option label="数值容差" value="within_tolerance" />
+            <el-option label="数值范围" value="within_range" />
+            <el-option label="正则匹配" value="matches_pattern" />
+            <el-option label="属于集合" value="one_of" />
+            <el-option label="字段不存在" value="must_be_missing" />
+          </el-select>
+        </div>
         <el-input
-          v-if="row.condition.kind === 'equals'"
+          v-if="!compactOutput && row.condition.kind === 'equals'"
           :model-value="asJson(row.condition.expected)"
           :disabled="disabled"
           :data-testid="`expectation-value-${index}`"
@@ -189,12 +242,14 @@ function setAllowed(row: any, value: string) {
         />
         <template v-else-if="row.condition.kind === 'within_tolerance'">
           <el-input-number
+            v-if="!compactOutput"
             v-model="row.condition.expected"
             :disabled="disabled"
             placeholder="期望值"
           />
           <el-input-number
             v-model="row.condition.epsilon"
+            aria-label="容差"
             :disabled="disabled"
             :min="0.000000001"
             placeholder="容差"
@@ -213,13 +268,13 @@ function setAllowed(row: any, value: string) {
           />
         </template>
         <el-input
-          v-else-if="row.condition.kind === 'matches_pattern'"
+          v-else-if="!compactOutput && row.condition.kind === 'matches_pattern'"
           v-model="row.condition.pattern"
           :disabled="disabled"
           placeholder="正则表达式"
         />
         <el-input
-          v-else-if="row.condition.kind === 'one_of'"
+          v-else-if="!compactOutput && row.condition.kind === 'one_of'"
           :model-value="allowedText(row)"
           :disabled="disabled"
           placeholder="允许值，逗号分隔"
@@ -227,6 +282,54 @@ function setAllowed(row: any, value: string) {
         />
       </div>
     </div>
-    <el-empty v-if="!rows.length" description="暂无字段、状态或输出期望" :image-size="58" />
+    <el-button v-if="compactOutput && !disabled" class="add-output" @click="add('output')"
+      >增加评估方式</el-button
+    >
+    <el-empty
+      v-if="!compactOutput && !rows.length"
+      description="暂无字段、状态或输出期望"
+      :image-size="58"
+    />
   </div>
 </template>
+
+<style scoped>
+.output-heading {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.expectation-row.compact-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.compact-row .expectation-fields {
+  flex: 1;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.remove-output {
+  order: 1;
+  flex-shrink: 0;
+  margin-top: 24px;
+}
+.compact-row .compact-label,
+.compact-row .condition-select > label {
+  display: block;
+  margin: 0;
+  line-height: 18px;
+  font-size: 12px;
+  color: #74829a;
+}
+.compact-row .compact-label :deep(.el-input),
+.compact-row .condition-select :deep(.el-select) {
+  margin-top: 7px;
+  width: 100%;
+}
+.compact-row .condition-select :deep(.el-select__wrapper) {
+  min-height: 40px;
+}
+.add-output {
+  margin-top: 12px;
+}
+</style>

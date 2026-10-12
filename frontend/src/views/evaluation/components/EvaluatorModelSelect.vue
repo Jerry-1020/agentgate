@@ -80,7 +80,7 @@ onMounted(refresh);
           {{ m.model_id }} · {{ m.provider_id }}{{ m.credential_ref ? ' · 指定凭据引用' : '' }}
         </option></select
       ><small v-if="!models.length"
-        >暂无已发布评估器的模型引用，可填写自定义引用进行 UX 设计。</small
+        >暂无评估器模型引用，可填写后端已接入的提供商与模型。</small
       ></label
     >
     <div v-if="editable && isCustom" class="model-fields">
@@ -143,11 +143,11 @@ onMounted(refresh);
 </template>
 <style scoped>
 .judge-model {
-  margin: 20px 0 0;
+  margin: 14px 0 0;
   border: 1px solid #dbe5f5;
   border-radius: 12px;
   background: #f8faff;
-  padding: 20px;
+  padding: 14px 16px;
 }
 .judge-model header {
   display: flex;
@@ -176,12 +176,12 @@ onMounted(refresh);
 .model-modes {
   display: flex;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .model-modes button {
   border: 1px solid #dce4f1;
   background: white;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border-radius: 7px;
   color: #687993;
   cursor: pointer;
@@ -217,8 +217,8 @@ onMounted(refresh);
   gap: 16px;
 }
 .model-summary {
-  margin-top: 16px;
-  padding: 14px;
+  margin-top: 12px;
+  padding: 10px 14px;
   background: white;
   border: 1px solid #e6ebf3;
   border-radius: 8px;

@@ -190,6 +190,8 @@ def test_pass_verdict_maps_to_result_and_records_provenance() -> None:
     assert result.checks[0].turn_id is None
     assert result.checks[0].methods[0].implementation_id == "answer_quality"
     assert result.judge_record.provider_id == "test-provider"
+    assert result.judge_record.request_system_prompt == model.requests[0].system_prompt
+    assert result.judge_record.request_user_prompt == model.requests[0].user_prompt
     assert result.judge_record.requested_model == "requested-model"
     assert result.judge_record.resolved_model == "resolved-model"
     assert result.judge_record.request_sha256 == request_fingerprint(model.requests[0])
@@ -404,3 +406,38 @@ def test_repeated_invalid_contract_remains_error_with_both_responses() -> None:
     assert len(model.requests) == 2
     assert result.score is None
     assert len(result.judge_record.previous_attempts) == 1
+
+
+def test_annotation_evidence_prefers_actual_request_and_keeps_full_response():
+    from agentgate.application.annotation_evidence import evaluator_annotation_evidence
+    model = RecordingModel()
+    result = execute(model)
+    payload = evaluator_annotation_evidence(judge_spec(), evaluation_case(), evaluation_trace(), result)
+    assert payload['prompt_source'] == 'recorded'
+    assert payload['system_prompt'] == model.requests[0].system_prompt
+    assert payload['user_prompt'] == model.requests[0].user_prompt
+    assert payload['result']['judge_record']['raw_response'] == model.response.text
+    assert payload['evidence']['case']['id'] == 'case'
+    assert len(model.requests) == 1
+
+
+def test_annotation_evidence_labels_reconstructed_historical_request():
+    from agentgate.application.annotation_evidence import evaluator_annotation_evidence
+    result = execute(RecordingModel())
+    old = result.model_copy(update={'judge_record': result.judge_record.model_copy(update={
+        'request_system_prompt': None, 'request_user_prompt': None})})
+    payload = evaluator_annotation_evidence(judge_spec(), evaluation_case(), evaluation_trace(), old)
+    assert payload['prompt_source'] == 'reconstructed'
+    assert payload['request_hash_matches'] is True
+    changed = old.model_copy(update={'judge_record': old.judge_record.model_copy(update={'request_sha256': 'a' * 64})})
+    assert evaluator_annotation_evidence(judge_spec(), evaluation_case(), evaluation_trace(), changed)['request_hash_matches'] is False
+
+
+def test_annotation_rule_evidence_exposes_versioned_code_without_execution():
+    from agentgate.application.annotation_evidence import evaluator_annotation_evidence
+    spec = EvaluatorSpec(id='output', name='Output', dimension='output', metric='match', implementation_id='final_output')
+    payload = evaluator_annotation_evidence(spec, evaluation_case(), evaluation_trace(), None)
+    assert 'class FinalOutputEvaluator' in payload['code'][0]['source']
+    assert payload['result'] is None
+    unknown = spec.model_copy(update={'implementation_version': 'unknown'})
+    assert not evaluator_annotation_evidence(unknown, evaluation_case(), evaluation_trace(), None)['code']

@@ -215,3 +215,24 @@ def test_result_case_routes_translate_writeback_failures(tmp_path) -> None:
     assert changed_identity.json()["detail"] == (
         "edited Case id must match the historical Case id"
     )
+
+
+def test_annotation_evidence_routes_use_frozen_run_and_validate_identity(tmp_path):
+    dependencies = build_dependencies(tmp_path / 'annotation-evidence.db')
+    run = dependencies.execute_demo_run('loan-agent-v2-fixed', dataset_version=1)
+    with _client(dependencies) as client:
+        url = f'/api/runs/{run.id}/cases/high-risk-approval/annotation-evidence'
+        response = client.get(url)
+        assert response.status_code == 200
+        entries = response.json()
+        assert {e['spec']['id'] for e in entries} == {s.id for s in run.manifest.evaluator_specs}
+        assert all(e['evidence']['case']['id'] == 'high-risk-approval' for e in entries)
+        assert all(e['result']['case_id'] == 'high-risk-approval' for e in entries if e['result'])
+        assert any(e['code'] for e in entries)
+        for entry in entries:
+            if entry['result']:
+                assert entry['result']['evaluator_id'] == entry['spec']['id']
+                for check in entry['result']['checks']:
+                    assert check['turn_id'] is None or check['turn_id'] in {t.id for c in run.manifest.dataset.cases if c.id == 'high-risk-approval' for t in c.turns}
+        assert client.get(f'/api/runs/{run.id}/cases/missing/annotation-evidence').status_code == 404
+        assert client.get('/api/runs/missing/cases/missing/annotation-evidence').status_code == 404

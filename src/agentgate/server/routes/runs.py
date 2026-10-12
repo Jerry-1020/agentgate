@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agentgate.application import RunActivity, RunProgress
 from agentgate.application.skill_analysis import SkillAnalysisUnavailable
 from agentgate.domain import (
     EvaluationRun,
+    EvaluatorRef,
     RunManifest,
     RunStatus,
     SkillAnalysisReport,
@@ -21,7 +22,6 @@ from agentgate.server.errors import (
     raise_service_unavailable,
     raise_unprocessable,
 )
-
 
 router = APIRouter(prefix="/api", tags=["runs"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -35,12 +35,19 @@ class LaunchRequest(BaseModel):
     dataset_id: str
     dataset_version: int = Field(ge=1)
     evaluator_ids: list[str] | None = None
+    evaluator_refs: list[EvaluatorRef] | None = Field(default=None, min_length=1)
     timeout_seconds: float = Field(default=300, gt=0, le=3600)
     max_parallel_cases: int = Field(default=1, ge=1, le=32)
     max_retries: int = Field(default=0, ge=0, le=5)
     case_ids: list[str] | None = None
     scheduled_for: datetime | None = None
     api_key: str | None = None
+
+    @model_validator(mode="after")
+    def validate_evaluator_selection(self) -> "LaunchRequest":
+        if self.evaluator_ids is not None and self.evaluator_refs is not None:
+            raise ValueError("use evaluator_ids or evaluator_refs, not both")
+        return self
 
 
 class RunSetupSkillAnalysisRequest(BaseModel):
@@ -76,6 +83,7 @@ def launch_evaluation(
             dataset_version=request.dataset_version,
             case_ids=request.case_ids,
             evaluator_ids=request.evaluator_ids,
+            evaluator_refs=request.evaluator_refs,
             timeout_seconds=request.timeout_seconds,
             max_parallel_cases=request.max_parallel_cases,
             max_retries=request.max_retries,
@@ -85,7 +93,7 @@ def launch_evaluation(
         return dependencies.results.get_run_progress(run.id)
     except RuntimeError as error:
         raise_service_unavailable(error)
-    except ValueError as error:
+    except (ValueError, LookupError) as error:
         raise_unprocessable(error)
 
 

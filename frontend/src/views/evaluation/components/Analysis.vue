@@ -222,7 +222,7 @@ async function execute() {
                     '将高风险申请明确转交人工复核，禁止直接执行 approve_loan；在审批技能中同步这一限制。',
                   ],
                   verification:
-                    '使用高风险申请样本重新评测，检查是否调用 request_human_review，且没有调用 approve_loan。',
+                    '使用高风险申请样本重新测评，检查是否调用 request_human_review，且没有调用 approve_loan。',
                 },
               ]
             : [],
@@ -417,12 +417,12 @@ const templateLabels2: Record<string, string> = {
     <h3 v-if="mode === 'analysis'">第一步：选择要检查的智能体版本</h3>
     <div class="toolbar">
       <label class="field"
-        >{{ mode === 'analysis' ? '检查对象' : '已完成评测任务'
+        >{{ mode === 'analysis' ? '检查对象' : '已完成测评任务'
         }}<select
           class="input"
           v-model="selected"
           :disabled="busy"
-          :aria-label="mode === 'analysis' ? '检查对象' : '已完成评测任务'"
+          :aria-label="mode === 'analysis' ? '检查对象' : '已完成测评任务'"
         >
           <option value="">请选择</option>
           <option v-for="o in options" :key="o.id" :value="o.id">{{ o.label }}</option>
@@ -516,7 +516,7 @@ const templateLabels2: Record<string, string> = {
         }}
       </p>
       <a class="link" :href="'#datasets/' + data.dataset_id + '?version=' + data.dataset_version"
-        >查看评测集版本 →</a
+        >查看测评集版本 →</a
       >
     </div>
     <div v-if="mode === 'optimizer' && sourceReport" class="toolbar">
@@ -660,10 +660,10 @@ const templateLabels2: Record<string, string> = {
             @click="verificationFinding = row"
           >
             选择验证用例</button
-          ><small v-if="data.mock" class="muted">样例发现项不用于真实评测。</small>
+          ><small v-if="data.mock" class="muted">样例发现项不用于真实测评。</small>
           <h4>验证方式</h4>
           <p>
-            {{ row.verification ?? '修改对应版本定义后重新分析，并对涉及 Skill 的样本发起评测。' }}
+            {{ row.verification ?? '修改对应版本定义后重新分析，并对涉及 Skill 的样本发起测评。' }}
           </p>
         </template>
         <p v-if="row.case_count != null">

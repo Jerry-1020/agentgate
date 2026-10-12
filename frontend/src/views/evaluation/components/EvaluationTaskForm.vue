@@ -28,11 +28,13 @@ const props = defineProps<{
   };
 }>();
 const emit = defineEmits<{ close: []; created: [link: TaskLink] }>();
+const taskName = ref('');
 const taskKind = ref<'single' | 'ab'>('single'),
   candidateVersion = ref(''),
   includeStatic = ref(false);
 const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
 const platformSelection = ref<AgentTargetSelection | null>(null);
+const localBankSelected = computed(() => platformSelection.value?.localTarget?.adapter_type === 'local_bank');
 const auth = useAuthStore();
 const platformDirectory = computed(() =>
   auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
@@ -41,14 +43,36 @@ const platformToken = computed(() => (auth.loginMode === 'bank' ? auth.token : '
 const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId : ''));
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   platformSelection.value = selection;
+  if (selection?.localTarget?.adapter_type === 'local_bank') {
+    concurrency.value = 1; timeout.value = 180; retries.value = 0;
+  }
 }
+const platformCandidateVersion = ref('');
+const platformCandidateVersions = ref<readonly { agentVersion: string; status?: string }[]>([]);
+watch(platformSelection, async (selection) => {
+  platformCandidateVersion.value = '';
+  platformCandidateVersions.value = [];
+  if (!selection) return;
+  try {
+    const input = { token: platformToken.value, agentId: selection.agentId };
+    platformCandidateVersions.value =
+      selection.typeGroup === 'abcclaw' && selection.branchId
+        ? await platformDirectory.value.getBranchVersions({
+            ...input,
+            branchId: selection.branchId,
+          })
+        : await platformDirectory.value.getAgentVersions(input);
+  } catch {
+    platformCandidateVersions.value = [];
+  }
+});
 const gradingMode = ref<'overall' | 'per_turn'>('overall');
 const staticDialog = ref(false),
   staticLoading = ref(false),
   staticError = ref('');
 const staticConnection = ref<{ model: string; base_url: string; configured: boolean } | null>(null);
 const staticReport = ref<any>(null),
-  staticReports = ref<{ version: string; reportId: string }[]>([]);
+  staticReports = ref<{ version: string; reportId: string; descriptorHash: string }[]>([]);
 let staticSequence = 0;
 function cancelAnalysis() {
   staticSequence++;
@@ -59,7 +83,7 @@ function cancelAnalysis() {
   staticLoading.value = false;
 }
 async function confirmStatic() {
-  if (taskKind.value !== 'ab' || submitting.value) return;
+  if (!staticAvailable.value || submitting.value || staticLoading.value) return;
   const ticket = ++staticSequence;
   staticLoading.value = true;
   staticError.value = '';
@@ -68,14 +92,15 @@ async function confirmStatic() {
   staticReports.value = [];
   try {
     const reports = [];
-    for (const version of taskKind.value === 'ab'
-      ? [selectedVersion.value, candidateVersion.value]
-      : [selectedVersion.value]) {
-      const report = bankTarget.value
+    const exactTarget = staticTarget.value;
+    for (const version of exactTarget
+      ? [exactTarget.ref.external_version_id]
+      : [selectedVersion.value, candidateVersion.value]) {
+      const report = exactTarget
         ? await request<any>(
             '/skill-analysis/reports',
             'POST',
-            { target_descriptor_sha256: bankTarget.value.descriptor.content_sha256 },
+            { target_descriptor_sha256: exactTarget.content_sha256 },
             240000,
           )
         : await request<any>('/evaluations/skill-analysis', 'POST', { version }, 240000);
@@ -84,7 +109,9 @@ async function confirmStatic() {
         staticReport.value = report;
         throw Error('静态分析未完成，请检查模型权限或连接。报告 ID：' + report.id);
       }
-      reports.push({ version, reportId: report.id });
+      if (exactTarget && report.target_descriptor_sha256 !== exactTarget.content_sha256)
+        throw Error('分析报告与所选智能体定义不一致，请重新分析。');
+      reports.push({ version, reportId: report.id, descriptorHash: report.target_descriptor_sha256 });
       if (!staticReport.value) staticReport.value = report;
     }
     staticReports.value = reports;
@@ -97,7 +124,7 @@ async function confirmStatic() {
   }
 }
 async function openStatic() {
-  if (taskKind.value !== 'ab' || submitting.value) return;
+  if (!staticAvailable.value || submitting.value || staticLoading.value) return;
   const ticket = ++staticSequence;
   staticDialog.value = true;
   staticError.value = '';
@@ -158,9 +185,88 @@ const branchMismatch = computed(
     normalizedBranch(gitBranchUrl.value) !==
       normalizedBranch(bankTarget.value.git_branch_url ?? ''),
 );
-const targetDescriptor = computed(() =>
-  branchMismatch.value ? undefined : bankTarget.value?.descriptor,
-);
+const targetDescriptor = computed(() => {
+  if (branchMismatch.value) return undefined;
+  if (platformSelection.value?.localTarget) return platformSelection.value.localTarget.descriptor;
+  if (bankTarget.value) return bankTarget.value.descriptor;
+  if (platformSelection.value) {
+    const sel = platformSelection.value;
+    const topology = buildFrontendTopology(sel);
+    if (topology) {
+      return {
+        ref: {
+          source_id: 'platform',
+          target_type: 'agent',
+          external_target_id: sel.agentId,
+          external_version_id: sel.agentVersion,
+        },
+        display_name: sel.agentName,
+        description: null,
+        prompt: null,
+        prompt_sha256: null,
+        skills: (sel.skills ?? []).map((s) => ({
+          external_skill_id: s.id,
+          external_version_id: 'v1',
+          name: s.name ?? s.id,
+          description: s.description ?? '',
+          tools: [],
+          prompt: null,
+        })),
+        tools: (sel.tools ?? []).map((t) => ({
+          name: t?.function?.name ?? '',
+          description: t?.function?.description ?? '',
+          input_schema: {},
+        })),
+        input_schema: {},
+        output_schema: {},
+        metadata: { topology },
+        fetched_at: '',
+        content_sha256: '',
+      } as any;
+    }
+  }
+  return undefined;
+});
+
+const staticTarget = computed(() => auth.loginMode === 'external'
+  ? platformSelection.value?.localTarget?.descriptor ?? bankTarget.value?.descriptor
+  : undefined);
+const staticAvailable = computed(() => staticTarget.value
+  ? staticTarget.value.skills.length >= 2
+  : auth.loginMode === 'external' && taskKind.value === 'ab' && !platformSelection.value && selectedAgent.value === 'demo');
+watch([platformSelection, selectedAgent, selectedVersion, candidateVersion, taskKind,
+  () => auth.loginMode, () => auth.teamId], cancelAnalysis);
+
+function buildFrontendTopology(sel: NonNullable<typeof platformSelection.value>) {
+  if (!sel.tools?.length && !sel.skills?.length) return null;
+  const composition = sel.platformArrangeType ?? sel.typeGroup.split('/')[0] ?? 'base';
+  const nodes: { id: string; kind: string; label: string; description: string }[] = [
+    { id: sel.agentId, kind: 'agent', label: sel.agentName, description: `被测智能体（${composition}）` },
+  ];
+  const edges: { source: string; target: string; relation: string }[] = [];
+  for (const skill of sel.skills ?? []) {
+    const skillId = `${sel.agentId}:skill:${skill.id}`;
+    nodes.push({ id: skillId, kind: 'skill', label: skill.name ?? skill.id, description: skill.description ?? '' });
+    edges.push({ source: sel.agentId, target: skillId, relation: 'includes_skill' });
+    for (const toolName of skill.tools ?? []) {
+      const toolId = `${sel.agentId}:tool:${toolName}`;
+      if (!nodes.some((n) => n.id === toolId)) {
+        nodes.push({ id: toolId, kind: 'tool', label: toolName, description: `工具：${toolName}` });
+      }
+      edges.push({ source: skillId, target: toolId, relation: 'includes_tool' });
+    }
+  }
+  for (const tool of sel.tools ?? []) {
+    const name = tool?.function?.name ?? '';
+    if (!name) continue;
+    const toolId = `${sel.agentId}:tool:${name}`;
+    if (!nodes.some((n) => n.id === toolId)) {
+      nodes.push({ id: toolId, kind: 'tool', label: name, description: tool?.function?.description ?? '' });
+      edges.push({ source: sel.agentId, target: toolId, relation: 'includes_tool' });
+    }
+  }
+  return { composition, nodes, edges };
+}
 watch(
   bankTarget,
   (target) => {
@@ -281,7 +387,7 @@ async function loadLegacyTargets() {
       api.versions(),
       request<BankTarget[]>('/bank-targets').catch(() => {
         if (ticket === legacySequence)
-          targetError.value = '真实智能体目录暂不可用，仍可选择内置 Demo 进行 A/B 实验。';
+          targetError.value = '真实智能体目录暂不可用，仍可选择内置 Demo 进行 A/B试验。';
         return [];
       }),
     ]);
@@ -303,7 +409,7 @@ async function loadLegacyTargets() {
     legacyLoaded = true;
   } catch {
     if (ticket === legacySequence)
-      targetError.value = '被测智能体目录不可用，请切换回单任务后重试 A/B 实验。';
+      targetError.value = '被测智能体目录不可用，请切换回单任务后重试 A/B试验。';
   } finally {
     if (ticket === legacySequence) legacyLoading.value = false;
   }
@@ -371,11 +477,33 @@ async function submit() {
     legacyLoading.value
   )
     return;
-  const platform =
-    taskKind.value === 'single' ? platformPicker.value?.readSubmissionSelection() : null;
+  if (!taskName.value.trim()) {
+    formError.value = '请输入任务名称。';
+    return;
+  }
+  const platform = platformPicker.value?.readSubmissionSelection() ?? null;
+  const localTarget = platform?.target.localTarget;
+  if (localTarget && auth.loginMode !== 'external') {
+    formError.value = '本地智能体仅支持行外模式。';
+    return;
+  }
+  if (localTarget?.adapter_type === 'local_bank' && (concurrency.value !== 1 || retries.value !== 0 || timeout.value > 300)) {
+    formError.value = '贷款智能体要求并发 1、重试 0、超时不超过 300 秒。';
+    return;
+  }
   if (taskKind.value === 'single' && !platform) {
     formError.value = '请完整选择被测智能体及版本。';
     return;
+  }
+  if (taskKind.value === 'ab' && platform) {
+    if (!platformCandidateVersion.value) {
+      formError.value = '请为 A/B试验选择候选版本。';
+      return;
+    }
+    if (platformCandidateVersion.value === platform.target.agentVersion) {
+      formError.value = 'A/B试验需要选择两个不同版本。';
+      return;
+    }
   }
   formError.value = '';
   if (gradingMode.value === 'per_turn') {
@@ -387,20 +515,21 @@ async function submit() {
     formError.value = '该 Git 分支尚未登记可运行版本，请选择已登记分支，或先部署并登记所填分支。';
     return;
   }
-  if (taskKind.value === 'ab' && selectedAgent.value !== 'demo' && !bankTarget.value) {
+  if (taskKind.value === 'ab' && !platform && selectedAgent.value !== 'demo' && !bankTarget.value) {
     formError.value = '被测智能体不可用，请重新加载。';
     return;
   }
-  if (bankTarget.value && taskKind.value === 'ab') {
+  if (bankTarget.value && taskKind.value === 'ab' && !platform) {
     formError.value =
       '当前真实智能体目录只登记一个版本，且 A/B 接口仅支持内置双版本智能体。请登记两侧真实快照并扩展后端后再运行；不会代用 Demo。';
     return;
   }
   if (
     taskKind.value === 'ab' &&
+    !platform &&
     (!candidateVersion.value || candidateVersion.value === selectedVersion.value)
   ) {
-    formError.value = 'A/B 实验需要选择两个不同版本。';
+    formError.value = 'A/B试验需要选择两个不同版本。';
     return;
   }
   for (const [label, value, min, max] of [
@@ -415,7 +544,7 @@ async function submit() {
     }
   }
   if (taskKind.value === 'ab' && repetitions.value > 1) {
-    formError.value = 'A/B 实验暂不支持重复执行，请选择单任务进行稳定性测试。';
+    formError.value = 'A/B试验暂不支持重复执行，请选择单任务进行稳定性测试。';
     return;
   }
   if (
@@ -425,15 +554,15 @@ async function submit() {
       !Number.isFinite(new Date(scheduledAt.value).getTime()) ||
       new Date(scheduledAt.value).getTime() <= Date.now())
   ) {
-    formError.value = '预约时间必须晚于当前时间，且只支持单次普通评测。';
+    formError.value = '预约时间必须晚于当前时间，且只支持单次普通测评。';
     return;
   }
   const dataset = datasets.value.find((d) => d.id === selectedDataset.value);
   if (!dataset || selectedDatasetVersion.value === null) {
-    formError.value = '请选择已发布的评测集及版本。';
+    formError.value = '请选择已发布的测评集及版本。';
     return;
   }
-  if (taskKind.value === 'ab' && !selectedVersion.value) {
+  if (taskKind.value === 'ab' && !platform && !selectedVersion.value) {
     formError.value = '请选择智能体版本。';
     return;
   }
@@ -443,21 +572,25 @@ async function submit() {
     return;
   }
   const snapshot = {
+    name: taskName.value.trim(),
     kind: taskKind.value,
     datasetId: dataset.id,
     datasetVersion: selectedDatasetVersion.value,
     caseIds: scope.value === 'selected' ? [...selectedCaseIds.value] : undefined,
     evaluatorIds: [...selectedEvaluators.value],
     chosen: evaluators.value.filter((e) => selectedEvaluators.value.includes(e.id)),
+    evaluatorRefs: evaluators.value
+      .filter((e) => selectedEvaluators.value.includes(e.id))
+      .map((e) => ({ evaluator_id: e.id, evaluator_version: e.latest_version! })),
     concurrency: concurrency.value,
     timeout: timeout.value,
     retries: retries.value,
     repetitions: repetitions.value,
     scheduledFor:
       launchMode.value === 'scheduled' ? new Date(scheduledAt.value).toISOString() : undefined,
-    baseline: selectedVersion.value,
-    candidate: candidateVersion.value,
-    staticReports: taskKind.value === 'ab' && includeStatic.value ? [...staticReports.value] : [],
+    baseline: localTarget ? platform!.target.agentVersion : selectedVersion.value,
+    candidate: localTarget ? platformCandidateVersion.value : candidateVersion.value,
+    staticReports: includeStatic.value ? [...staticReports.value] : [],
   };
   submitting.value = true;
   formError.value = '';
@@ -477,7 +610,7 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
-    if (platform) {
+    if (platform && !localTarget) {
       const incompatible = exact.cases.filter(
         (c) =>
           Object.keys(c.initial_state ?? {}).length > 0 ||
@@ -491,7 +624,7 @@ async function submit() {
       );
       if (incompatible.length)
         invalid(
-          `所选评测集有 ${incompatible.length} 条用例包含业务初始状态或非纯文本输入，平台目标仅支持纯文本（txt）用例；请选择如“平台模拟验收”类评测集。`,
+          `所选测评集有 ${incompatible.length} 条用例包含业务初始状态或非纯文本输入，平台目标仅支持纯文本（txt）用例；请选择如“平台模拟验收”类测评集。`,
         );
     }
     const chosen = snapshot.chosen;
@@ -510,15 +643,94 @@ async function submit() {
       await ElMessageBox.confirm(
         `${uncovered.length} 条用例没有匹配检查，将标为不适用。是否继续？`,
         '检查覆盖范围',
-        { confirmButtonText: '继续评测', cancelButtonText: '返回修改' },
+        { confirmButtonText: '继续测评', cancelButtonText: '返回修改' },
       );
     creating = true;
-    if (platform) {
+    if (localTarget && taskKind.value === 'single') {
+      const common = {
+        dataset_id: snapshot.datasetId, dataset_version: snapshot.datasetVersion,
+        case_ids: snapshot.caseIds, evaluator_refs: snapshot.evaluatorRefs,
+        timeout_seconds: snapshot.timeout, scheduled_for: snapshot.scheduledFor,
+      };
+      const created = await request<{ id?: string; run_id?: string; run_ids?: string[] }>(
+        localTarget.adapter_type === 'local_bank' ? '/bank-evaluations'
+          : snapshot.repetitions > 1 ? '/stability-experiments' : '/evaluations',
+        'POST', localTarget.adapter_type === 'local_bank'
+          ? { ...common, name: snapshot.name, mode: localTarget.mode,
+              target_descriptor_sha256: localTarget.descriptor.content_sha256,
+              repetitions: snapshot.repetitions }
+          : { ...common, version: platform!.target.agentVersion,
+              max_parallel_cases: snapshot.concurrency, max_retries: snapshot.retries,
+              ...(snapshot.repetitions > 1 ? { repetitions: snapshot.repetitions } : {}) },
+      );
+      const id = created.id ?? created.run_id;
+      if (!id) throw Error('Invalid local task response');
+      const link: TaskLink = { id, name: snapshot.name,
+        kind: snapshot.repetitions > 1 ? 'stability' : 'single',
+        runIds: created.run_ids ?? [id], staticReports: snapshot.staticReports };
+      await saveTaskLink(link);
+      emit('created', link);
+      ElMessage.success('测评任务已提交');
+      return;
+    }
+    if (localTarget?.adapter_type === 'local_bank') invalid('该贷款智能体仅登记一个版本，暂不支持 A/B试验。');
+    if (platform && !localTarget && taskKind.value === 'ab') {
+      const target = platform.target;
+      const created = await httpRequest<{
+        baseline: { run_id: string };
+        candidate: { run_id: string };
+      }>('/agent-platform/comparisons', {
+        method: 'POST',
+        headers: { 'X-Agent-Platform-Token': platform.token },
+        data: {
+          name: snapshot.name,
+          target: {
+            ...(target.teamId ? { team_id: target.teamId } : {}),
+            agent_id: target.agentId,
+            type_group: target.typeGroup,
+            baseline_version: target.agentVersion,
+            candidate_version: platformCandidateVersion.value,
+            ...(target.typeGroup === 'abcclaw'
+              ? { branch_id: target.branchId }
+              : {
+                  arrange_type: target.platformArrangeType ?? target.platformAgentType,
+                }),
+          },
+          dataset_id: snapshot.datasetId,
+          dataset_version: snapshot.datasetVersion,
+          ...(caseIds ? { case_ids: caseIds } : {}),
+          evaluator_refs: snapshot.evaluatorRefs,
+          timeout_seconds: snapshot.timeout,
+        },
+      });
+      const link = {
+        id: created.baseline.run_id,
+        kind: 'ab' as const,
+        runIds: [created.baseline.run_id, created.candidate.run_id],
+        staticReports: [] as { version: string; descriptorHash?: string; reportId?: string }[],
+      };
+      let refreshed = true;
+      try {
+        await refreshTaskLinks();
+      } catch {
+        refreshed = false;
+      }
+      window.dispatchEvent(new Event('task-links-updated'));
+      emit('created', link);
+      if (refreshed) ElMessage.success('A/B试验已提交');
+      else
+        ElMessage.warning(
+          `实验已创建（${link.id}），但列表刷新失败，请刷新任务列表；请勿重复提交。`,
+        );
+      return;
+    }
+    if (platform && !localTarget) {
       const target = platform.target;
       const created = await httpRequest<unknown>('/agent-platform/evaluations', {
         method: 'POST',
         headers: { 'X-Agent-Platform-Token': platform.token },
         data: {
+          name: snapshot.name,
           target: {
             ...(target.teamId ? { team_id: target.teamId } : {}),
             agent_id: target.agentId,
@@ -533,7 +745,7 @@ async function submit() {
           dataset_id: snapshot.datasetId,
           dataset_version: snapshot.datasetVersion,
           ...(caseIds ? { case_ids: caseIds } : {}),
-          evaluator_ids: snapshot.evaluatorIds,
+          evaluator_refs: snapshot.evaluatorRefs,
           max_parallel_cases: snapshot.concurrency,
           timeout_seconds: snapshot.timeout,
           max_retries: snapshot.retries,
@@ -550,7 +762,7 @@ async function submit() {
       }
       window.dispatchEvent(new Event('task-links-updated'));
       emit('created', link);
-      if (refreshed) ElMessage.success('评测任务已提交');
+      if (refreshed) ElMessage.success('测评任务已提交');
       else
         ElMessage.warning(
           `任务已创建（${link.id}），但列表刷新失败，请刷新任务列表；请勿重复提交。`,
@@ -570,6 +782,7 @@ async function submit() {
     );
     const link: TaskLink = {
       id: pair.baseline.run_id,
+      name: snapshot.name,
       kind: 'ab',
       runIds: [pair.baseline.run_id, pair.candidate.run_id],
       staticReports: snapshot.staticReports,
@@ -585,7 +798,7 @@ async function submit() {
     ElMessage.success(
       link.staticReports.some((x) => x.error)
         ? '运行已提交，静态分析未完成，请查看任务详情'
-        : '评测任务已提交',
+        : '测评任务已提交',
     );
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') {
@@ -594,7 +807,7 @@ async function submit() {
           ? String(e)
           : validationError ||
             (!creating
-              ? '读取评测配置失败，请重试。'
+              ? '读取测评配置失败，请重试。'
               : e instanceof ApiError && e.status >= 400 && e.status < 500
                 ? '任务提交被拒绝，请检查访问权限、目标及执行设置后重试。'
                 : '暂时无法确认任务是否创建成功，请先检查任务列表，勿重复提交。');
@@ -622,7 +835,7 @@ function platformTaskLink(value: unknown, repetitions: number): TaskLink {
 }
 
 watch(taskKind, (kind) => {
-  platformSelection.value = null;
+  // 平台选择器在单任务与 A/B 间共享，切换模式保留已选目标。
   formError.value = '';
   cancelAnalysis();
   if (kind !== 'ab') {
@@ -658,8 +871,8 @@ onMounted(() => void openCreate(props.source));
     @close="emit('close')"
     :show-close="!submitting"
     :close-on-press-escape="!submitting"
-    title="新建评测任务"
-    width="min(1080px, 96vw)"
+    title="新建测评任务"
+    width="min(800px,96vw)"
     class="task-create-dialog"
     top="3vh"
     :close-on-click-modal="false"
@@ -669,6 +882,19 @@ onMounted(() => void openCreate(props.source));
 
     <div class="form-section-heading full">
       <span>01</span>
+      <div><h3>任务名称</h3></div>
+    </div>
+    <el-input
+      v-model="taskName"
+      aria-label="任务名称"
+      placeholder="请输入任务名称"
+      maxlength="128"
+      show-word-limit
+      :disabled="submitting"
+    />
+
+    <div class="form-section-heading full">
+      <span>02</span>
       <div><h3>任务类型</h3></div>
     </div>
     <div class="task-kind-choice" aria-label="任务类型">
@@ -685,7 +911,7 @@ onMounted(() => void openCreate(props.source));
         :disabled="submitting || formLoading"
         @click="taskKind = 'ab'"
       >
-        <b>A/B 实验</b>
+        <b>A/B试验</b>
       </button>
     </div>
     <fieldset
@@ -693,25 +919,49 @@ onMounted(() => void openCreate(props.source));
       class="form-grid task-create-grid"
     >
       <div class="form-section-heading full">
-        <span>02</span>
-        <div><h3>评测对象</h3></div>
+        <span>03</span>
+        <div><h3>测评对象</h3></div>
       </div>
+      <p v-if="taskKind === 'ab'" class="full platform-source-badge">
+        数据源：{{ auth.modeLabel }}
+      </p>
       <AgentTargetPicker
-        v-if="taskKind === 'single'"
         ref="platformPicker"
         class="full"
         :directory="platformDirectory"
         :token="platformToken"
         :team-id="platformTeamId"
         :disabled="submitting || formLoading"
+        :version-label="taskKind === 'ab' ? '实验 A · 基线版本' : '智能体版本'"
         @selection-change="receivePlatformSelection"
       />
-      <p v-if="taskKind === 'single'" class="muted full">
-        平台目录暂未提供图谱与静态分析所需信息，当前无法展示智能体图谱或进行静态分析。
+      <div v-if="taskKind === 'ab'" class="full platform-candidate-row">
+        <label class="field platform-candidate-field"
+          >实验 B · 候选版本<select
+            v-model="platformCandidateVersion"
+            class="input"
+            aria-label="平台候选版本"
+            :disabled="!platformSelection || submitting || formLoading"
+          >
+            <option value="">请选择候选版本</option>
+            <option
+              v-for="v in platformCandidateVersions"
+              :key="v.agentVersion"
+              :value="v.agentVersion"
+            >
+              {{ v.agentVersion }}{{ v.status ? ' · ' + v.status : '' }}
+            </option>
+          </select></label
+        >
+        <p class="muted platform-candidate-hint">与基线版本同一目录加载；必须选择不同的版本。</p>
+      </div>
+      <p class="muted full">
+        平台目录的图谱数据来源于智能体描述符；行内部署如未提供拓扑信息，此处仅展示已注册的
+        Skill 与 Tool 列表。
       </p>
       <p v-if="legacyLoading" class="full" role="status">正在加载 A/B 智能体目录…</p>
       <div
-        v-if="taskKind === 'ab'"
+        v-if="taskKind === 'ab' && !platformSelection"
         class="target-choice full"
         :class="{ 'is-ab': taskKind === 'ab', 'has-git-branch': usesGitBranch }"
       >
@@ -803,20 +1053,20 @@ onMounted(() => void openCreate(props.source));
         <TargetStructure :descriptor="targetDescriptor" hide-source />
       </details>
       <div class="form-section-heading full">
-        <span>03</span>
-        <div><h3>评测数据</h3></div>
+        <span>04</span>
+        <div><h3>测评数据</h3></div>
       </div>
       <div class="dataset-selection full">
         <label class="field"
-          >评测集<select class="input" v-model="selectedDataset" aria-label="任务评测集">
+          >测评集<select class="input" v-model="selectedDataset" aria-label="任务测评集">
             <option v-for="d in datasets" :key="d.id" :value="d.id">{{ d.name }}</option>
           </select></label
         >
         <label class="field"
-          >评测集版本<select
+          >测评集版本<select
             class="input"
             v-model="selectedDatasetVersion"
-            aria-label="任务评测集版本"
+            aria-label="任务测评集版本"
           >
             <option v-for="v in datasetVersions" :key="v.version" :value="v.version">
               v{{ v.version }} · {{ v.cases.length }} 条样本
@@ -853,7 +1103,7 @@ onMounted(() => void openCreate(props.source));
         >
       </div>
       <div class="form-section-heading full">
-        <span>04</span>
+        <span>05</span>
         <div><h3>评估方式</h3></div>
       </div>
       <TaskEvaluatorPicker
@@ -863,7 +1113,7 @@ onMounted(() => void openCreate(props.source));
         v-model="selectedEvaluators"
         :static-report="staticReport"
         :static-enabled="includeStatic"
-        :static-available="taskKind === 'ab' && (!bankTarget || !!targetDescriptor?.skills.length)"
+        :static-available="staticAvailable"
         @static="openStatic"
         @cancel-analysis="cancelAnalysis"
       />
@@ -896,7 +1146,7 @@ onMounted(() => void openCreate(props.source));
         </p>
       </div>
       <div class="form-section-heading full">
-        <span>05</span>
+        <span>06</span>
         <div><h3>执行设置</h3></div>
       </div>
       <div class="execution-settings full" aria-label="执行参数">
@@ -926,7 +1176,7 @@ onMounted(() => void openCreate(props.source));
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
-            :disabled="taskKind === 'ab'"
+            :disabled="taskKind === 'ab' || localBankSelected"
             title="最多 30 个样本并发"
             aria-label="并发样本数"
             type="number"
@@ -939,11 +1189,11 @@ onMounted(() => void openCreate(props.source));
             class="input"
             :disabled="taskKind === 'ab'"
             v-model.number="timeout"
-            :title="bankTarget ? '1–300 秒，最大 300 秒' : '1–3600 秒，最大 3600 秒'"
+            :title="bankTarget || localBankSelected ? '1–300 秒，最大 300 秒' : '1–3600 秒，最大 3600 秒'"
             aria-label="执行超时（秒）"
             type="number"
             min="1"
-            :max="bankTarget ? 300 : 3600"
+            :max="bankTarget || localBankSelected ? 300 : 3600"
             step="1"
         /></label>
         <label class="field"
@@ -961,7 +1211,7 @@ onMounted(() => void openCreate(props.source));
           >失败重试次数<input
             class="input"
             v-model.number="retries"
-            :disabled="taskKind === 'ab'"
+            :disabled="taskKind === 'ab' || localBankSelected"
             title="最多 5 次；仅重试可安全重试的执行错误"
             aria-label="失败重试次数"
             type="number"
@@ -971,11 +1221,13 @@ onMounted(() => void openCreate(props.source));
         /></label>
       </div>
 
-      <p v-if="taskKind === 'ab'" class="muted full">A/B 两侧沿用固定执行参数：并发 1，失败重试 0。</p>
+      <p v-if="taskKind === 'ab'" class="muted full">
+        A/B 两侧沿用固定执行参数：并发 1，失败重试 0。
+      </p>
     </fieldset>
     <p class="task-summary">
       本次：{{
-        taskKind === 'ab' ? 'A/B 实验 · 两个版本' : repetitions > 1 ? '稳定性测试' : '单任务'
+        taskKind === 'ab' ? 'A/B试验 · 两个版本' : repetitions > 1 ? '稳定性测试' : '单任务'
       }}
       ·
       {{
@@ -998,7 +1250,7 @@ onMounted(() => void openCreate(props.source));
         </p>
         <p v-else-if="formLoading || datasetLoading" role="status">正在加载任务配置…</p>
         <p v-else-if="branchMismatch" role="status">
-          Git 分支未匹配，暂不能开始评测，请修正分支地址。
+          Git 分支未匹配，暂不能开始测评，请修正分支地址。
         </p>
       </div>
       <div class="submission-actions">
@@ -1022,15 +1274,19 @@ onMounted(() => void openCreate(props.source));
             submitting ||
             legacyLoading ||
             (taskKind === 'single' && !platformSelection) ||
+            (taskKind === 'ab' && !!platformSelection && !platformCandidateVersion) ||
+            (taskKind === 'ab' &&
+              !!platformSelection &&
+              platformCandidateVersion === platformSelection?.agentVersion) ||
             formLoading ||
             datasetLoading ||
             staticLoading ||
             branchMismatch ||
-            (taskKind === 'ab' && !!bankTarget)
+            (taskKind === 'ab' && !platformSelection && !!bankTarget)
           "
           @click="submit"
         >
-          {{ submitting ? '正在处理…' : taskKind === 'ab' ? '创建 A/B 实验' : '开始评测' }}
+          {{ submitting ? '正在处理…' : taskKind === 'ab' ? '创建 A/B试验' : '开始测评' }}
         </button>
       </div>
     </template>
@@ -1068,6 +1324,32 @@ onMounted(() => void openCreate(props.source));
   </el-dialog>
 </template>
 <style scoped>
+.platform-source-badge {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  padding: 6px 12px;
+  background: var(--el-color-primary-light-9);
+  border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+}
+.platform-candidate-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 20px;
+  margin-top: 0;
+  align-items: start;
+}
+.platform-candidate-row .platform-candidate-field {
+  grid-column: 3;
+}
+.platform-candidate-row .platform-candidate-hint {
+  grid-column: 1 / 3;
+  align-self: end;
+  margin: 0 0 24px;
+}
 .dataset-selection {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
@@ -1136,7 +1418,7 @@ onMounted(() => void openCreate(props.source));
 }
 .execution-settings {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -1287,5 +1569,10 @@ fieldset {
   .target-choice.is-ab {
     grid-template-columns: 1fr;
   }
+}
+</style>
+<style>
+.el-overlay .el-dialog.task-create-dialog .el-dialog__body {
+  max-height: 68vh;
 }
 </style>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from langgraph.graph import StateGraph, START, END
@@ -45,6 +46,73 @@ class Extracted(BaseModel):
     amount: float | None = Field(default=None, gt=0, le=10000000, allow_inf_nan=False)
     purpose: str | None = Field(default=None, min_length=1, max_length=200)
     intent: str
+
+
+def build_loan_workflow(handlers: Mapping[str, Callable[[dict], dict]]):
+    """One graph definition for execution and descriptor export."""
+    graph = StateGraph(dict)
+    definitions = (
+        ("extract", "信息提取", "llm", "根据对话提取意图、金额和用途，检查缺失资料"),
+        ("submit", "提交申请", "tool", "调用 submit_application 创建测试申请"),
+        ("credit", "征信查询", "tool", "调用 credit_inquiry 查询测试客户风险"),
+        ("decide", "规则决策", "rule", "按测试政策确定通过、转人工或拒绝"),
+        ("act", "执行动作", "tool", "依据决策调用 approve_loan、request_human_review 或 reject_loan"),
+        ("lookup", "查询申请", "tool", "调用 get_application 查询本会话申请"),
+        ("end", "生成回复", "llm", "依据实际状态回复，或追问缺失资料；声明测试环境"),
+    )
+    if set(handlers) != {row[0] for row in definitions}:
+        raise ValueError("workflow handlers must match declared nodes")
+    for node_id, label, node_type, description in definitions:
+        graph.add_node(node_id, handlers[node_id], metadata={
+            "label": label, "node_type": node_type, "description": description,
+            "trace_name": f"workflow.{node_id}",
+        })
+
+    def route(state):
+        if state["intent"] == "status":
+            return "查询进度"
+        if state["intent"] == "apply" and not state["missing"]:
+            return "申请且资料齐全"
+        return "缺资料或咨询"
+
+    graph.add_edge(START, "extract")
+    graph.add_conditional_edges("extract", route, {
+        "查询进度": "lookup", "申请且资料齐全": "submit", "缺资料或咨询": "end",
+    })
+    for before, after in (("submit", "credit"), ("credit", "decide"),
+                          ("decide", "act"), ("act", "end"), ("lookup", "end")):
+        graph.add_edge(before, after)
+    graph.add_edge("end", END)
+    return graph
+
+
+def loan_workflow_topology() -> dict:
+    """Export the execution graph without executing model, tools or storage."""
+    def not_executable(_):
+        raise RuntimeError("descriptor-only workflow cannot execute")
+
+    graph = build_loan_workflow(dict.fromkeys(
+        ("extract", "submit", "credit", "decide", "act", "lookup", "end"),
+        not_executable,
+    ))
+    nodes = []
+    for node_id in (START, *graph.nodes, END):
+        metadata = graph.nodes[node_id].metadata if node_id in graph.nodes else {}
+        terminal = node_id in {START, END}
+        nodes.append({
+            "id": node_id, "kind": "workflow",
+            "label": ("开始" if node_id == START else "结束") if terminal else metadata["label"],
+            "description": "流程入口" if node_id == START else "流程结束" if node_id == END else metadata["description"],
+            "node_type": "terminal" if terminal else metadata["node_type"],
+            "trace_name": None if terminal else metadata["trace_name"],
+        })
+    edges = [{"source": source, "target": target, "relation": "下一步"}
+             for source, target in sorted(graph.edges)]
+    for source, branches in graph.branches.items():
+        for branch in branches.values():
+            edges.extend({"source": source, "target": target, "relation": label}
+                         for label, target in branch.ends.items())
+    return {"composition": "工作流 · 条件分支", "nodes": nodes, "edges": edges}
 
 
 class Runtime:
@@ -164,24 +232,20 @@ class Runtime:
                 raise ValueError("decision rejected")
             return {"application": value}
 
-        graph = StateGraph(dict)
         # dict state nodes return complete accumulated state; no hidden checkpoint state.
         def wrap(name, fn):
             run = node(name, fn)
             return lambda state: {**state, **run(state)}
-        graph.add_node("extract", wrap("extract", extract))
-        graph.add_node("submit", wrap("submit", submit))
-        graph.add_node("credit", wrap("credit", credit))
-        graph.add_node("decide", wrap("decide", decide))
-        graph.add_node("act", wrap("act", act))
-        graph.add_node("lookup", wrap("lookup", lambda _: {"application": tools.invoke("get_application", {})}))
-        graph.add_node("end", wrap("end", lambda state: {"output": self._summary(history, tools, evidence, state.get("missing"))}))
-        graph.add_edge(START, "extract")
-        graph.add_conditional_edges("extract", lambda state: "lookup" if state["intent"] == "status" else
-                                    "submit" if state["intent"] == "apply" and not state["missing"] else "end")
-        for before, after in (("submit", "credit"), ("credit", "decide"), ("decide", "act"), ("act", "end"), ("lookup", "end")):
-            graph.add_edge(before, after)
-        graph.add_edge("end", END)
+
+        graph = build_loan_workflow({
+            "extract": wrap("extract", extract),
+            "submit": wrap("submit", submit),
+            "credit": wrap("credit", credit),
+            "decide": wrap("decide", decide),
+            "act": wrap("act", act),
+            "lookup": wrap("lookup", lambda _: {"application": tools.invoke("get_application", {})}),
+            "end": wrap("end", lambda state: {"output": self._summary(history, tools, evidence, state.get("missing"))}),
+        })
         return graph.compile().invoke({})["output"]
 
     def _cloud(self, history, slots, tools, evidence, progress):

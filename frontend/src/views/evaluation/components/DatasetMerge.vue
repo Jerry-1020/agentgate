@@ -128,7 +128,7 @@ async function inspect() {
   try {
     if (mode.value === 'demo') sources.value = demoSources();
     else {
-      if (chosen.value.length < 2) throw Error('请选择至少两个不同的评测集及发布版本');
+      if (chosen.value.length < 2) throw Error('请选择至少两个不同的测评集及发布版本');
       sources.value = await Promise.all(
         chosen.value.map(async (id) => {
           if (!versions.value[id]) throw Error('请选择来源发布版本');
@@ -197,8 +197,8 @@ function downloadPlan() {
 <template>
   <section class="card merge-workspace">
     <div class="toolbar">
-      <h1>合并现有评测集</h1>
-      <button class="secondary" @click="emit('close')">返回评测集</button>
+      <h1>合并现有测评集</h1>
+      <button class="secondary" @click="emit('close')">返回测评集</button>
     </div>
     <p class="muted" role="status">
       {{ mode === 'demo' ? '交互演示 · 不创建真实资产' : '本地预览 · 源数据只读，未经服务端验证' }}

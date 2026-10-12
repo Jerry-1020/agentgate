@@ -87,7 +87,29 @@ async function deleteSelectedDraft() {
     await datasetApi.discardDraft(deleteItem.value.id);
     deleteItem.value = null;
     datasets.value = await datasetApi.list();
-    ElMessage.success('草稿已删除，评测集记录保留');
+    ElMessage.success('草稿已删除，测评集记录保留');
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') showError(e, '删除失败');
+  } finally {
+    deleting.value = false;
+  }
+}
+const deleteHasPublished = computed(() =>
+  deleteVersions.value.some((v) => v.status === 'published'),
+);
+async function deleteWholeRecord() {
+  if (!deleteItem.value || deleting.value || deleteHasPublished.value) return;
+  try {
+    await ElMessageBox.confirm(
+      '确认永久删除该测评集及其草稿？此操作不可恢复，也不会以归档替代删除。',
+      '删除整个测评集',
+      { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' },
+    );
+    deleting.value = true;
+    await datasetApi.deleteRecord(deleteItem.value.id);
+    deleteItem.value = null;
+    datasets.value = await datasetApi.list();
+    ElMessage.success('测评集已删除');
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') showError(e, '删除失败');
   } finally {
@@ -96,7 +118,7 @@ async function deleteSelectedDraft() {
 }
 async function openById() {
   try {
-    const { value } = await ElMessageBox.prompt('输入评测集 ID，可打开已归档资产。', '按 ID 打开', {
+    const { value } = await ElMessageBox.prompt('输入测评集 ID，可打开已归档资产。', '按 ID 打开', {
       inputValidator: (v) => !!v?.trim() || '请输入 ID',
     });
     await openDataset(value.trim());
@@ -114,7 +136,7 @@ async function openDataset(id: string, editDraft = true) {
     showingDetail.value = true;
     void router.replace('/datasets/' + encodeURIComponent(id));
   } catch (error) {
-    showError(error, '无法打开评测集');
+    showError(error, '无法打开测评集');
   }
 }
 async function backToList() {
@@ -126,7 +148,7 @@ async function backToList() {
   try {
     datasets.value = await datasetApi.list();
   } catch (error) {
-    showError(error, '无法刷新评测集');
+    showError(error, '无法刷新测评集');
   }
 }
 const activeVersionId = ref('');
@@ -138,7 +160,7 @@ async function restoreDataset(item: DatasetSummary) {
   try {
     await datasetApi.update(item.id, { archived: false });
     datasets.value = await datasetApi.list();
-    ElMessage.success('评测集已恢复');
+    ElMessage.success('测评集已恢复');
   } catch (e) {
     showError(e, '恢复失败');
   }
@@ -176,7 +198,7 @@ async function showHistory() {
     history.value = matched.slice((historyPage.value - 1) * 20, historyPage.value * 20);
     historyTotal.value = matched.length;
   } catch (error) {
-    if (ticket === historyRequest) showError(error, '无法加载评测历史');
+    if (ticket === historyRequest) showError(error, '无法加载测评历史');
   }
 }
 watch(activeVersionId, () => {
@@ -476,7 +498,7 @@ function openCreate() {
 
 function openCopy(item: DatasetSummary) {
   if (!canDiscard()) return;
-  if (!copySources.value.length) return ElMessage.warning('发布首个版本后才可复制评测集');
+  if (!copySources.value.length) return ElMessage.warning('发布首个版本后才可复制测评集');
   copyVersion.value = activeVersion.value?.version ?? copySources.value[0]?.version ?? null;
   dialogMode.value = 'copy';
   dialogName.value = `${item.name}（副本）`;
@@ -493,7 +515,7 @@ function openMetadata(item: DatasetSummary) {
 }
 
 async function submitDatasetDialog() {
-  if (!dialogName.value.trim()) return ElMessage.warning('请输入评测集名称');
+  if (!dialogName.value.trim()) return ElMessage.warning('请输入测评集名称');
   busy.value = true;
   try {
     if (dialogMode.value === 'edit') {
@@ -519,7 +541,7 @@ async function submitDatasetDialog() {
     await loadDatasets(result.dataset.id);
     showingDetail.value = true;
     void router.replace('/datasets/' + encodeURIComponent(result.dataset.id));
-    ElMessage.success(dialogMode.value === 'create' ? '评测集已创建' : '评测集已复制');
+    ElMessage.success(dialogMode.value === 'create' ? '测评集已创建' : '测评集已复制');
   } catch (error) {
     showError(error, '操作失败');
   } finally {
@@ -532,7 +554,7 @@ async function archiveDataset(item: DatasetSummary) {
   try {
     await ElMessageBox.confirm(
       `归档“${item.name}”？历史版本和运行记录仍可读取。主仓不提供归档列表，请保留 ID：${item.id}，通过“按 ID 打开”恢复。`,
-      '归档评测集',
+      '归档测评集',
       { type: 'warning', confirmButtonText: '确定', cancelButtonText: '取消' },
     );
   } catch {
@@ -541,7 +563,7 @@ async function archiveDataset(item: DatasetSummary) {
   await datasetApi.archive(item.id);
   await loadDatasets('');
   showingDetail.value = false;
-  ElMessage.success('评测集已归档');
+  ElMessage.success('测评集已归档');
 }
 
 async function createDraft(base: number | null) {
@@ -571,7 +593,7 @@ async function discardDraft() {
 
 async function publishDraft() {
   if (dirty.value) {
-    ElMessage.warning('请先保存当前样本，再发布评测集');
+    ElMessage.warning('请先保存当前样本，再发布测评集');
     return;
   }
   busy.value = true;
@@ -592,7 +614,7 @@ async function publishDraft() {
       error.status === 422 &&
       error.detail === 'published DatasetVersion requires at least one Case'
     ) {
-      validationIssues.value = [{ path: 'cases', message: '评测集至少需要一个用例' }];
+      validationIssues.value = [{ path: 'cases', message: '测评集至少需要一个用例' }];
     }
     showError(error, '发布失败，请检查用例');
   } finally {
@@ -609,7 +631,7 @@ async function importDataset(event: Event) {
     const result = await datasetApi.importDataset(payload);
     await loadDatasets(result.dataset.id);
     showingDetail.value = true;
-    ElMessage.success('评测集已导入');
+    ElMessage.success('测评集已导入');
   } catch (error) {
     showError(error, '导入失败');
   } finally {
@@ -625,7 +647,7 @@ onMounted(async () => {
   try {
     await loadDatasets();
   } catch (error) {
-    showError(error, '无法加载评测集');
+    showError(error, '无法加载测评集');
   } finally {
     loading.value = false;
   }
@@ -637,13 +659,13 @@ onMounted(async () => {
     <div class="workspace-heading">
       <div>
         <button v-if="showingDetail" class="link" data-testid="back-datasets" @click="backToList">
-          ← 返回评测集列表
+          ← 返回测评集列表
         </button>
-        <h1 id="dataset-workspace-title">{{ showingDetail ? activeDataset?.name : '评测集' }}</h1>
+        <h1 id="dataset-workspace-title">{{ showingDetail ? activeDataset?.name : '测评集' }}</h1>
       </div>
       <div v-if="!showingDetail" class="actions" style="margin-left: auto">
         <button class="primary" data-testid="create-dataset" :disabled="busy" @click="openCreate">
-          ＋ 创建数据集
+          ＋ 创建测评集
         </button>
       </div>
       <div v-else-if="activeDataset" class="actions">
@@ -653,7 +675,7 @@ onMounted(async () => {
           class="secondary"
           @click="restoreDataset(activeDataset)"
         >
-          恢复评测集</button
+          恢复测评集</button
         ><button
           class="secondary"
           :disabled="busy || activeDataset.archived"
@@ -666,7 +688,7 @@ onMounted(async () => {
           :disabled="busy || !copySources.length"
           @click="openCopy(activeDataset)"
         >
-          复制评测集</button
+          复制测评集</button
         ><button class="secondary" @click="openExport(activeDataset.id, activeVersionId)">
           导出样本
         </button>
@@ -720,7 +742,7 @@ onMounted(async () => {
           数据样本
         </button>
         <button :class="['tab', { active: detailTab === 'history' }]" @click="showHistory">
-          关联评测历史
+          关联测评历史
         </button>
       </div>
       <el-dialog v-model="versionHistoryDialog" title="版本记录" width="min(850px,94vw)"
@@ -780,8 +802,8 @@ onMounted(async () => {
         <p v-if="!history.length" class="empty">
           {{
             activeVersion?.status === 'draft'
-              ? '草稿尚未发布，暂无关联评测任务'
-              : '当前版本暂无关联评测任务'
+              ? '草稿尚未发布，暂无关联测评任务'
+              : '当前版本暂无关联测评任务'
           }}
         </p>
         <p class="muted">
@@ -908,10 +930,10 @@ onMounted(async () => {
       v-model="datasetDialog"
       :title="
         dialogMode === 'create'
-          ? '新建评测集'
+          ? '新建测评集'
           : dialogMode === 'edit'
             ? '编辑基本信息'
-            : '复制评测集'
+            : '复制测评集'
       "
       width="min(460px, 92vw)"
     >
@@ -927,7 +949,7 @@ onMounted(async () => {
             <option v-for="v in copySources" :key="v.version!" :value="v.version">
               v{{ v.version }} · {{ v.cases.length }} 条用例
             </option></select
-          ><small>生成独立评测集草稿，不包含当前未发布修改。</small></el-form-item
+          ><small>生成独立测评集草稿，不包含当前未发布修改。</small></el-form-item
         >
       </el-form>
       <template #footer
@@ -946,7 +968,7 @@ onMounted(async () => {
   </section>
   <el-dialog
     :model-value="!!deleteItem"
-    title="删除评测集版本"
+    title="删除测评集版本"
     width="560px"
     @close="!deleting && (deleteItem = null)"
   >
@@ -961,7 +983,11 @@ onMounted(async () => {
       </select></label
     >
     <p class="muted">
-      当前后端只支持删除草稿。已发布版本删除和整个评测集删除尚无接口，暂不可提交；不会用归档替代删除。
+      {{
+        deleteHasPublished
+          ? '当前后端只支持删除草稿。已发布版本删除尚无接口，暂不可提交；不会用归档替代删除。'
+          : '该测评集没有已发布版本，可永久删除整个测评集记录（不可恢复）。'
+      }}
     </p>
     <template #footer
       ><button class="secondary" :disabled="deleting" @click="deleteItem = null">取消</button
@@ -973,6 +999,14 @@ onMounted(async () => {
         @click="deleteSelectedDraft"
       >
         删除草稿
+      </button>
+      <button
+        v-if="!deleteHasPublished"
+        class="primary"
+        :disabled="deleting"
+        @click="deleteWholeRecord"
+      >
+        删除整个测评集
       </button></template
     >
   </el-dialog>

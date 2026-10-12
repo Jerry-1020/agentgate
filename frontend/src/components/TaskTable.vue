@@ -4,8 +4,8 @@
       <thead>
         <tr>
           <th>任务</th>
-          <th>评测对象 / 版本</th>
-          <th>评测集 / 评估器</th>
+          <th>测评对象 / 版本</th>
+          <th>测评集 / 评估器</th>
           <th>状态</th>
           <th>通过率</th>
           <th>创建时间</th>
@@ -34,7 +34,7 @@
           <td><button class="link" @click="$emit('open', task)">查看</button></td>
         </tr>
         <tr v-if="!tasks.length">
-          <td colspan="7" class="empty">暂无符合条件的评测任务</td>
+          <td colspan="7" class="empty">暂无符合条件的测评任务</td>
         </tr>
       </tbody>
     </table>

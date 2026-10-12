@@ -12,7 +12,7 @@ async function submit() {
   error.value = '';
   issues.value = [];
   if (!file.value || (format.value === 'xlsx' && !name.value.trim())) {
-    error.value = '请选择文件并填写评测集名称。';
+    error.value = '请选择文件并填写测评集名称。';
     return;
   }
   busy.value = true;
@@ -60,7 +60,7 @@ async function submit() {
         <option value="json">JSON</option>
       </select></label
     ><label v-if="format === 'xlsx'"
-      >评测集名称<input class="input" aria-label="导入评测集名称" v-model="name" /></label
+      >测评集名称<input class="input" aria-label="导入测评集名称" v-model="name" /></label
     ><small v-if="format === 'xlsx'"
       >工作表 Cases，每行一轮。case_id、case_name、input_json 必填；输入及期望采用 JSON，category
       可填 positive / negative /

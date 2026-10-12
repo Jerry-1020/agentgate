@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .model import LiveModel
-from .runtime import Runtime, SKILLS, BASE_PROMPT, EXTRACT_PROMPT, ROUTER_PROMPT, SUMMARY_PROMPT
+from .runtime import Runtime, SKILLS, BASE_PROMPT, EXTRACT_PROMPT, ROUTER_PROMPT, SUMMARY_PROMPT, loan_workflow_topology
 from .store import Store, Conflict
 from .telemetry import PROJECT
 from .tools import TOOLS
@@ -87,7 +87,9 @@ def create_app(runtime=None):
                  "implementation_sha256": implementation_sha256, "tools": TOOLS,
                  "skills": SKILLS if mode == "cloudshrimp" else [], "test_only": True,
                  "prompt": BASE_PROMPT if mode == "base" else EXTRACT_PROMPT if mode == "workflow" else ROUTER_PROMPT,
-                 "summary_prompt": SUMMARY_PROMPT} for name, mode in AGENTS.items()]
+                 "summary_prompt": SUMMARY_PROMPT,
+                 **({"topology": loan_workflow_topology()} if mode == "workflow" else {})}
+                for name, mode in AGENTS.items()]
 
     @app.get("/test-cases")
     def cases():

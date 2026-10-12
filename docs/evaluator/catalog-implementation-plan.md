@@ -1,5 +1,33 @@
 # Evaluator Catalog Implementation Plan
 
+## 2026-10-08：LLM 设计页接通持久化
+
+用户批准“保存服务端草稿 → 发布不可变版本 → 按版本运行”，并授权完成后推送。
+本增量复用本计划已经实施的领域、SQLite、Catalog API 与 RunManifest 边界。
+
+基线评估：`origin/goal/p1-demo` 保留不可变执行快照的思想，但 Judge 运行能力尚未完成；
+`origin/integration/p1-new` 的评估器页面是只读占位。当前集成分支已完成草稿、发布与运行快照，
+因此直接复用当前实现，未复制旧契约。功能分支从已同步的 `refactor-1` 创建，并快进纳入
+`integration/baibo` 已有设计页作为本次依赖。
+
+文件职责与实现：
+
+- `frontend/.../JudgeSystem.vue`：服务端草稿保存、发布启用、版本读取、错误状态和关闭保护。
+- `frontend/.../evaluator-design.ts`：纯配置校验和 UI/后端字段转换，无内存草稿库。
+- `frontend/.../review.ts`：目录加载包含未发布草稿，已发布维度配置可提取为标注模板。
+- `evaluator/judge/dimension_contract.py`：严格逐维度响应协议。
+- `evaluator/judge/dimension_quality.py`：`answer_quality@2` 输入配置、请求生成、一次纠正、
+  十进制加权、复核传播及证据记录。单次模型请求返回全部维度；原 `@1` 保持原协议。
+- `application/evaluator_management.py`：显式注册两个执行版本。
+- `application/annotation_evidence.py`：按实现版本还原请求；实际留存优先。
+- 现有任务提交路由与 `EvaluationTaskForm.vue`：传递精确 `EvaluatorRef`，复用
+  `select_versions` 与不可变 RunManifest；行内/行外数据源与 Token 路由保持不变。
+
+没有新增领域模型、持久化表、动态实现注册或数据迁移。
+对应操作、评分语义、接口及验收范围见 [LLM 持久化操作指南](llm-persistence-guide.md)。
+
+---
+
 ## Goal
 
 Implement the POC Evaluator Catalog as a persistent product capability while preserving

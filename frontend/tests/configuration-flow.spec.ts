@@ -62,7 +62,7 @@ test('AB uses exact descriptor snapshots and shows changed prompts',async({page,
  const ids=['loan-agent-v1-risky','loan-agent-v2-fixed'].map(v=>runs.find((r:any)=>r.status==='completed'&&r.manifest.target.ref.external_version_id===v).id)
  await page.goto('/#experiments')
  for(let i=0;i<2;i++)await selectHistoryTask(page,i,ids[i])
- await page.getByText('查看方案与评测条件差异（只读）',{exact:true}).click()
+ await page.getByText('查看方案与测评条件差异（只读）',{exact:true}).click()
  const diff=page.getByTestId('configuration-diff')
  await expect(diff.getByTestId('execution-scope')).toContainText(/(全部用例|指定用例) · \d+ 条/)
  await expect(diff.getByTestId('execution-scope').locator('li').first()).toBeVisible()

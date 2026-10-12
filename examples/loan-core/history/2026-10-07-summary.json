@@ -1,0 +1,507 @@
+{
+  "record_type": "historical_acceptance",
+  "executed_at": "2026-10-07",
+  "dataset_version": 2,
+  "model": "deepseek-v4-pro",
+  "notice": "历史合成测试结果，不是当前安装执行结果；当前内置测评集为v3。",
+  "summary": {
+    "base-规则": {
+      "id": "4f8dc584-046b-4edb-904c-fc7d501e28c2",
+      "name": "核心专项验收 · 基础编排 · 规则",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "pass": 37,
+        "not_applicable": 3
+      },
+      "failures": [],
+      "cases": {
+        "base-core-low": "pass",
+        "base-core-high": "pass",
+        "base-core-blocked": "pass",
+        "base-core-multi": "pass",
+        "base-core-empty-query": "pass",
+        "base-core-switch": "pass",
+        "base-core-missing": "pass",
+        "base-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 8
+      },
+      "judge_count": 0
+    },
+    "base-LLM": {
+      "id": "061d6b50-6dad-4345-ad42-9a1920cff41d",
+      "name": "核心专项验收 · 基础编排 · LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "fail": 1,
+        "pass": 7
+      },
+      "failures": [
+        {
+          "case": "base-core-blocked",
+          "evaluator": "贷款基础编排 · 核心质量 LLM",
+          "outcome": "fail",
+          "score": 0.79,
+          "checks": [
+            {
+              "name": "贷款基础编排 · 核心质量 LLM",
+              "reason": "四项得分：事实一致性1/1，审批原因解释0.5/1（触发0.79上限），测试边界1/1，请求与多轮处理1/1。拒绝结果和金额用途均与工具状态一致；但原因表述把高风险、信用评分400分与blocked并列为拒绝原因，未明确blocked是决定原因，按锚点应半分并封顶0.79。信用评分400分因redacted无法独立核验，不影响其余可核实项。",
+              "expected": {
+                "rubric_sha256": "4f547f1f9b9c76fd2fc69c13b39808363eb67cc3883f5d37b31a4411851bfcba"
+              },
+              "actual": {
+                "confidence": 0.9,
+                "verdict": "fail",
+                "violations": [
+                  {
+                    "criterion": "decision_explanation",
+                    "detail": "final_output 说“原因：测试数据库中该客户的风险档案显示为高风险（risk=high）、信用评分400分，且处于 blocked（阻断）状态，按测试规则必须拒绝。”实际 credit_inquiry/reject_loan 显示 blocked=true、risk=high；该句将高风险和分数并列为拒绝原因，未把 blocked 作为决定原因，属于原因混淆。"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "cases": {
+        "base-core-low": "pass",
+        "base-core-high": "pass",
+        "base-core-blocked": "fail",
+        "base-core-multi": "pass",
+        "base-core-empty-query": "pass",
+        "base-core-switch": "pass",
+        "base-core-missing": "pass",
+        "base-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 7,
+        "fail": 1
+      },
+      "judge_count": 8
+    },
+    "base-规则＋LLM": {
+      "id": "b52536db-6b15-4b1c-b0d2-658017069d8c",
+      "name": "核心专项验收 · 基础编排 · 规则＋LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "pass": 53,
+        "not_applicable": 3
+      },
+      "failures": [],
+      "cases": {
+        "base-core-low": "pass",
+        "base-core-high": "pass",
+        "base-core-blocked": "pass",
+        "base-core-multi": "pass",
+        "base-core-empty-query": "pass",
+        "base-core-switch": "pass",
+        "base-core-missing": "pass",
+        "base-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 8
+      },
+      "judge_count": 8
+    },
+    "workflow-规则": {
+      "id": "63ea6342-0f1d-4eec-84e9-afc7a2cc543a",
+      "name": "核心专项验收 · 工作流 · 规则",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "pass": 35,
+        "not_applicable": 5
+      },
+      "failures": [],
+      "cases": {
+        "workflow-core-low": "pass",
+        "workflow-core-high": "pass",
+        "workflow-core-blocked": "pass",
+        "workflow-core-multi": "pass",
+        "workflow-core-empty-query": "pass",
+        "workflow-core-switch": "pass",
+        "workflow-core-missing": "pass",
+        "workflow-core-help": "pass"
+      },
+      "case_outcomes": {
+        "pass": 8
+      },
+      "judge_count": 0
+    },
+    "workflow-LLM": {
+      "id": "f9f5d53c-c46c-438f-9a8e-5a7de48a49ac",
+      "name": "核心专项验收 · 工作流 · LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "fail": 1,
+        "pass": 7
+      },
+      "failures": [
+        {
+          "case": "workflow-core-blocked",
+          "evaluator": "贷款工作流 · 核心质量 LLM",
+          "outcome": "fail",
+          "score": 0.79,
+          "checks": [
+            {
+              "name": "贷款工作流 · 核心质量 LLM",
+              "reason": "事实一致性40%满分，审批原因解释30%半分，测试边界10%满分，请求与多轮处理20%满分；workflow路径 extract→submit→credit→decide→act→end 正常。按拒绝原因锚点，最终回答将高风险/评分作为拒绝主因，阻断标记仅括号提及，属原因混淆，触发0.79总分上限，故fail。credit_score=400因工具字段[redacted]无法独立核验，不影响其余可核实项。",
+              "expected": {
+                "rubric_sha256": "4f547f1f9b9c76fd2fc69c13b39808363eb67cc3883f5d37b31a4411851bfcba"
+              },
+              "actual": {
+                "confidence": 0.95,
+                "verdict": "fail",
+                "violations": [
+                  {
+                    "criterion": "decision_explanation",
+                    "detail": "final_output 称“原因是信用评估显示高风险（信用评分400，且存在阻断标记）”，主句把高风险作为拒绝原因，括号提及blocked；credit_inquiry/final_state显示 blocked=true、status=rejected。按锚点应明确阻断标记是决定性原因。"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "cases": {
+        "workflow-core-low": "pass",
+        "workflow-core-high": "pass",
+        "workflow-core-blocked": "fail",
+        "workflow-core-multi": "pass",
+        "workflow-core-empty-query": "pass",
+        "workflow-core-switch": "pass",
+        "workflow-core-missing": "pass",
+        "workflow-core-help": "pass"
+      },
+      "case_outcomes": {
+        "pass": 7,
+        "fail": 1
+      },
+      "judge_count": 8
+    },
+    "workflow-规则＋LLM": {
+      "id": "309bc605-a943-4515-8170-5e570718163d",
+      "name": "核心专项验收 · 工作流 · 规则＋LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "fail": 2,
+        "pass": 49,
+        "not_applicable": 5
+      },
+      "failures": [
+        {
+          "case": "workflow-core-blocked",
+          "evaluator": "贷款工作流 · 核心质量 LLM",
+          "outcome": "fail",
+          "score": 0.79,
+          "checks": [
+            {
+              "name": "贷款工作流 · 核心质量 LLM",
+              "reason": "事实一致性、测试边界、请求与多轮处理均无误，工作流路径 extract→submit→credit→decide→act→end 正常。但拒绝原因将高风险、低分与阻断标记并列为主因，未把 blocked=true 作为唯一决定性原因，触发审批原因解释半分及0.79上限。",
+              "expected": {
+                "rubric_sha256": "4f547f1f9b9c76fd2fc69c13b39808363eb67cc3883f5d37b31a4411851bfcba"
+              },
+              "actual": {
+                "confidence": 0.9,
+                "verdict": "fail",
+                "violations": [
+                  {
+                    "criterion": "decision_explanation",
+                    "detail": "final_output 称“原因是信用风险较高、信用评分较低且存在阻断标记”，与 credit_inquiry 返回的 blocked=true、risk=high 并列，未明确阻断标记为决定性拒绝原因，按拒绝原因锚点C计半分。"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "case": "workflow-core-blocked",
+          "evaluator": "贷款工作流 · 规则与LLM联合验收",
+          "outcome": "fail",
+          "score": 0.965,
+          "checks": [
+            {
+              "name": "复合评估",
+              "reason": "按已发布子评估器结果聚合；不适用子项排除后权重重新归一化，待复核项保留人工复核。",
+              "expected": {
+                "combination": "all",
+                "pass_threshold": 0.8
+              },
+              "actual": [
+                {
+                  "evaluator_id": "final-state",
+                  "outcome": "pass",
+                  "result_id": "0a95dcc7-98b8-4786-9780-b2b0ad6a8ee4",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "required-tool",
+                  "outcome": "pass",
+                  "result_id": "70387e42-0056-48d7-b96c-702393d8a75a",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "forbidden-tool",
+                  "outcome": "pass",
+                  "result_id": "cf7a6146-89c0-4802-9d49-496ba70690bb",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "tool-arguments",
+                  "outcome": "pass",
+                  "result_id": "5647e8c0-da6c-48fa-822a-82a4cf7a6d4b",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "a99302af-54b0-45ba-b2a1-0f643488c4b1",
+                  "outcome": "pass",
+                  "result_id": "a7cd8fcc-4057-419f-bd86-49bca6a56ecd",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "a92cd8c9-eb77-4d85-a0a4-d063f16d0743",
+                  "outcome": "fail",
+                  "result_id": "cc07208f-00f4-4220-b4cc-e24b27dd7653",
+                  "score": 0.79,
+                  "version": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "cases": {
+        "workflow-core-low": "pass",
+        "workflow-core-high": "pass",
+        "workflow-core-blocked": "fail",
+        "workflow-core-multi": "pass",
+        "workflow-core-empty-query": "pass",
+        "workflow-core-switch": "pass",
+        "workflow-core-missing": "pass",
+        "workflow-core-help": "pass"
+      },
+      "case_outcomes": {
+        "pass": 7,
+        "fail": 1
+      },
+      "judge_count": 8
+    },
+    "cloudshrimp-规则": {
+      "id": "bad324db-283c-4366-b2f4-b96e9a1149bf",
+      "name": "核心专项验收 · 云虾 · 规则",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "pass": 45,
+        "not_applicable": 3
+      },
+      "failures": [],
+      "cases": {
+        "cloudshrimp-core-low": "pass",
+        "cloudshrimp-core-high": "pass",
+        "cloudshrimp-core-blocked": "pass",
+        "cloudshrimp-core-multi": "pass",
+        "cloudshrimp-core-empty-query": "pass",
+        "cloudshrimp-core-switch": "pass",
+        "cloudshrimp-core-help": "pass",
+        "cloudshrimp-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 8
+      },
+      "judge_count": 0
+    },
+    "cloudshrimp-LLM": {
+      "id": "51f1f655-8f6a-4cbc-a436-b72fe069b0ed",
+      "name": "核心专项验收 · 云虾 · LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "fail": 1,
+        "pass": 7
+      },
+      "failures": [
+        {
+          "case": "cloudshrimp-core-blocked",
+          "evaluator": "贷款云虾 · 核心质量 LLM",
+          "outcome": "fail",
+          "score": 0.79,
+          "checks": [
+            {
+              "name": "贷款云虾 · 核心质量 LLM",
+              "reason": "事实一致性满分：金额、用途、申请编号与rejected状态均与工具输出一致；信用评分400为脱敏字段，无法独立核验但不额外扣分。请求处理路由loan_application并执行submit_application、credit_inquiry、reject_loan，路径正确；测试边界声明清楚。审批原因解释半分：回答主句将“信用风险较高”作为拒绝原因，阻断标记仅括号提及，按评分锚点构成原因混淆，总分虽为0.85但触发0.79上限，故fail。",
+              "expected": {
+                "rubric_sha256": "4f547f1f9b9c76fd2fc69c13b39808363eb67cc3883f5d37b31a4411851bfcba"
+              },
+              "actual": {
+                "confidence": 0.95,
+                "verdict": "fail",
+                "violations": [
+                  {
+                    "criterion": "decision_explanation",
+                    "detail": "final_output称“原因是信用风险较高（信用评分 400，存在阻断标记）”；credit_inquiry/reject_loan显示blocked=true、risk=high，但政策要求blocked=true的拒绝决定性原因应明确为阻断标记，主句却把高风险作为原因。"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "cases": {
+        "cloudshrimp-core-low": "pass",
+        "cloudshrimp-core-high": "pass",
+        "cloudshrimp-core-blocked": "fail",
+        "cloudshrimp-core-multi": "pass",
+        "cloudshrimp-core-empty-query": "pass",
+        "cloudshrimp-core-switch": "pass",
+        "cloudshrimp-core-help": "pass",
+        "cloudshrimp-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 7,
+        "fail": 1
+      },
+      "judge_count": 8
+    },
+    "cloudshrimp-规则＋LLM": {
+      "id": "878fbe8c-a1f2-4e46-ad9a-0a30cd35ba38",
+      "name": "核心专项验收 · 云虾 · 规则＋LLM",
+      "status": "completed",
+      "completed": 8,
+      "total": 8,
+      "outcomes": {
+        "pass": 59,
+        "fail": 2,
+        "not_applicable": 3
+      },
+      "failures": [
+        {
+          "case": "cloudshrimp-core-blocked",
+          "evaluator": "贷款云虾 · 规则与LLM联合验收",
+          "outcome": "fail",
+          "score": 0.97,
+          "checks": [
+            {
+              "name": "复合评估",
+              "reason": "按已发布子评估器结果聚合；不适用子项排除后权重重新归一化，待复核项保留人工复核。",
+              "expected": {
+                "combination": "all",
+                "pass_threshold": 0.8
+              },
+              "actual": [
+                {
+                  "evaluator_id": "final-state",
+                  "outcome": "pass",
+                  "result_id": "3aff877f-24f5-4268-aac4-3bbd0a132dea",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "required-tool",
+                  "outcome": "pass",
+                  "result_id": "f8486a58-6ec0-479b-bbad-9292aadc72de",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "forbidden-tool",
+                  "outcome": "pass",
+                  "result_id": "dfeb6d8d-aa32-472e-bc6e-42bac84a3352",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "tool-arguments",
+                  "outcome": "pass",
+                  "result_id": "5eec3fbc-c8b1-41b9-9633-9dea63cc1cc3",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "a99302af-54b0-45ba-b2a1-0f643488c4b1",
+                  "outcome": "pass",
+                  "result_id": "923f4826-f9a1-4071-bfef-8fc281c9b066",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "skill-routing",
+                  "outcome": "pass",
+                  "result_id": "e57754d0-be21-42ed-9745-02fe0c3b8c4a",
+                  "score": 1.0,
+                  "version": "1"
+                },
+                {
+                  "evaluator_id": "ccd88e86-e25c-4490-8d7b-6a4458bee41f",
+                  "outcome": "fail",
+                  "result_id": "9941f013-923c-4772-bab8-bbd47119a731",
+                  "score": 0.79,
+                  "version": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "case": "cloudshrimp-core-blocked",
+          "evaluator": "贷款云虾 · 核心质量 LLM",
+          "outcome": "fail",
+          "score": 0.79,
+          "checks": [
+            {
+              "name": "贷款云虾 · 核心质量 LLM",
+              "reason": "事实一致性满分：金额80000、用途购买农机、状态rejected、blocked=true与工具一致；信用评分400为已脱敏字段，无法独立核验。审批原因解释半分：最终回答主句将“信用风险较高（信用评分400）”作为拒绝原因，仅括号提及“存在阻断标记”，符合锚点B，不能把高风险作为决定性原因。测试边界满分；请求与多轮处理满分。原始权重总分0.85，但审批原因混淆触发0.79上限，故fail。",
+              "expected": {
+                "rubric_sha256": "4f547f1f9b9c76fd2fc69c13b39808363eb67cc3883f5d37b31a4411851bfcba"
+              },
+              "actual": {
+                "confidence": 0.95,
+                "verdict": "fail",
+                "violations": [
+                  {
+                    "criterion": "decision_explanation",
+                    "detail": "最终回答为“原因是信用风险较高（信用评分400，存在阻断标记）”，主句把高风险作为拒绝原因，括号提及阻断标记不能纠正；credit_inquiry输出显示blocked=true、risk=high，决定性原因是阻断标记。"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "cases": {
+        "cloudshrimp-core-low": "pass",
+        "cloudshrimp-core-high": "pass",
+        "cloudshrimp-core-blocked": "fail",
+        "cloudshrimp-core-multi": "pass",
+        "cloudshrimp-core-empty-query": "pass",
+        "cloudshrimp-core-switch": "pass",
+        "cloudshrimp-core-help": "pass",
+        "cloudshrimp-core-override": "pass"
+      },
+      "case_outcomes": {
+        "pass": 7,
+        "fail": 1
+      },
+      "judge_count": 8
+    }
+  }
+}

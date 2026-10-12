@@ -20,6 +20,11 @@ LOGGER = logging.getLogger(__name__)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="Release due Runs once and exit.")
+    parser.add_argument(
+        "--name",
+        default="",
+        help="informational instance label used to tell stacks apart in process lists",
+    )
     options = parser.parse_args()
     interval = int(os.getenv("AGENTGATE_SCHEDULER_INTERVAL_SECONDS", "10"))
     if interval < 1:
@@ -34,7 +39,9 @@ def main() -> int:
 
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
-    LOGGER.info("BJS scheduler started (interval=%ds)", interval)
+    LOGGER.info(
+        "BJS scheduler started (interval=%ds%s)", interval, f", name={options.name}" if options.name else ""
+    )
     while not stopped.is_set():
         with closing(create_repository(config)) as repository:
             scheduling = RunScheduling(repository)

@@ -95,7 +95,7 @@ async function submit() {
     version.value === null ||
     !selected.value.length
   ) {
-    error.value = '请选择不同的智能体版本、同一评测集版本及评估器。';
+    error.value = '请选择不同的智能体版本、同一测评集版本及评估器。';
     return;
   }
   busy.value = true;
@@ -121,7 +121,7 @@ async function submit() {
         published.value.find((v) => v.version === version.value)?.cases ?? [],
       ).length
     )
-      throw Error('没有匹配的样本期望，请先补充评测集。');
+      throw Error('没有匹配的样本期望，请先补充测评集。');
     const r = await request<{ baseline: { run_id: string }; candidate: { run_id: string } }>(
       '/run-comparisons',
       'POST',
@@ -144,7 +144,7 @@ async function submit() {
 <template>
   <section class="card new-comparison">
     <h2 class="section-title">创建实验并运行</h2>
-    <p class="muted">两侧共用评测集和评估器的固定版本，仅比较智能体版本变化。</p>
+    <p class="muted">两侧共用测评集和评估器的固定版本，仅比较智能体版本变化。</p>
     <p v-if="error" class="notice error" role="alert">{{ error }}</p>
     <div class="form-grid">
       <label class="field"
@@ -172,13 +172,13 @@ async function submit() {
         </select></label
       >
       <label class="field"
-        >共同评测集<select
+        >共同测评集<select
           class="input"
           v-model="datasetId"
-          aria-label="共同评测集"
+          aria-label="共同测评集"
           :disabled="busy || catalogLoading"
         >
-          <option value="" disabled>请选择评测集名称</option>
+          <option value="" disabled>请选择测评集名称</option>
           <option v-for="d in datasets" :key="d.id" :value="d.id" :disabled="d.version === null">
             {{ d.name }}{{ d.version === null ? '（草稿，发布后可用）' : '' }}
           </option>

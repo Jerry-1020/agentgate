@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import Analysis from './UpstreamAnalysis.vue';
 import { request, type TargetDescriptor } from '../../../api/evaluations';
-import { readTaskLinks, saveTaskLink } from '../utils/task-links';
+import { readTaskLinks, refreshTaskLinks, saveTaskLink } from '../utils/task-links';
 const props = defineProps<{ runIds: string[] }>();
 const selected = ref(''),
   version = ref(''),
@@ -46,9 +46,10 @@ async function load() {
   error.value = '';
   loading.value = true;
   try {
-    const target = await request<TargetDescriptor>(
-      '/runs/' + encodeURIComponent(active.value) + '/target-descriptor',
-    );
+    const [target] = await Promise.all([
+      request<TargetDescriptor>('/runs/' + encodeURIComponent(active.value) + '/target-descriptor'),
+      refreshTaskLinks(),
+    ]);
     if (current === ticket) {
       descriptor.value = target;
       version.value = target.ref.external_version_id;

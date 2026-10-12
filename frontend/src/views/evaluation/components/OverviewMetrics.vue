@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from 'vue';
 import { api, score } from '../../../api/evaluations';
-const days = ref(7),
+const props = defineProps<{ days?: number }>();
+const emit = defineEmits<{ 'update:days': [value: number] }>();
+const days = ref(props.days ?? 7),
   data = ref<any>(null),
   error = ref(''),
   loading = ref(false);
+watch(
+  () => props.days,
+  (v) => {
+    days.value = v ?? 7;
+  },
+);
 let sequence = 0;
 async function load() {
   const ticket = ++sequence;
@@ -62,25 +70,10 @@ onUnmounted(() => sequence++);
 </script>
 <template>
   <section aria-label="总览统计">
-    <div class="toolbar">
-      <div class="tabs">
-        <button
-          v-for="d in [1, 7, 30]"
-          :key="d"
-          :class="['tab', { active: days === d }]"
-          :aria-pressed="days === d"
-          @click="days = d"
-        >
-          {{ d === 1 ? '今日' : '近' + d + '天' }}
-        </button>
-      </div>
-      <button class="link" :disabled="loading" @click="load">刷新统计</button>
-    </div>
-    <p class="muted">时间统计基于最近最多 200 条任务；未覆盖更早记录。</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="overview-metrics">
       <article class="card">
-        <div class="metric-label">评测任务总数</div>
+        <div class="metric-label">测评任务总数</div>
         <div class="metric-value">{{ data?.total_runs ?? '—' }}</div>
         <small>所选区间内创建的任务</small>
       </article>
@@ -90,19 +83,14 @@ onUnmounted(() => sequence++);
         <small>{{ data?.scored_runs ?? '—' }} 个已完成且有有效评分的任务</small>
       </article>
       <article class="card">
-        <div class="metric-label">评测完成样本数</div>
+        <div class="metric-label">测评完成样本数</div>
         <div class="metric-value">{{ data?.completed_samples ?? '—' }}</div>
         <small>已完成任务的执行用例数，重跑单独计数</small>
       </article>
       <article class="card">
-        <div class="metric-label">数据集样本</div>
+        <div class="metric-label">测评集样本</div>
         <div class="metric-value">{{ data?.dataset_samples ?? '—' }}</div>
         <small>当前 {{ data?.dataset_count ?? '—' }} 个未归档集的最新发布样本，不随时间筛选</small>
-      </article>
-      <article class="card">
-        <div class="metric-label">Token 消耗</div>
-        <div class="metric-value">—</div>
-        <small>当前未提供完整用量统计</small>
       </article>
     </div>
   </section>
@@ -110,7 +98,7 @@ onUnmounted(() => sequence++);
 <style scoped>
 .overview-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }

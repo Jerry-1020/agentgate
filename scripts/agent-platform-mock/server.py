@@ -1,6 +1,8 @@
 """Loopback-only peer. Directory shapes follow the supplied document; no authentication."""
 
 import json
+import os
+import importlib.util
 from pathlib import Path
 from uuid import uuid4
 
@@ -64,6 +66,20 @@ def create_app():
         events.append({"operation": "create", "agentName": name, **instances[name]})
         return wrapped({"code": "0", "data": {"agentName": name}})
 
+    def trace_frame(record, session, text, output, claw, *, failed=False):
+        if not os.environ.get("TRACE_REPORT_URL"):
+            return ""
+        spec = importlib.util.spec_from_file_location("mock_telemetry", Path(__file__).with_name("telemetry.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            receipt = module.report_simulated(record["agentId"], record["type"], session, text, output, failed=failed)
+        except (ValueError, RuntimeError):
+            raise HTTPException(503, "simulated trace upload failed; local evidence retained") from None
+        reference = {"project_id": receipt["project_id"], "trace_id": receipt["trace_id"], "simulated": True}
+        return ("data: " + json.dumps({"event": "trace", "data": reference}) + "\n\n" if claw
+                else "event: trace\ndata: " + json.dumps(reference) + "\n\n")
+
     @app.get("/health")
     @app.get("/mock/capabilities")
     def health():
@@ -96,6 +112,15 @@ def create_app():
         if agent(agentId)["agentType"] == "abcclaw":
             raise HTTPException(422, "use branch versions")
         return wrapped(fixtures["versions"])
+
+    @app.get("/web/agent/capabilities")
+    def capabilities(agentId: str, agentVersion: str | None = None, branchId: str | None = None):
+        # 本地扩展接口：目录文档未定义能力声明；未登记能力的智能体返回 404 供调用方优雅降级。
+        agent(agentId)
+        declared = fixtures.get("agentCapabilities", {}).get(agentId)
+        if declared is None:
+            raise HTTPException(404, "no declared capabilities")
+        return wrapped(declared)
 
     @app.get("/web/abcclaw/v2/branchTree")
     def branch_tree(agentId: str):
@@ -165,7 +190,8 @@ def create_app():
         events.append({"operation": "chat", "agentName": name, "session": session, "input": text})
         if text == "模拟失败":
             return Response(
-                'event: failed\ndata: {"message":"simulated failure"}\n\n',
+                trace_frame(record, session, text, 'simulated failure', claw, failed=True) +
+                ('data: {"event":"failed","data":{"message":"simulated failure"}}\n\n' if claw else 'event: failed\ndata: {"message":"simulated failure"}\n\n'),
                 media_type="text/event-stream",
             )
         output = f"模拟回复[{record['agentId']}|{record['branchId'] or '-'}|{record['agentVersion']}]：{text}"
@@ -188,6 +214,7 @@ def create_app():
                 + json.dumps(message, ensure_ascii=False)
                 + "\n\nevent: done\ndata: [DONE]\n\n"
             )
+        wire = trace_frame(record, session, text, output, claw) + wire
         return Response(wire, media_type="text/event-stream")
 
     return app
@@ -198,4 +225,7 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8119, access_log=False)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8119)
+    uvicorn.run(app, host="127.0.0.1", port=parser.parse_args().port, access_log=False)

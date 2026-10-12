@@ -114,7 +114,7 @@ export const initialTasks: EvalTask[] = [
   },
   {
     id: 'ET-20260905-016',
-    name: '业务咨询智能体 · 冒烟评测',
+    name: '业务咨询智能体 · 冒烟测评',
     target: targets[1],
     dataset: datasets[2],
     evaluator: evaluators[1],

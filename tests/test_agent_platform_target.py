@@ -96,13 +96,14 @@ def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch,
     with TestClient(app) as client:
         response = client.post(
             "/api/agent-platform/evaluations",
-            json=submission(dataset, mode, repetitions),
+            json={**submission(dataset, mode, repetitions), "name": "平台命名验收"},
             headers={"X-Agent-Platform-Token": "test-private-token"},
         )
         assert response.status_code == 202, response.text
         task = response.json()["data"]
         assert dispatcher.ids == task["run_ids"]
         assert task["id"] == task["run_ids"][0]
+        assert deps.repository.get_evaluation_task(task["id"]).name == "平台命名验收"
         for run_id in dispatcher.ids:
             before = deps.repository.get_run(run_id)
             assert before.api_key is None and before.manifest.target.credential_ref
@@ -332,3 +333,25 @@ def test_initial_state_rejected_without_leaving_credentials_or_tasks(
         assert response.status_code == 422
         assert not deps.repository.list_evaluation_tasks()
         assert not deps.api_keys.list_api_keys()
+
+
+def test_platform_comparison_persists_user_task_name(mock_peer, monkeypatch, tmp_path):
+    origin, _ = mock_peer
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    app = create_app(tmp_path / "named-ab.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    dataset = seed(deps)
+    body = submission(dataset, "base")
+    body["target"].pop("agent_version")
+    body["target"].update(baseline_version="1.0", candidate_version="2.0")
+    for key in ("max_parallel_cases", "max_retries", "repetitions"):
+        body.pop(key)
+    body["name"] = "自定义 A/B 任务"
+    with TestClient(app) as client:
+        response = client.post("/api/agent-platform/comparisons", json=body,
+                               headers={"X-Agent-Platform-Token": "test-private-token"})
+        assert response.status_code == 202, response.text
+        task_id = response.json()["data"]["baseline"]["run_id"]
+        assert deps.repository.get_evaluation_task(task_id).name == body["name"]
+        assert client.get("/api/evaluation-tasks/" + task_id).json()["data"]["name"] == body["name"]

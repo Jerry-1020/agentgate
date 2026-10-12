@@ -41,9 +41,9 @@ onUnmounted(() => {
 <template>
   <div class="page-head">
     <div>
-      <button class="link" @click="emit('navigate', 'tasks')">← 返回评测任务</button>
+      <button class="link" @click="emit('navigate', 'tasks')">← 返回测评任务</button>
       <h1 class="page-title">稳定性测试</h1>
-      <p class="page-sub">固定智能体、评测集与评估器快照，重复执行独立任务</p>
+      <p class="page-sub">固定智能体、测评集与评估器快照，重复执行独立任务</p>
     </div>
   </div>
   <p v-if="error" class="notice error">{{ error }}</p>
@@ -123,6 +123,6 @@ onUnmounted(() => {
         </tr>
       </tbody>
     </table>
-    <p v-if="!items.length" class="empty">暂无记录。新建评测任务时设置重复次数即可创建。</p>
+    <p v-if="!items.length" class="empty">暂无记录。新建测评任务时设置重复次数即可创建。</p>
   </div>
 </template>

@@ -1,10 +1,415 @@
 {
-  "teams": [{"teamId":"team-local","teamName":"本地验收团队"},{"teamId":"team-empty","teamName":"空团队（边界测试）"}],
-  "agents": [
-    {"id":"agent-base","name":"基础编排 · 本地模拟","teamId":"team-local","agentType":"base","arrangeType":"base"},
-    {"id":"agent-workflow","name":"工作流 · 本地模拟","teamId":"team-local","agentType":"workflow","arrangeType":"workflow"},
-    {"id":"agent-claw","name":"云虾 · 本地模拟","teamId":"team-local","agentType":"abcclaw","arrangeType":"abcclaw2"}
+  "teams": [
+    {
+      "teamId": "team-local",
+      "teamName": "本地验收团队"
+    },
+    {
+      "teamId": "team-empty",
+      "teamName": "空团队（边界测试）"
+    }
   ],
-  "versions": [{"agentVersion":"1.0","status":"published"},{"agentVersion":"2.0","status":"test"}],
-  "branches": [{"branchId":"branch-main","branchName":"主分支","children":[{"branchId":"branch-review","branchName":"审核分支","children":[]}]}]
+  "agents": [
+    {
+      "id": "agent-base",
+      "name": "基础编排 · 本地模拟",
+      "teamId": "team-local",
+      "agentType": "base",
+      "arrangeType": "base",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "submit_application",
+            "description": "提交贷款申请，写入测试数据库",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "credit_inquiry",
+            "description": "查询客户征信风险档案",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "approve_loan",
+            "description": "批准贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "request_human_review",
+            "description": "转人工复核",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "reject_loan",
+            "description": "拒绝贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_application",
+            "description": "查询申请进度",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      ],
+      "skills": []
+    },
+    {
+      "id": "agent-workflow",
+      "name": "工作流 · 本地模拟",
+      "teamId": "team-local",
+      "agentType": "workflow",
+      "arrangeType": "workflow",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "submit_application",
+            "description": "提交贷款申请，写入测试数据库",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "credit_inquiry",
+            "description": "查询客户征信风险档案",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "approve_loan",
+            "description": "批准贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "request_human_review",
+            "description": "转人工复核",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "reject_loan",
+            "description": "拒绝贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_application",
+            "description": "查询申请进度",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      ],
+      "skills": [],
+      "workflow_nodes": [
+        {
+          "id": "extract",
+          "label": "信息提取",
+          "description": "从对话中提取金额与用途"
+        },
+        {
+          "id": "submit",
+          "label": "提交申请",
+          "description": "调用 submit_application"
+        },
+        {
+          "id": "credit",
+          "label": "征信查询",
+          "description": "调用 credit_inquiry"
+        },
+        {
+          "id": "decide",
+          "label": "决策",
+          "description": "根据征信结果决定审批动作"
+        },
+        {
+          "id": "act",
+          "label": "执行",
+          "description": "执行审批工具调用"
+        },
+        {
+          "id": "end",
+          "label": "总结",
+          "description": "生成最终回答"
+        }
+      ]
+    },
+    {
+      "id": "agent-claw",
+      "name": "云虾 · 本地模拟",
+      "teamId": "team-local",
+      "agentType": "abcclaw",
+      "arrangeType": "abcclaw2",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "submit_application",
+            "description": "提交贷款申请，写入测试数据库",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "credit_inquiry",
+            "description": "查询客户征信风险档案",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "approve_loan",
+            "description": "批准贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "request_human_review",
+            "description": "转人工复核",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "reject_loan",
+            "description": "拒绝贷款申请",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "get_application",
+            "description": "查询申请进度",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      ],
+      "skills": [
+        {
+          "id": "loan_application",
+          "version": "v1",
+          "name": "贷款申请",
+          "description": "收集金额用途，查询风险，执行测试审批或转人工",
+          "tools": [
+            "submit_application",
+            "credit_inquiry",
+            "approve_loan",
+            "request_human_review",
+            "reject_loan"
+          ]
+        },
+        {
+          "id": "application_status",
+          "version": "v1",
+          "name": "申请进度",
+          "description": "读取本会话已提交申请，不创建新申请",
+          "tools": [
+            "get_application"
+          ]
+        },
+        {
+          "id": "general_help",
+          "version": "v1",
+          "name": "贷款咨询",
+          "description": "说明测试能力和所需资料，不执行审批",
+          "tools": []
+        }
+      ]
+    }
+  ],
+  "versions": [
+    {
+      "agentVersion": "1.0",
+      "status": "published"
+    },
+    {
+      "agentVersion": "2.0",
+      "status": "test"
+    }
+  ],
+  "branches": [
+    {
+      "branchId": "branch-main",
+      "branchName": "主分支",
+      "children": [
+        {
+          "branchId": "branch-review",
+          "branchName": "审核分支",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "agentCapabilities": {
+    "agent-base": {
+      "tools": [
+        {
+          "name": "submit_application",
+          "description": "提交贷款测试申请，金额用途来自用户输入"
+        },
+        {
+          "name": "credit_inquiry",
+          "description": "查询合成征信：风险等级、信用分与拦截标记"
+        },
+        {
+          "name": "approve_loan",
+          "description": "对已提交测试申请执行通过审批"
+        },
+        {
+          "name": "request_human_review",
+          "description": "将高风险测试申请转人工复核"
+        },
+        {
+          "name": "reject_loan",
+          "description": "拒绝被拦截或不达标的测试申请"
+        },
+        {
+          "name": "get_application",
+          "description": "查询本会话测试申请的当前状态"
+        }
+      ],
+      "skills": []
+    },
+    "agent-claw": {
+      "tools": [
+        {
+          "name": "submit_application",
+          "description": "提交贷款测试申请，金额用途来自用户输入"
+        },
+        {
+          "name": "credit_inquiry",
+          "description": "查询合成征信：风险等级、信用分与拦截标记"
+        },
+        {
+          "name": "approve_loan",
+          "description": "对已提交测试申请执行通过审批"
+        },
+        {
+          "name": "request_human_review",
+          "description": "将高风险测试申请转人工复核"
+        },
+        {
+          "name": "reject_loan",
+          "description": "拒绝被拦截或不达标的测试申请"
+        },
+        {
+          "name": "get_application",
+          "description": "查询本会话测试申请的当前状态"
+        }
+      ],
+      "skills": [
+        {
+          "external_skill_id": "loan_application",
+          "name": "贷款申请",
+          "description": "收集金额用途，查询风险，执行测试审批或转人工",
+          "tools": [
+            "submit_application",
+            "credit_inquiry",
+            "approve_loan",
+            "request_human_review",
+            "reject_loan",
+            "get_application"
+          ]
+        },
+        {
+          "external_skill_id": "application_status",
+          "name": "申请进度",
+          "description": "读取本会话已提交申请，不创建新申请",
+          "tools": [
+            "get_application"
+          ]
+        },
+        {
+          "external_skill_id": "general_help",
+          "name": "贷款咨询",
+          "description": "说明测试能力和所需资料，不执行审批",
+          "tools": []
+        }
+      ]
+    }
+  }
 }

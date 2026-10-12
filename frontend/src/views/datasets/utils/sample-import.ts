@@ -36,6 +36,24 @@ function json(value: unknown, fallback: unknown) {
 }
 function validateExpectation(e: any) {
   const nonempty = (v: unknown) => typeof v === 'string' && !!v.trim();
+  if (e.kind === 'execution_path') {
+    if (
+      !['workflow', 'tool', 'skill'].includes(e.scope) ||
+      !Array.isArray(e.expected) ||
+      e.expected.some((v: unknown) => !nonempty(v))
+    )
+      throw Error('执行路径期望格式错误');
+    if (e.scope !== 'tool' && !e.expected.length) throw Error('执行路径不能为空');
+    if (e.scope === 'skill') {
+      if (
+        e.expected.length !== 1 ||
+        !Array.isArray(e.allowed_tools) ||
+        e.allowed_tools.some((v: unknown) => !nonempty(v))
+      )
+        throw Error('Skill 检查需要单个技能和允许工具列表');
+    } else if (e.allowed_tools != null) throw Error('只有 Skill 检查支持允许工具列表');
+    return;
+  }
   if (e.kind === 'tool_call') {
     if (!nonempty(e.tool) || !['required', 'forbidden'].includes(e.mode))
       throw Error('工具期望缺少 tool 或 mode');
@@ -202,7 +220,15 @@ export function normalizeCases(value: unknown): EvaluationCase[] {
     c.turns = c.turns.map((t: any) => {
       if (!object(t) || !object(t.input) || !Array.isArray(t.expectations))
         throw Error('轮次需要 input 对象及 expectations 数组');
-      const allowed = ['output', 'state', 'tool_argument', 'tool_call', 'skill_route', 'policy'];
+      const allowed = [
+        'output',
+        'state',
+        'tool_argument',
+        'tool_call',
+        'skill_route',
+        'policy',
+        'execution_path',
+      ];
       if (t.expectations.some((e: any) => !object(e) || !allowed.includes(String(e.kind))))
         throw Error('存在未知期望类型');
       t.expectations.forEach(validateExpectation);

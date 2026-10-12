@@ -71,3 +71,10 @@ npm --prefix frontend run build
 ```
 
 Python 测试使用临时数据库和本地随机端口，不需要上面的常驻服务。浏览器专项测试自带隔离页面和 HTTP 测试数据；人工页面验收使用上面的完整服务。
+
+## 本地扩展：智能体能力声明（图谱数据源）
+
+`GET /web/agent/capabilities?agentId=&agentVersion=[&branchId=]` 返回该智能体声明的
+工具与 Skill 列表（`fixtures.json` 的 `agentCapabilities`）。该接口是本地扩展，平台
+目录文档未定义；未登记能力的智能体（如 agent-workflow）返回 404，调用方据此优雅
+降级为"目录未提供图谱信息"。前端据此派生 Agent → Skill → Tool 图谱。

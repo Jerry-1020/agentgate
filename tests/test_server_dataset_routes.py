@@ -194,3 +194,42 @@ def test_dataset_routes_require_configured_dependencies() -> None:
         response = client.get("/api/datasets")
 
     assert response.status_code == 500
+
+
+def test_dataset_record_deletion_requires_no_published_version(tmp_path) -> None:
+    with _client(tmp_path) as client:
+        created = client.post(
+            "/api/datasets", json={"name": "Draft Only", "description": ""}
+        )
+        assert created.status_code == 201
+        dataset_id = created.json()["dataset"]["id"]
+
+        deleted = client.delete(f"/api/datasets/{dataset_id}/record")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] == dataset_id
+        assert all(d["id"] != dataset_id for d in client.get("/api/datasets").json())
+        assert client.get(f"/api/datasets/{dataset_id}").status_code == 404
+
+        published = client.post(
+            "/api/datasets", json={"name": "Published Set", "description": ""}
+        )
+        assert published.status_code == 201
+        other = published.json()["dataset"]["id"]
+        assert (
+            client.post(
+                f"/api/datasets/{other}/drafts/cases",
+                json=Case(
+                    id="c", name="c", turns=(CaseTurn(id="t", input={"txt": "hi"}),)
+                ).model_dump(mode="json"),
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(f"/api/datasets/{other}/drafts/publish").status_code == 200
+        )
+        rejected = client.delete(f"/api/datasets/{other}/record")
+        assert rejected.status_code == 422
+        assert "published versions" in rejected.json()["detail"]
+
+        unknown = client.delete("/api/datasets/missing/record")
+        assert unknown.status_code == 422

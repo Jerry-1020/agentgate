@@ -15,7 +15,7 @@ const templateLabels1: Record<string, string> = { rule: '规则', llm_judge: 'LL
           <td>{{ config.target.display_name }} · {{ config.target.ref.external_version_id }}</td>
         </tr>
         <tr>
-          <th>评测集 / 版本</th>
+          <th>测评集 / 版本</th>
           <td>
             <a
               class="link"

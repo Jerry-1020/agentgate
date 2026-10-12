@@ -75,7 +75,7 @@ async function download() {
 <template>
   <el-dialog
     :model-value="true"
-    title="导出评测集样本"
+    title="导出测评集样本"
     width="min(760px,94vw)"
     :close-on-click-modal="false"
     :before-close="() => !busy && emit('close')"

@@ -151,7 +151,7 @@ defineExpose({ save });
         <el-form-item label="分类"
           ><template #label
             ><span
-              title="正例：应正常完成；负例：应正确拒绝或处理异常；边界：临界条件。分类不会直接决定评测通过与否。"
+              title="正例：应正常完成；负例：应正确拒绝或处理异常；边界：临界条件。分类不会直接决定测评通过与否。"
               >分类 ⓘ</span
             ></template
           >

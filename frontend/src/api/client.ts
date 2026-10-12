@@ -45,6 +45,11 @@ export interface EvaluationResult {
   evaluator_name: string;
   evaluator_version?: string;
   evaluator_kind: string;
+  judge_record?: {
+    raw_response: string;
+    request_system_prompt?: string | null;
+    request_user_prompt?: string | null;
+  } | null;
   dimension: string;
   metric: string;
   severity: 'standard' | 'blocking';
@@ -97,6 +102,7 @@ export interface Trace {
   case_id: string;
   spans: {
     span_id: string;
+    parent_span_id?: string | null;
     name: string;
     operation_type: string;
     sequence: number;

@@ -1,24 +1,13 @@
 import type { EvaluationResult } from '../../../api/client';
-export type ScoreColumn = { key: string; name: string; evaluatorId: string; criterion?: string };
+export type ScoreColumn = { key: string; name: string; evaluatorId: string };
 export function scoreColumns(manifest: any): ScoreColumn[] {
   return (manifest.evaluator_specs ?? [])
     .filter((s: any) => manifest.primary_evaluator_ids.includes(s.id))
-    .flatMap((s: any) => {
-      const criteria = s.kind === 'llm_judge' ? Object.keys(s.config?.rubric ?? {}) : [];
-      return criteria.length
-        ? criteria.map((key) => ({
-            key: s.id + ':' + key,
-            name: key,
-            evaluatorId: s.id,
-            criterion: key,
-          }))
-        : [{ key: s.id, name: s.name, evaluatorId: s.id }];
-    });
+    .map((s: any) => ({ key: s.id, name: s.name, evaluatorId: s.id }));
 }
 export function columnScore(results: EvaluationResult[], column: ScoreColumn): number | null {
   const r = results.find((x) => x.evaluator_id === column.evaluatorId);
-  // The current Judge contract returns one verdict, not a score per rubric criterion.
-  return !r || column.criterion ? null : r.score;
+  return r?.score ?? null;
 }
 export function sampleSummary(results: EvaluationResult[], primary: string[]) {
   const rows = results.filter((r) => primary.includes(r.evaluator_id)),

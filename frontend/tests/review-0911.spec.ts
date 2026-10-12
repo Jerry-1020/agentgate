@@ -23,7 +23,7 @@ test('review 0911 cards and explicit expected output persist to published backen
  const output=draft.cases[0].turns[0].expectations.find((e:any)=>e.kind==='output')
  expect(output.condition).toEqual({kind:'equals',expected:{status:'pending_review'}})
  await page.getByTestId('back-datasets').click()
- await page.getByLabel('搜索评测集',{exact:true}).fill(name)
+ await page.getByLabel('搜索测评集',{exact:true}).fill(name)
  await expect(page.locator('.catalog-grid .dataset-tile')).toHaveCount(1)
  await page.getByTestId('dataset-item-'+id).getByRole('button',{name:'继续编辑草稿'}).click()
  await expect(page.getByTestId('turn-output-0')).toHaveValue(/pending_review/)
@@ -32,9 +32,9 @@ test('review 0911 cards and explicit expected output persist to published backen
  await expect(page.getByTestId('run-dataset-version')).toBeEnabled()
  await expect(page.locator('.dataset-run-bar')).toHaveCount(0)
  await page.goto('/#tasks')
- await page.getByRole('button',{name:'新建评测任务',exact:true}).click()
- await page.getByLabel('任务评测集',{exact:true}).selectOption(id)
- await expect(page.getByLabel('任务评测集版本',{exact:true})).toHaveValue('1')
+ await page.getByRole('button',{name:'新建测评任务',exact:true}).click()
+ await page.getByLabel('任务测评集',{exact:true}).selectOption(id)
+ await expect(page.getByLabel('任务测评集版本',{exact:true})).toHaveValue('1')
  await page.getByRole('button',{name:/使用推荐的 1 个/}).click()
  await expect(page.getByText('评估器 · 已选 1 个',{exact:true})).toBeVisible()
  }finally{if(id)await request.delete('/api/datasets/'+id)}
@@ -49,7 +49,7 @@ test('known no-evidence run explains missing criteria and links exact dataset ve
  await expect(page.getByRole('columnheader',{name:'本次引用版本'})).toBeVisible()
  await page.goto('/#optimizer/'+id)
  await expect(page.getByText('没有适用的评估检查',{exact:true})).toBeVisible()
- await expect(page.getByRole('link',{name:'查看评测集版本 →'})).toHaveAttribute('href',/version=1/)
+ await expect(page.getByRole('link',{name:'查看测评集版本 →'})).toHaveAttribute('href',/version=1/)
 })
 
 test('overview has five honest metrics with interval switching',async({page})=>{
@@ -70,12 +70,12 @@ test('task creation refuses rules with no applicable expectations without submit
  data:{id:'no-criteria',name:'无评判条件',turns:[{id:'turn',input:{query:'hello'},expectations:[]}],initial_state:{},category:'positive',difficulty:'easy',tags:[],notes:''}})).json()).data
  expect((await request.post('/api/datasets/'+id+'/drafts/publish',{headers:{'If-Match':added.content_sha256}})).ok()).toBeTruthy()
  await page.goto('/#tasks')
- await page.getByRole('button',{name:'新建评测任务',exact:true}).click()
- await page.getByLabel('任务评测集',{exact:true}).selectOption(id)
- await expect(page.getByLabel('任务评测集版本',{exact:true})).toHaveValue('1')
+ await page.getByRole('button',{name:'新建测评任务',exact:true}).click()
+ await page.getByLabel('任务测评集',{exact:true}).selectOption(id)
+ await expect(page.getByLabel('任务测评集版本',{exact:true})).toHaveValue('1')
  let submissions=0
  page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/api/evaluations'))submissions++})
- await page.getByRole('button',{name:'提交评测',exact:true}).click()
+ await page.getByRole('button',{name:'提交测评',exact:true}).click()
  await expect(page.getByRole('dialog').getByRole('alert')).toContainText('没有适用检查')
  expect(submissions).toBe(0)
  }finally{await request.delete('/api/datasets/'+id)}
@@ -84,7 +84,7 @@ test('task creation refuses rules with no applicable expectations without submit
 test('new AB invokes upstream pair launch endpoint with frozen common versions',async({page})=>{
  await page.goto('/#experiments')
  await page.getByRole('button',{name:'创建实验并运行',exact:true}).click()
- await page.getByLabel('共同评测集',{exact:true}).selectOption('loan-risk-policy')
+ await page.getByLabel('共同测评集',{exact:true}).selectOption('loan-risk-policy')
  await expect(page.getByLabel('发布版本',{exact:true})).not.toHaveValue('')
  await expect(page.locator('.check-list input:checked').first()).toBeChecked()
  const response=page.waitForResponse(r=>r.url().endsWith('/api/run-comparisons')&&r.request().method()==='POST')

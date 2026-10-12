@@ -338,7 +338,7 @@ async function create() {
     form.value = false;
     kind.value = createKind.value;
     await open({ ...created.evaluator, kind: createKind.value });
-    ElMessage.success('草稿已保存，发布后可用于评测');
+    ElMessage.success('草稿已保存，发布后可用于测评');
   });
 }
 async function save() {
@@ -571,15 +571,15 @@ onMounted(async () => {
               :disabled="busy || !selected.evaluator.enabled || !selected.latest || dirty"
               @click="emit('launch', selected.evaluator.id)"
             >
-              发起评测
+              发起测评
             </button>
           </div>
           <p class="evaluator-status-note">
             {{
               selected.evaluator.source === 'builtin'
-                ? '内置评估器启停保存在当前浏览器，影响本页面新建任务、A/B 实验及重跑；历史报告和其他客户端不受影响。清除浏览器数据会重置。'
+                ? '内置评估器启停保存在当前浏览器，影响本页面新建任务、A/B试验及重跑；历史报告和其他客户端不受影响。清除浏览器数据会重置。'
                 : !selected.latest
-                  ? '尚无发布版本：保存并发布草稿后，启用即可发起评测。'
+                  ? '尚无发布版本：保存并发布草稿后，启用即可发起测评。'
                   : !selected.evaluator.enabled
                     ? '当前未启用；启用后可用于新任务，历史结果不受影响。'
                     : '新任务使用已发布版本；草稿修改不会影响历史结果。'
@@ -652,7 +652,7 @@ onMounted(async () => {
           </section>
           <section>
             <h3>结果呈现位置</h3>
-            <p>评测任务 → 查看详情 → 评测结果 → 样本评估明细</p>
+            <p>测评任务 → 查看详情 → 测评结果 → 样本评估明细</p>
           </section>
         </div>
         <div v-else class="detail-content">

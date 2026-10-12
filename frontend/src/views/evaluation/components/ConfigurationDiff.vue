@@ -87,7 +87,7 @@ const skills = computed(() =>
 );
 const conditions = computed(() =>
   [
-    ['评测集内容', a.value.dataset, b.value.dataset],
+    ['测评集内容', a.value.dataset, b.value.dataset],
     ['评估器及版本定义', a.value.evaluator_specs, b.value.evaluator_specs],
     ['主评估器', a.value.primary_evaluator_ids, b.value.primary_evaluator_ids],
     ['指标口径', a.value.metric_plan, b.value.metric_plan],
@@ -151,7 +151,7 @@ const conditions = computed(() =>
       </article>
       <p class="muted">以上来自任务绑定的定义快照；未记录的源码修改不作推断。</p>
     </template>
-    <h3>评测条件</h3>
+    <h3>测评条件</h3>
     <ExecutionScope :baseline="a" :candidate="b" />
     <div v-for="c in conditions" :key="String(c.name)">
       <details>

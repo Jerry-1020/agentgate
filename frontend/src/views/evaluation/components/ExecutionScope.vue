@@ -72,7 +72,7 @@ const comparison = computed(() => {
       两侧执行用例不同，不能直接将结果差异归因于方案修改。
     </p>
     <small v-else-if="comparison === '一致'"
-      >仅表示用例 ID 集合一致，评测集版本和内容是否一致仍需核对。</small
+      >仅表示用例 ID 集合一致，测评集版本和内容是否一致仍需核对。</small
     >
   </details>
 </template>

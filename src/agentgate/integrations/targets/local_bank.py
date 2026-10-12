@@ -53,25 +53,100 @@ class LocalBankClient:
             raise TargetExecutionError("rejected", "bank transport failed; inspect request evidence before retrying") from None
 
 
+def declared_topology(display_name, skills, tools):
+    """Derive the structure graph from Skill/Tool declarations; None when undeclared."""
+    skill_rows, tool_rows = list(skills), list(tools)
+    if not skill_rows and not tool_rows:
+        return None
+    nodes = [{"id": "agent", "kind": "agent", "label": display_name, "description": display_name}]
+    edges = []
+    tool_nodes = {}
+    tool_descriptions = {t["name"]: t.get("description") or "" for t in tool_rows}
+
+    def tool_node(name):
+        if name not in tool_nodes:
+            tool_nodes[name] = {"id": "tool:" + name, "kind": "tool", "label": name,
+                                "description": tool_descriptions.get(name, "")}
+            nodes.append(tool_nodes[name])
+        return tool_nodes[name]["id"]
+
+    for skill in skill_rows:
+        skill_id = "skill:" + skill["external_skill_id"]
+        nodes.append({"id": skill_id, "kind": "skill", "label": skill["name"],
+                      "description": skill.get("description") or ""})
+        edges.append({"source": "agent", "target": skill_id, "relation": "declares"})
+        for bound in skill.get("tools", ()):
+            edges.append({"source": skill_id, "target": tool_node(bound["name"]),
+                          "relation": "binds"})
+    declared = {edge["target"] for edge in edges}
+    for tool in tool_rows:
+        node_id = tool_node(tool["name"])
+        if node_id not in declared:
+            edges.append({"source": "agent", "target": node_id, "relation": "uses"})
+    return {
+        "composition": "Agent → Skill → Tool" if skill_rows else "Agent → Tool",
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def validated_workflow_topology(value):
+    """Validate the runtime's graph before pinning it in a descriptor."""
+    def text(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    if not isinstance(value, dict) or not text(value.get("composition")):
+        raise ValueError("workflow topology requires a composition label")
+    nodes, edges = value.get("nodes"), value.get("edges")
+    if not isinstance(nodes, list) or not nodes or not isinstance(edges, list) or not edges:
+        raise ValueError("workflow topology requires nodes and edges")
+    ids = set()
+    for node in nodes:
+        if not isinstance(node, dict) or not all(text(node.get(k)) for k in ("id", "label", "description")):
+            raise ValueError("invalid workflow topology node fields")
+        if node["id"] in ids:
+            raise ValueError("duplicate workflow topology node ID")
+        ids.add(node["id"])
+        if node.get("kind") != "workflow" or node.get("node_type") not in ("terminal", "llm", "rule", "tool"):
+            raise ValueError("invalid workflow topology node type")
+        if node.get("trace_name") is not None and not text(node["trace_name"]):
+            raise ValueError("invalid workflow topology trace name")
+    for edge in edges:
+        if not isinstance(edge, dict) or not all(text(edge.get(k)) for k in ("source", "target", "relation")):
+            raise ValueError("invalid workflow topology edge fields")
+        if edge["source"] not in ids or edge["target"] not in ids:
+            raise ValueError("workflow topology edge references an unknown node")
+    return value
+
+
 def local_bank_target(client, mode):
     if mode not in {"base", "workflow", "cloudshrimp"}:
         raise ValueError("unknown bank mode")
     record = next((r for r in client.call("/agents") if r["mode"] == mode), None)
     if not record or record["agent_version"] != "v1" or record.get("test_only") is not True:
         raise ValueError("unsupported local bank runtime descriptor")
+    skills = tuple({"external_skill_id": s["id"], "external_version_id": s["version"],
+                    "name": s["name"], "description": s["description"],
+                    "tools": tuple({"name": t} for t in s["tools"])} for s in record["skills"])
+    tools = tuple({"name": t["function"]["name"], "description": t["function"]["description"],
+                   "input_schema": t["function"]["parameters"]} for t in record["tools"])
+    display_name = {"base": "贷款智能体 · 基础编排", "workflow": "贷款智能体 · 工作流",
+                    "cloudshrimp": "贷款智能体 · 云虾"}[mode]
+    topology = (validated_workflow_topology(record.get("topology")) if mode == "workflow"
+                else declared_topology(display_name, skills, tools))
+    metadata = {"mode": mode, "model": record["model"], "policy_version": record["policy_version"],
+                "implementation_sha256": record["implementation_sha256"],
+                "summary_prompt": record["summary_prompt"], "test_only": True}
+    if topology is not None:
+        metadata["topology"] = topology
     descriptor = TargetDescriptor(
         ref=TargetRef(source_id="local-bank-runtime", target_type="agent", external_target_id="loan-" + mode, external_version_id="v1"),
-        display_name={"base": "贷款智能体 · 基础编排", "workflow": "贷款智能体 · 工作流", "cloudshrimp": "贷款智能体 · 云虾"}[mode],
+        display_name=display_name,
         prompt=record["prompt"],
-        tools=tuple({"name": t["function"]["name"], "description": t["function"]["description"],
-                     "input_schema": t["function"]["parameters"]} for t in record["tools"]),
-        skills=tuple({"external_skill_id": s["id"], "external_version_id": s["version"],
-                      "name": s["name"], "description": s["description"],
-                      "tools": tuple({"name": t} for t in s["tools"])} for s in record["skills"]),
+        tools=tools,
+        skills=skills,
         input_schema={"type": "object", "required": ["txt"], "properties": {"txt": {"type": "string"}}},
-        metadata={"mode": mode, "model": record["model"], "policy_version": record["policy_version"],
-                  "implementation_sha256": record["implementation_sha256"],
-                  "summary_prompt": record["summary_prompt"], "test_only": True},
+        metadata=metadata,
     )
     snapshot = TargetSnapshot(ref=descriptor.ref, display_name=descriptor.display_name,
         adapter_type="local_bank", adapter_version="1", descriptor_sha256=descriptor.content_sha256,
@@ -170,6 +245,13 @@ class LocalBankAdapter:
                     raise TargetExecutionError("protocol_error", "unknown recorded Skill decision")
                 operation = "routing"
                 attrs["selected_skill"] = selected
+            sdk_name = attrs.get("trace_sdk.name", "")
+            if isinstance(sdk_name, str) and sdk_name.startswith("workflow."):
+                operation = "workflow"
+                attrs["workflow.id"] = sdk_name.removeprefix("workflow.")
+            elif isinstance(sdk_name, str) and sdk_name.startswith("skill.") and sdk_name != "skill.route":
+                operation = "skill"
+                attrs["skill.id"] = sdk_name.removeprefix("skill.")
             spans.append(span.model_copy(update={"operation_type": operation, "attributes": FrozenJsonObject(attrs)}))
         outcomes = {t.id: {"input": inputs[t.id], "output": {"output": outputs[t.id]["output"]}, "state": outputs[t.id]["final_state"]} for t in request.case.turns}
         final = outcomes[request.case.turns[-1].id]

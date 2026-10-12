@@ -199,7 +199,7 @@ body {
 .check-list span {
   margin-left: auto;
 }
-.el-dialog {
+.el-dialog:not(.is-fullscreen) {
   margin: 6vh auto !important;
   max-height: 88vh;
   display: flex;
@@ -221,6 +221,38 @@ body {
 }
 .el-message-box {
   max-width: 94vw;
+  width: auto !important;
+  min-width: 0;
+  padding: 16px 20px;
+}
+.el-message-box__title {
+  font-size: 14px;
+}
+.el-message-box__message {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.el-message-box__btns .el-button {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.el-overlay .el-dialog:not(.is-fullscreen) {
+  /* Explicit dialog width is supplied by Element Plus as an inline CSS variable. */
+  --el-dialog-width: 400px;
+  width: var(--el-dialog-width);
+  max-width: 96vw;
+  max-height: 80vh;
+}
+.el-overlay .el-dialog:not(.is-fullscreen) .el-dialog__body {
+  padding: 14px 18px;
+  max-height: 55vh;
+  overflow: auto;
+}
+.el-overlay .el-dialog .el-dialog__header {
+  padding: 12px 18px;
+}
+.el-overlay .el-dialog .el-dialog__footer {
+  padding: 10px 18px;
 }
 .revision-app .dataset-workspace {
   background: #fff;

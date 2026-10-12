@@ -102,11 +102,13 @@ def test_exact_submission_and_safe_response(claw, count):
             **{k: v for k, v in body.items() if k != "target"},
             "case_ids": ("case-2", "case-1"),
             "evaluator_ids": ("judge",),
+            "evaluator_refs": None,
             "scheduled_for": None,
             "token": SECRET,
             "user_team_id": "gate-team",
             "user_id": "user",
             "user_name": "User",
+            "name": None,
         }
     ]
     assert SECRET not in response.text
@@ -391,3 +393,113 @@ def test_valid_domain_task_with_wrong_requested_repeat_count_is_uncertain():
         response = client.post(PATH, json=body, headers=HEADERS)
     assert response.status_code == 500
     assert "uncertain" in response.text
+
+
+def test_platform_comparison_submission_creates_ab_pair():
+    calls = []
+
+    def comparison(**kwargs):
+        calls.append(kwargs)
+        from types import SimpleNamespace
+
+        return (
+            SimpleNamespace(id="run-a", status="pending"),
+            SimpleNamespace(id="run-b", status="pending"),
+        )
+
+    app = FastAPI()
+    app.state.submit_agent_platform_comparison = comparison
+    app.include_router(router)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-platform/comparisons",
+            headers=HEADERS,
+            json={
+                "target": {
+                    "team_id": "external-team",
+                    "agent_id": "agent/raw",
+                    "type_group": "base/workflow",
+                    "baseline_version": "v1",
+                    "candidate_version": "v2",
+                    "arrange_type": "workflow",
+                },
+                "dataset_id": "dataset",
+                "dataset_version": 2,
+                "evaluator_ids": ["judge"],
+                "case_ids": ["case-1"],
+                "timeout_seconds": 300,
+            },
+        )
+    assert response.status_code == 202, response.text
+    assert response.json() == {
+        "baseline": {"run_id": "run-a", "status": "pending"},
+        "candidate": {"run_id": "run-b", "status": "pending"},
+    }
+    assert calls == [
+        {
+            "team_id": "external-team",
+            "agent_id": "agent/raw",
+            "type_group": "base/workflow",
+            "baseline_version": "v1",
+            "candidate_version": "v2",
+            "arrange_type": "workflow",
+            "branch_id": None,
+            "dataset_id": "dataset",
+            "dataset_version": 2,
+            "case_ids": ("case-1",),
+            "evaluator_ids": ("judge",),
+            "evaluator_refs": None,
+            "timeout_seconds": 300,
+            "token": SECRET,
+            "user_team_id": "",
+            "user_id": "anonymous",
+            "user_name": "匿名用户",
+            "name": None,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "target_override, expected",
+    [
+        ({"baseline_version": "v1", "candidate_version": "v1"}, 422),
+        ({"candidate_version": None}, 422),
+        ({"arrange_type": None}, 422),
+        ({"branch_id": "branch/raw"}, 422),
+    ],
+)
+def test_platform_comparison_rejects_invalid_targets(target_override, expected):
+    app = FastAPI()
+    app.state.submit_agent_platform_comparison = lambda **kwargs: pytest.fail(
+        "submitter must not be reached"
+    )
+    app.include_router(router)
+    body = {
+        "target": {
+            "team_id": "external-team",
+            "agent_id": "agent/raw",
+            "type_group": "base/workflow",
+            "baseline_version": "v1",
+            "candidate_version": "v2",
+            "arrange_type": "workflow",
+        },
+        "dataset_id": "dataset",
+        "dataset_version": 2,
+        "evaluator_ids": ["judge"],
+        "timeout_seconds": 300,
+    }
+    body["target"].update(target_override)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-platform/comparisons", headers=HEADERS, json=body
+        )
+    assert response.status_code == expected
+
+
+@pytest.mark.parametrize("name", ["", "   ", "a" * 129])
+def test_invalid_task_names_rejected_before_submission(name):
+    calls = []
+    with client_for(lambda **kw: calls.append(kw)) as client:
+        response = client.post(PATH, json={**payload(), "name": name}, headers=HEADERS)
+    assert response.status_code == 422
+    assert calls == []

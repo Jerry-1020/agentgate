@@ -63,7 +63,7 @@ const emit = defineEmits<{
         @click="emit('navigate', 'datasets')"
       >
         <span class="nav-icon">集</span>
-        <span><b>评测集管理</b><small>数据集、版本与用例</small></span>
+        <span><b>测评集管理</b><small>测评集、版本与用例</small></span>
       </button>
     </nav>
 

@@ -349,6 +349,44 @@ class MySQLRepository:
                 s.dataset_versions.delete().where(s.dataset_versions.c.id_key == _digest(draft.id))
             )
 
+    def delete_dataset_record(self, dataset_id: str, *, user_team_id: str) -> None:
+        with self._transaction() as db:
+            dataset = _one(
+                db, s.datasets, Dataset, id=dataset_id, user_team_id=user_team_id, lock=True
+            )
+            if dataset is None:
+                raise ValueError("expected Dataset does not exist")
+            db.execute(
+                s.dataset_versions.delete().where(
+                    s.dataset_versions.c.dataset_key == _digest(dataset_id),
+                    s.dataset_versions.c.user_team_key == _digest(user_team_id),
+                )
+            )
+            db.execute(s.datasets.delete().where(s.datasets.c.id_key == _digest(dataset_id)))
+
+    def delete_task_record(self, task_id: str, *, user_team_id: str) -> None:
+        with self._transaction() as db:
+            task = _one(
+                db, s.evaluation_tasks, EvaluationTask, id=task_id, lock=True
+            )
+            if task is None:
+                raise ValueError("task does not exist")
+            for run_id in task.run_ids:
+                db.execute(
+                    s.results.delete().where(s.results.c.run_key == _digest(run_id))
+                )
+                db.execute(
+                    s.traces.delete().where(s.traces.c.run_key == _digest(run_id))
+                )
+                db.execute(
+                    s.runs.delete().where(s.runs.c.id_key == _digest(run_id))
+                )
+            db.execute(
+                s.evaluation_tasks.delete().where(
+                    s.evaluation_tasks.c.id_key == _digest(task_id)
+                )
+            )
+
     def replace_dataset_draft(self, expected_draft_id: str, published: DatasetVersion) -> None:
         with self._transaction() as db:
             _one(db, s.datasets, Dataset, id=published.dataset_id, lock=True)
@@ -1013,7 +1051,7 @@ class MySQLRepository:
             reports[report.target_descriptor_sha256] = report_id
         if previous:
             task = EvaluationTask.model_validate(
-                {**previous.model_dump(), "static_report_ids": tuple(reports.values())}
+                {**previous.model_dump(), "name": task.name if task.name is not None else previous.name, "static_report_ids": tuple(reports.values())}
             )
             _update(db, s.evaluation_tasks, task)
         else:

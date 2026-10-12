@@ -42,11 +42,11 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
       <el-input
         v-model="query"
         clearable
-        placeholder="搜索评测集名称或 ID"
-        aria-label="搜索评测集"
+        placeholder="搜索测评集名称或 ID"
+        aria-label="搜索测评集"
       />
-      <select v-model="status" class="input" aria-label="评测集状态">
-        <option value="all">全部评测集</option>
+      <select v-model="status" class="input" aria-label="测评集状态">
+        <option value="all">全部测评集</option>
         <option value="unpublished">未发布</option>
         <option value="changes">有待发布修改</option>
       </select>
@@ -101,7 +101,7 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
         </div>
       </article>
     </div>
-    <el-empty v-if="!loading && !filtered.length" description="暂无符合条件的评测集" />
+    <el-empty v-if="!loading && !filtered.length" description="暂无符合条件的测评集" />
     <div class="catalog-pagination">
       <span>共 {{ filtered.length }} 个</span
       ><button class="link" :disabled="page <= 1" @click="page--">上一页</button

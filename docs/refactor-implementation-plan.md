@@ -353,3 +353,29 @@ Capability | Needed behavior | Test quality | Architectural fit | Port/reimpleme
 Potential candidates include JSON Schema evaluation, Excel handling, HTTP Target
 execution, Trace correlation, single-Case rerun, regression workflows, and selected Web
 components. This later review does not change the refactor baseline.
+
+## 2026-10-06 历史智能体目录接入
+
+沿用当前恢复分支的 TargetDescriptor、local_bank / demo_loan 执行适配器，以及平台目录；不改历史快照。行外 localAgentDirectory 组合平台目录与本地目录，行内 agentDirectory 保持原网关及 token。选择器传递明确的本地执行类型与真实描述符，贷款云虾不虚构平台分支。任务提交按适配器分流；标注和测评集关联按真实 source/id/version 匹配历史。复用既有三种贷款 LiveModel 服务和内置双版本 Demo，不新增模拟实现。验收覆盖目录、提交、标注匹配、真实执行和 Trace。
+
+本地目录接入补充验收：三种贷款模式已切换 DeepSeek v4 Pro（非思考模式），6 条真实模型样本/9 轮调用完成，Trace 及评分验证通过。使用原有 LiveModel/HTTP/SDK 边界，仅增加显式 thinking 配置和协议字段保留。详情见 project-progress.md 的 2026-10-06 DeepSeek 验收记录。
+
+
+## 2026-10-06 贷款云虾 LLM 评估器配置
+
+直接复用当前 answer_quality / full_trajectory / Evaluator Catalog 发布契约，以配置完成贷款回答可信度与审批解释评估，不新增模块、协议或模型路由层。当前发布评估器 113ee56f-3136-4d7d-9b43-ab47dfaeea06 v3；评分标准包含脱敏证据边界和正反归因锚点，7类真实模型校准均符合预期。默认模型连接在本地预览启动配置中切换为DeepSeek v4 Pro；行内/行外目录和token分流不变。逐版本校准和完整测评验收详情见 project-progress.md。
+
+
+## 2026-10-06 Skill 静态分析恢复接入
+
+复用现有 TaskStaticAnalysis / UpstreamAnalysis 与 skill_analysis 接口，在当前任务结果页开放入口；新建行外本地目标任务使用真实描述符预先分析并保存关联。任务报告按运行描述符锁定，登录模式目录分流不变；行内尚未执行的目录目标不使用本地 Demo 代替。保留描述分析与动态评估的边界，未扩大到代码审查或 Prompt-Tool 一致性。真实模型与回归结果见 project-progress.md。
+
+
+## 2026-10-07 贷款工作流图谱
+
+完成已确认的 runtime.py → app.py → local_bank.py → TargetStructure.vue 链路：共用执行图导出、接口传递、校验固定快照、按有向层级展示。基础编排和Skill结构复用既有声明；历史快照不回填，行内/行外路由不改变。用户在页面文件阶段授权直接完成后续实施与验收。详情见project-progress.md。
+
+
+## 2026-10-07 三类贷款核心专项验收
+
+用户授权直接实施至可验收。当前分支复用多轮领域、规则/LLM/composite执行与版本发布；新增单一职责 execution_path evaluator，适配器只规范化实际SDK类型，UI保存与导出保留新断言。未修改目录/Token模式路由、未新增调度或注册框架、未改变默认内置评估器集合。goal/p1-demo、integration/p1-new本地不可解析，因此未声称复用其具体代码。共3集v2、24样本、9任务真实完成，工作流7节点10连线、云虾3 Skills覆盖。回归1380后端/82前端通过，最终结果67/72通过，5条真实原因解释失败保留，详见project-progress.md。

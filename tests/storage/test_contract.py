@@ -10,7 +10,7 @@ from test_run_engine import pending_run
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.application.target_catalog import TargetCatalog
 from agentgate.demo.bootstrap import ensure_demo_target_descriptors
-from agentgate.domain import Dataset, DatasetVersion, RunStatus, utcnow
+from agentgate.domain import Case, CaseTurn, Dataset, DatasetVersion, RunStatus, utcnow
 from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.storage.mysql import MySQLRepository
 from agentgate.storage.repository import AgentGateRepository
@@ -188,7 +188,7 @@ def test_api_key_roundtrip_and_delete(repository):
 
 def test_dataset_publication_atomicity(repository):
     service = DatasetManagement(repository)
-    from agentgate.domain import Case, CaseTurn
+
 
     item = service.create_dataset("publish")
     service.create_draft(item.id)
@@ -232,3 +232,25 @@ def test_optimization_report_cache(repository):
     assert repository.save_optimization_report(key, item) == item
     assert repository.get_optimization_report(key) == item
     assert repository.get_optimization_report("missing") is None
+
+
+def test_delete_dataset_record_removes_draft_only_dataset(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("整删验证")
+    service.create_draft(dataset.id)
+    service.delete_record(dataset.id)
+    assert repository.get_dataset(dataset.id, user_team_id="") is None
+    assert repository.list_dataset_versions(dataset.id, user_team_id="") == []
+
+
+def test_delete_dataset_record_rejects_published_versions(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("已发布不可整删")
+    service.create_draft(dataset.id)
+    service.save_case(
+        dataset.id, Case(id="c1", name="c1", turns=(CaseTurn(id="t", input={"txt": "hi"}),))
+    )
+    service.publish_draft(dataset.id)
+    with pytest.raises(ValueError):
+        service.delete_record(dataset.id)
+    assert repository.get_dataset(dataset.id, user_team_id="") is not None

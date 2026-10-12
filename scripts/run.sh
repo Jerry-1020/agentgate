@@ -59,13 +59,11 @@ case "${1:-}" in
   seed) cd "$revision_root"; exec .venv/bin/python scripts/seed-bank-agents.py ;;
   verify-traces) cd "$revision_root"; shift; exec .venv/bin/python scripts/verify-bank-traces.py "$@" ;;
   redis) exec redis-server --bind 127.0.0.1 --port 6397 --dir "$revision_root/runtime" --save '' --appendonly no >> "$_log_dir/redis.log" 2>&1 ;;
-  api) _stop_service "uvicorn agentgate.server.app"; cd "$revision_root"; exec .venv/bin/python -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8097 >> "$_log_dir/api.log" 2>&1 ;;
-  worker) _stop_service "celery.*agentgate.*--hostname=unified-tasks-20260915"; cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO >> "$_log_dir/worker.log" 2>&1 ;;
+  api) cd "$revision_root"; exec .venv/bin/python -m uvicorn agentgate.server.app:app --host 127.0.0.1 --port 8097 >> "$_log_dir/api.log" 2>&1 ;;
+  worker) cd "$revision_root"; exec .venv/bin/python -m celery -A agentgate.integrations.job_dispatchers.celery:celery_app worker --pool=solo --concurrency=1 --hostname=unified-tasks-20260915@%h --loglevel=INFO >> "$_log_dir/worker.log" 2>&1 ;;
   web) cd "$revision_root/frontend"; export FRONTEND_PORT=5197 API_PROXY_TARGET=http://127.0.0.1:8097; exec npm run dev >> "$_log_dir/web.log" 2>&1 ;;
   scheduler)
     cd "$revision_root"
-    _stop_service "celery.*agentgate.*--beat"
-    _stop_service "dispatch-scheduled-runs"
     dispatcher_type="$(.venv/bin/python -c 'from agentgate.integrations.job_dispatchers.configuration import load_dispatcher_type; print(load_dispatcher_type())')"
     if [[ "$dispatcher_type" == bjs ]]; then
       exec .venv/bin/python scripts/dispatch-scheduled-runs.py >> "$_log_dir/scheduler.log" 2>&1
@@ -77,18 +75,18 @@ case "${1:-}" in
     targets=("${@:-api worker scheduler redis web}")
     for t in "${targets[@]}"; do
       case "$t" in
-        api) _stop_service "uvicorn agentgate.server.app" ;;
+        api) _stop_service "uvicorn agentgate.server.app.*--port 8097" ;;
         worker) _stop_service "celery.*agentgate.*--hostname=unified-tasks-20260915" ;;
         scheduler)
-          _stop_service "dispatch-scheduled-runs"
+          _stop_service "dispatch-scheduled-runs\.py( --once)?$"
           _stop_service "celery.*agentgate.*--beat"
           ;;
         redis) _stop_service "redis-server.*6397" ;;
         web) _stop_service "vite.*5197|npm run dev" ;;
         all)
-          _stop_service "uvicorn agentgate.server.app"
-          _stop_service "celery.*agentgate"
-          _stop_service "dispatch-scheduled-runs"
+          _stop_service "uvicorn agentgate.server.app.*--port 8097"
+          _stop_service "celery.*agentgate.*unified-tasks"
+          _stop_service "dispatch-scheduled-runs\.py( --once)?$"
           _stop_service "redis-server.*6397"
           _stop_service "vite.*5197|npm run dev"
           ;;

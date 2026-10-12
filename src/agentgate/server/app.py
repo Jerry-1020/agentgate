@@ -188,10 +188,20 @@ def create_app(
 
     application.add_middleware(RequestLogMiddleware)
 
-    from agentgate.application.agent_platform_evaluation import submit_platform_evaluation
+    from agentgate.application.agent_platform_evaluation import (
+        submit_platform_comparison,
+        submit_platform_evaluation,
+    )
 
     application.state.submit_agent_platform_evaluation = partial(
         submit_platform_evaluation,
+        repository=dependencies.repository,
+        evaluators=dependencies.evaluators,
+        credentials=dependencies.api_keys,
+        dispatcher=dependencies.dispatcher,
+    )
+    application.state.submit_agent_platform_comparison = partial(
+        submit_platform_comparison,
         repository=dependencies.repository,
         evaluators=dependencies.evaluators,
         credentials=dependencies.api_keys,

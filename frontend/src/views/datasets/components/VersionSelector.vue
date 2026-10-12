@@ -16,7 +16,7 @@ const emit = defineEmits<{
 
 <template>
   <div class="version-toolbar">
-    <div class="version-tabs" aria-label="评测集版本">
+    <div class="version-tabs" aria-label="测评集版本">
       <button
         v-for="item in versions"
         :key="item.id"
