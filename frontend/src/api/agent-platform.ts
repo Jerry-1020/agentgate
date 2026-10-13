@@ -281,16 +281,22 @@ function normalizeBranches(
     };
   });
 }
-function normalizeVersions(value: unknown, status: number, branchId?: string): PlatformVersion[] {
+function normalizeVersions(
+  value: unknown,
+  status: number,
+  branchId?: string,
+  versionField: 'agentVersion' | 'updatedAt' = 'agentVersion',
+): PlatformVersion[] {
   const result = new Map<string, PlatformVersion>();
   for (const raw of array(value, status)) {
     const row = object(raw, status);
     if (branchId !== undefined && text(row.branchId, status) !== branchId)
       throw failure('protocol', status);
-    if (row.status === null) throw failure('protocol', status);
+    // 行内基础编排/工作流以 updatedAt 标识版本，状态允许为空。
+    if (row.status === null && versionField !== 'updatedAt') throw failure('protocol', status);
     const versionStatus = optionalText(row.status, status);
     const item = {
-      agentVersion: text(row.agentVersion, status),
+      agentVersion: text(row[versionField], status),
       ...(versionStatus === null ? {} : { status: versionStatus }),
     };
     addUnique(result, item, (version) => version.agentVersion, status);
@@ -327,7 +333,10 @@ const LOCAL_PLATFORM_ORIGIN: string =
   ((import.meta.env.VITE_LOCAL_PLATFORM_ORIGIN as unknown) as string | undefined) ||
   'http://127.0.0.1:8119';
 
-function createDirectory(fixedOrigin: string): AgentDirectory {
+function createDirectory(
+  fixedOrigin: string,
+  baseVersionField: 'agentVersion' | 'updatedAt' = 'agentVersion',
+): AgentDirectory {
   const getTeams: AgentDirectory['getTeams'] = async ({ token }) =>
     query(token, (signal) =>
       allPages(
@@ -370,7 +379,12 @@ function createDirectory(fixedOrigin: string): AgentDirectory {
         signal,
         fixedOrigin,
       );
-      return normalizeVersions(unwrap(response.value, response.status), response.status);
+      return normalizeVersions(
+        unwrap(response.value, response.status),
+        response.status,
+        undefined,
+        baseVersionField,
+      );
     });
   };
   const getBranches: AgentDirectory['getBranches'] = async ({ token, agentId }) => {
@@ -433,7 +447,7 @@ function createDirectory(fixedOrigin: string): AgentDirectory {
   };
 }
 
-export const agentDirectory: AgentDirectory = createDirectory('');
+export const agentDirectory: AgentDirectory = createDirectory('', 'updatedAt');
 const mockDirectory = createDirectory(LOCAL_PLATFORM_ORIGIN);
 interface LocalCatalog {
   targets: LocalTarget[];

@@ -84,6 +84,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 const wrap = (data: unknown) => ({ code: '0', message: '查询成功', data });
+const bankVersionOne = '2026-05-06 17:21:16';
+const bankVersionTwo = '2026-05-06 17:20:34';
 const batch = (records: unknown[], total = records.length, current = 1, size = 300) => ({
   records,
   total,
@@ -220,8 +222,8 @@ test('both version endpoints retain statuses; branch tree preserves nested ident
       : parsed.pathname.endsWith('listVersions')
         ? [{ agentVersion: '1.0', status: 'test', branchId: 'branch &/+' }]
         : [
-            { agentVersion: '1.0', status: 'published' },
-            { agentVersion: '1.1', status: 'draft' },
+            { agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: 'published' },
+            { agentVersion: null, updatedAt: '2026-05-06 17:20:34', status: 'draft' },
           ];
     await reply(route, wrap(data));
   });
@@ -238,8 +240,8 @@ test('both version endpoints retain statuses; branch tree preserves nested ident
   expect(await call(page, 'getAgentVersions', { token: 't', agentId: 'base/1' })).toEqual({
     ok: true,
     value: [
-      { agentVersion: '1.0', status: 'published' },
-      { agentVersion: '1.1', status: 'draft' },
+      { agentVersion: '2026-05-06 17:21:16', status: 'published' },
+      { agentVersion: '2026-05-06 17:20:34', status: 'draft' },
     ],
   });
   expect(
@@ -259,6 +261,67 @@ test('both version endpoints retain statuses; branch tree preserves nested ident
     agentId: 'claw/1',
     branchId: 'branch &/+',
   });
+});
+
+test('in-bank base/workflow versions use updatedAt while branch versions keep agentVersion', async ({ page }) => {
+  await page.route('**/web/**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    return reply(route, wrap(path.endsWith('getAgentVersionList')
+      ? [
+          { agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: 'published' },
+          { agentVersion: 'ignored', updatedAt: '2026-05-06 17:20:34', status: 'draft' },
+        ]
+      : [{ agentVersion: 'claw-v1', updatedAt: '2026-05-06 17:21:16',
+          status: 'test', branchId: 'branch-1' }]));
+  });
+
+  expect(await call(page, 'getAgentVersions', { token: 't', agentId: 'base-1' })).toEqual({
+    ok: true,
+    value: [
+      { agentVersion: '2026-05-06 17:21:16', status: 'published' },
+      { agentVersion: '2026-05-06 17:20:34', status: 'draft' },
+    ],
+  });
+  expect(await call(page, 'getBranchVersions', {
+    token: 't', agentId: 'claw-1', branchId: 'branch-1',
+  })).toEqual({ ok: true, value: [{ agentVersion: 'claw-v1', status: 'test' }] });
+});
+
+for (const arrangeType of ['base', 'workflow']) {
+  test(`in-bank ${arrangeType} picker accepts null status and selects updatedAt`, async ({ page }) => {
+    await page.route('**/web/**', (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return reply(
+        route,
+        path.endsWith('/agents')
+          ? batch([{ id: 'bank-agent', name: '行内智能体', agentType: arrangeType, arrangeType }])
+          : wrap([{ agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: null }]),
+      );
+    });
+    expect(await call(page, 'getAgentVersions', { token: 't', agentId: 'bank-agent' })).toEqual({
+      ok: true,
+      value: [{ agentVersion: '2026-05-06 17:21:16' }],
+    });
+    await choose(page, '选择智能体', '行内智能体');
+    await choose(page, '智能体版本', '2026-05-06 17:21:16');
+    expect(await page.evaluate(() => (window as any).readTarget())).toMatchObject({
+      target: {
+        agentId: 'bank-agent',
+        typeGroup: 'base/workflow',
+        platformArrangeType: arrangeType,
+        agentVersion: '2026-05-06 17:21:16',
+      },
+    });
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  });
+}
+
+test('in-bank base/workflow versions reject blank updatedAt even if agentVersion is present', async ({ page }) => {
+  await page.route('**/web/**', (route) => reply(route, wrap([
+    { agentVersion: 'legacy', updatedAt: ' ', status: 'published' },
+  ])));
+  expect(await call(page, 'getAgentVersions', { token: 't', agentId: 'base-1' }))
+    .toMatchObject({ ok: false, error: { kind: 'protocol', status: 200 } });
 });
 
 test('a failed or inconsistent subsequent page never returns partial success', async ({ page }) => {
@@ -318,12 +381,13 @@ test('accepts documented empty pages but rejects malformed envelopes and ambiguo
     {
       name: 'getAgentVersions',
       data: wrap([
-        { agentVersion: '1', status: 'draft' },
-        { agentVersion: '1', status: 'published' },
+        { agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: 'draft' },
+        { agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: 'published' },
       ]),
     },
-    { name: 'getAgentVersions', data: wrap([{ agentVersion: '' }]) },
-    { name: 'getAgentVersions', data: wrap([{ agentVersion: '1', status: null }]) },
+    { name: 'getAgentVersions', data: wrap([{ agentVersion: null, updatedAt: '' }]) },
+    { name: 'getAgentVersions', data: wrap([{ agentVersion: null, updatedAt: '2026-05-06 17:21:16', status: 1 }]) },
+    { name: 'getBranchVersions', data: wrap([{ agentVersion: '1', branchId: 'a', status: null }]) },
   ];
   for (const item of cases) {
     await page.route('**/web/**', (route) => reply(route, item.data));
@@ -379,7 +443,7 @@ test('invalid inputs cause no request and concurrent calls cannot exchange token
       token: (await route.request().allHeaders()).authorization,
       agentId: new URL(route.request().url()).searchParams.get('agentId'),
     });
-    await reply(route, wrap([{ agentVersion: 'v1' }]));
+    await reply(route, wrap([{ agentVersion: null, updatedAt: '2026-05-06 17:21:16' }]));
   });
   for (const token of ['', ' ', ' leading', 'line\nbreak', 'Bearer abc', 'x'.repeat(513)]) {
     expect(await call(page, 'getTeams', { token })).toMatchObject({
@@ -611,7 +675,10 @@ async function openForm(page: Page, selected = false) {
             ? wrap([{ branchId: 'branch/raw', branchName: '分支' }])
             : path.endsWith('listVersions')
               ? wrap([{ agentVersion: 'v2', branchId: 'branch/raw' }])
-              : wrap([{ agentVersion: 'v1' }, { agentVersion: 'v2' }]),
+              : wrap([
+                  { agentVersion: 'v1', updatedAt: bankVersionOne },
+                  { agentVersion: 'v2', updatedAt: bankVersionTwo },
+                ]),
     );
   });
   await page.goto(url.replace('__directory', '__form') + (selected ? '?selected' : ''));
@@ -631,7 +698,7 @@ async function selectFormTarget(page: Page, claw = false) {
   );
   await choose(page, '选择智能体', claw ? '云虾 · claw' : '工作流 · workflow');
   if (claw) await choose(page, '分支地址', '分支 · branch/raw');
-  await choose(page, '智能体版本', claw ? 'v2' : 'v1');
+  await choose(page, '智能体版本', claw ? 'v2' : bankVersionOne);
 }
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
 
@@ -643,7 +710,7 @@ test('form preserves dataset/execution choices through target changes and logout
   await page.getByLabel('并发样本数', { exact: true }).fill('7');
   await page.getByLabel('执行超时（秒）', { exact: true }).fill('999');
   await selectFormTarget(page);
-  await choose(page, '智能体版本', 'v2');
+  await choose(page, '智能体版本', bankVersionTwo);
   await expect(page.getByLabel('任务测评集', { exact: true })).toHaveValue('other');
   await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('7');
   await expect(page.getByLabel('执行超时（秒）', { exact: true })).toHaveValue('999');
@@ -669,7 +736,7 @@ test('form submits workflow target and selected source cases with isolated token
       team_id: 'team',
       agent_id: 'workflow',
       type_group: 'base/workflow',
-      agent_version: 'v1',
+      agent_version: '2026-05-06 17:21:16',
       arrange_type: 'workflow',
     },
     dataset_id: 'dataset',
@@ -700,7 +767,7 @@ test('platform A/B submits both versions to the comparison endpoint', async ({ p
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
   const candidate = page.getByLabel('平台候选版本', { exact: true });
   await expect(candidate).toBeEnabled();
-  await candidate.selectOption('v2');
+  await candidate.selectOption(bankVersionTwo);
   await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   const submission = requests.find((r) => r.path === '/api/agent-platform/comparisons')!;
@@ -710,8 +777,8 @@ test('platform A/B submits both versions to the comparison endpoint', async ({ p
       team_id: 'team',
       agent_id: 'workflow',
       type_group: 'base/workflow',
-      baseline_version: 'v1',
-      candidate_version: 'v2',
+      baseline_version: '2026-05-06 17:21:16',
+      candidate_version: '2026-05-06 17:20:34',
       arrange_type: 'workflow',
     },
     dataset_id: 'dataset',
@@ -731,9 +798,9 @@ test('platform A/B requires a different candidate version before creating', asyn
   await expect(create).toBeDisabled();
   const candidate = page.getByLabel('平台候选版本', { exact: true });
   await expect(candidate).toBeEnabled();
-  await candidate.selectOption('v1');
+  await candidate.selectOption(bankVersionOne);
   await expect(create).toBeDisabled();
-  await candidate.selectOption('v2');
+  await candidate.selectOption(bankVersionTwo);
   await expect(create).toBeEnabled();
 });
 
@@ -748,14 +815,14 @@ test('personal space submits without a team_id field', async ({ page }) => {
     }),
   );
   await choose(page, '选择智能体', '工作流 · workflow');
-  await choose(page, '智能体版本', 'v1');
+  await choose(page, '智能体版本', bankVersionOne);
   await start(page).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   const submission = requests.find((r) => r.path === '/api/agent-platform/evaluations')!;
   expect(submission.body.target).toEqual({
     agent_id: 'workflow',
     type_group: 'base/workflow',
-    agent_version: 'v1',
+    agent_version: '2026-05-06 17:21:16',
     arrange_type: 'workflow',
   });
   expect('team_id' in submission.body.target).toBe(false);
@@ -991,7 +1058,7 @@ for (const mode of ['bank', 'external'] as const)
       );
     }
     await choose(page, '选择智能体', '工作流 · workflow');
-    await choose(page, '智能体版本', 'v1');
+    await choose(page, '智能体版本', mode === 'bank' ? bankVersionOne : 'v1');
     // Publish version 2 after the form loaded version 1. The submitted reference must stay at 1.
     await page.route('**/api/evaluators', (route) =>
       reply(route, [
