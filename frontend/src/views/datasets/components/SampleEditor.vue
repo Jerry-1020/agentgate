@@ -184,6 +184,15 @@ defineExpose({ save });
         <label
           >样本名称<input v-model="form.name" :disabled="!editable" aria-label="样本名称"
         /></label>
+        <label
+          title="正例：应正常完成；负例：应正确拒绝或处理异常；边界：临界条件。分类不会直接决定测评通过与否。"
+          >分类
+          <select v-model="form.category" :disabled="!editable" aria-label="样本分类">
+            <option value="positive">正例</option>
+            <option value="negative">负例</option>
+            <option value="boundary">边界</option>
+          </select>
+        </label>
       </div>
       <div class="conversation-layout">
         <aside>
