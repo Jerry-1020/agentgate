@@ -40,3 +40,12 @@ def test_ab_keeps_baseline_candidate_order():
 def test_invalid_task_references_are_rejected(values):
     with pytest.raises(ValidationError):
         EvaluationTask(**values)
+
+
+def test_current_and_historical_runs_must_not_overlap_or_repeat():
+    with pytest.raises(ValidationError):
+        EvaluationTask(kind="single", run_ids=("current",), previous_run_ids=("current",))
+    with pytest.raises(ValidationError):
+        EvaluationTask(kind="single", run_ids=("current",), previous_run_ids=("old", "old"))
+    with pytest.raises(ValidationError):
+        EvaluationTask(kind="ab", run_ids=("a", "b"), previous_run_ids=("old",))

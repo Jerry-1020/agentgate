@@ -7,6 +7,8 @@ export interface TaskLink {
   kind: 'single' | 'ab' | 'stability';
   mockSelection?: { branch: string; credentialScope: string; credentialLabel: string };
   runIds: string[];
+  previousRunIds?: string[];
+  createdAt?: string;
   staticReports: { version: string; descriptorHash?: string; reportId?: string; error?: string }[];
 }
 interface StoredTask {
@@ -14,46 +16,56 @@ interface StoredTask {
   name?: string | null;
   kind: 'single' | 'ab' | 'stability';
   run_ids: string[];
+  previous_run_ids?: string[];
+  created_at?: string;
   static_report_ids: string[];
 }
 export const useTaskLinksStore = defineStore('task-links', () => {
   const cache = ref<TaskLink[]>([]);
   let generation = 0;
+  let latestRefresh: Promise<TaskLink[]>;
   function readTaskLinks(): TaskLink[] {
     return cache.value;
   }
-  async function refreshTaskLinks(): Promise<TaskLink[]> {
+  function refreshTaskLinks(): Promise<TaskLink[]> {
     const current = ++generation;
-    const tasks = await request<StoredTask[]>('/evaluation-tasks');
-    const ids = [...new Set(tasks.flatMap((t) => t.static_report_ids))];
-    const versions = new Map(
-      await Promise.all(
-        ids.map(async (id) => {
-          const detail = await request<{
-            report: {
-              target_ref: { external_version_id: string };
-              target_descriptor_sha256: string;
-            };
-          }>('/skill-analysis/reports/' + encodeURIComponent(id));
-          return [
-            id,
-            {
-              version: detail.report.target_ref.external_version_id,
-              descriptorHash: detail.report.target_descriptor_sha256,
-            },
-          ] as const;
-        }),
-      ),
-    );
-    const links = tasks.map((t) => ({
-      id: t.id,
-      name: t.name ?? undefined,
-      kind: t.kind,
-      runIds: t.run_ids,
-      staticReports: t.static_report_ids.map((id) => ({ reportId: id, ...versions.get(id)! })),
-    }));
-    if (current === generation) cache.value = links;
-    return cache.value;
+    const refresh = (async () => {
+      const tasks = await request<StoredTask[]>('/evaluation-tasks');
+      const ids = [...new Set(tasks.flatMap((t) => t.static_report_ids))];
+      const versions = new Map(
+        await Promise.all(
+          ids.map(async (id) => {
+            const detail = await request<{
+              report: {
+                target_ref: { external_version_id: string };
+                target_descriptor_sha256: string;
+              };
+            }>('/skill-analysis/reports/' + encodeURIComponent(id));
+            return [
+              id,
+              {
+                version: detail.report.target_ref.external_version_id,
+                descriptorHash: detail.report.target_descriptor_sha256,
+              },
+            ] as const;
+          }),
+        ),
+      );
+      const links = tasks.map((t) => ({
+        id: t.id,
+        name: t.name ?? undefined,
+        kind: t.kind,
+        runIds: t.run_ids,
+        previousRunIds: t.previous_run_ids ?? [],
+        createdAt: t.created_at,
+        staticReports: t.static_report_ids.map((id) => ({ reportId: id, ...versions.get(id)! })),
+      }));
+      if (current !== generation) return latestRefresh;
+      cache.value = links;
+      return cache.value;
+    })();
+    latestRefresh = refresh;
+    return refresh;
   }
   async function saveTaskLink(link: TaskLink): Promise<void> {
     await request('/evaluation-tasks/' + encodeURIComponent(link.id), 'PUT', {

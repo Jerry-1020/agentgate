@@ -4,7 +4,7 @@ import EvaluationLayout from '../../layout/EvaluationLayout.vue';
 import TaskStaticAnalysis from './components/TaskStaticAnalysis.vue';
 import TaskTuning from './components/TaskTuning.vue';
 import EvaluationTaskForm from './components/EvaluationTaskForm.vue';
-import { readTaskLinks, refreshTaskLinks, type TaskLink } from './utils/task-links';
+import { readTaskLinks, refreshTaskLinks, includeCurrentTaskRuns, type TaskLink } from './utils/task-links';
 import { shallowRef, computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/modules/auth';
@@ -41,6 +41,7 @@ const datasetDirty = ref(false),
   evaluatorDirty = ref(false),
   settingsDirty = ref(false);
 const rerunId = ref('');
+const rerunTaskId = ref('');
 const currentRoute = useRoute(),
   router = useRouter();
 const route = computed(() => currentRoute.fullPath.slice(1) || 'overview');
@@ -90,7 +91,7 @@ const pairLink = computed(() =>
   currentLink.value?.kind === 'ab' && !route.value.includes('/samples/') ? currentLink.value : null,
 );
 function linkFor(id: string) {
-  return taskLinks.value.find((t) => t.runIds.includes(id));
+  return taskLinks.value.find((t) => t.id === id || t.runIds.includes(id));
 }
 function groupStatus(run: EvaluationRun, records = runs.value) {
   const link = linkFor(run.id);
@@ -109,7 +110,11 @@ const datasetOptions = computed(() => [
 const evaluatorOptions = computed(() => [
   ...new Set(runs.value.flatMap((r) => r.manifest.primary_evaluator_ids)),
 ]);
-const runId = computed(() => route.value.split('/')[1]?.split('?')[0] || '');
+const runId = computed(() => {
+  const id = route.value.split('/')[1]?.split('?')[0] || '';
+  return /^(tasks|results)\//.test(route.value)
+    ? taskLinks.value.find(t => t.id === id)?.runIds[0] ?? id : id;
+});
 function go(value: string) {
   const id = value.split('/')[1];
   void router.push(
@@ -130,6 +135,10 @@ onBeforeRouteUpdate((to, from) => {
 });
 const runs = shallowRef<EvaluationRun[]>([]),
   overview = ref<Overview | null>(null);
+const latestRuns = computed(() => {
+  const history = new Set(taskLinks.value.flatMap(t => t.previousRunIds ?? []));
+  return runs.value.filter(r => !history.has(r.id));
+});
 const overviewDays = ref(7);
 const auth = useAuthStore();
 const authLabel = computed(() => auth.modeLabel);
@@ -247,7 +256,9 @@ watch(pageNumber, () => void loadPage());
 const actionRun = ref('');
 async function runAction(id: string, action: 'cancel' | 'rerun') {
   if (action === 'rerun') {
+    if (rerunId.value) return;
     rerunId.value = id;
+    rerunTaskId.value = linkFor(id)?.id ?? '';
     return;
   }
   if (actionRun.value) return;
@@ -272,10 +283,10 @@ async function refresh() {
   if (loading.value) return;
   loading.value = true;
   try {
-    const [o, r, links] = await Promise.all([api.overview(), api.runs(), refreshTaskLinks()]);
+    const [o, r] = await Promise.all([api.overview(), api.runs(), refreshTaskLinks()]);
     overview.value = o;
-    runs.value = r;
-    taskLinks.value = links;
+    runs.value = await includeCurrentTaskRuns(r);
+    taskLinks.value = readTaskLinks();
     online.value = true;
     error.value = '';
   } catch (e) {
@@ -317,6 +328,15 @@ async function taskCreated(link: TaskLink) {
   go((link.kind === 'stability' ? 'stability/' : 'tasks/') + link.id);
   await refresh();
 }
+async function taskRerunCreated(taskId: string) {
+  rerunId.value = '';
+  rerunTaskId.value = '';
+  detailDialog.value = '';
+  await refreshTaskLinks();
+  syncTaskLinks();
+  await refresh();
+  go('tasks/' + taskId);
+}
 </script>
 <template>
   <EvaluationLayout :page="page" :online="online" :auth-label="authLabel" @logout="confirmLogout">
@@ -357,7 +377,7 @@ async function taskCreated(link: TaskLink) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in runs.slice(0, 6)" :key="r.id">
+            <tr v-for="r in latestRuns.slice(0, 6)" :key="r.id">
               <td class="nowrap">
                 {{ r.manifest.target.display_name }}
                 <span class="muted">· {{ r.manifest.target.ref.external_version_id }}</span>
@@ -365,7 +385,7 @@ async function taskCreated(link: TaskLink) {
               <td class="nowrap">{{ r.manifest.dataset.dataset_name }}</td>
               <td class="nowrap">{{ statusLabel(r.status) }}</td>
               <td class="nowrap">
-                <button class="link" @click="go('tasks/' + r.id)">查看</button>
+                <button class="link" @click="go('tasks/' + (linkFor(r.id)?.id ?? r.id))">查看</button>
               </td>
             </tr>
           </tbody>
@@ -455,7 +475,7 @@ async function taskCreated(link: TaskLink) {
           :key="pairLink.id"
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
           embedded />
-        <RunDetail v-if="!pairLink" :key="route" :id="runId" :return-page="page" @navigate="go"
+        <RunDetail v-if="!pairLink" :key="route + ':' + runId" :id="runId" :task-id="currentLink?.id" :return-page="page" @navigate="go" @rerun-created="taskRerunCreated"
       /></template>
       <template v-else>
         <TaskList @create="openCreate()" @navigate="go" @action="runAction" />
@@ -475,13 +495,9 @@ async function taskCreated(link: TaskLink) {
       <RerunDialog
         v-if="rerunId"
         :id="rerunId"
+        :task-id="rerunTaskId || undefined"
         @close="rerunId = ''"
-        @created="
-          (id) => {
-            rerunId = '';
-            go('tasks/' + id);
-          }
-        "
+        @created="taskRerunCreated"
       />
       <el-dialog
         :model-value="!!detailDialog"
@@ -492,7 +508,9 @@ async function taskCreated(link: TaskLink) {
         ><RunDetail
           v-if="detailDialog"
           :id="detailDialog"
+          :task-id="linkFor(detailDialog)?.id"
           return-page="tasks"
+          @rerun-created="taskRerunCreated"
           @navigate="
             (value) => {
               detailDialog = '';

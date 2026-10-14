@@ -19,6 +19,8 @@ const kindLabels: Record<ExpectationKind, string> = {
 };
 const emit = defineEmits<{ 'update:modelValue': [value: Expectation[]] }>();
 const rows = ref<any[]>([]);
+// Keep incomplete JSON as typed text; only the parsed value belongs in the saved model.
+const jsonDrafts = ref(new Map<string, { text: string; serialized: string | undefined }>());
 let syncing = false;
 const cloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -27,6 +29,16 @@ watch(
   (value) => {
     syncing = true;
     rows.value = cloneJson(value ?? []);
+    const currentRows = new Map(rows.value.map((row) => [row.id, row]));
+    for (const [id, draft] of jsonDrafts.value) {
+      const row = currentRows.get(id);
+      if (
+        row?.condition?.kind !== 'equals' ||
+        serializedExpected(row.condition.expected) !== draft.serialized
+      ) {
+        jsonDrafts.value.delete(id);
+      }
+    }
     queueMicrotask(() => {
       syncing = false;
     });
@@ -81,11 +93,18 @@ function changeKind(index: number, kind: string) {
 }
 
 function changeCondition(row: any, kind: string) {
+  jsonDrafts.value.delete(row.id);
   row.condition = condition(kind);
 }
 
-function asJson(value: unknown) {
-  return JSON.stringify(value ?? '', null, 0);
+function serializedExpected(value: unknown) {
+  return JSON.stringify(value === undefined ? '' : value);
+}
+
+function asJson(row: any) {
+  const serialized = serializedExpected(row.condition.expected);
+  const draft = jsonDrafts.value.get(row.id);
+  return draft && draft.serialized === serialized ? draft.text : serialized;
 }
 
 function setJson(row: any, field: string, value: string) {
@@ -94,6 +113,10 @@ function setJson(row: any, field: string, value: string) {
   } catch {
     row.condition[field] = value;
   }
+  jsonDrafts.value.set(row.id, {
+    text: value,
+    serialized: serializedExpected(row.condition.expected),
+  });
 }
 
 function allowedText(row: any) {
@@ -234,7 +257,7 @@ function setAllowed(row: any, value: string) {
         </div>
         <el-input
           v-if="!compactOutput && row.condition.kind === 'equals'"
-          :model-value="asJson(row.condition.expected)"
+          :model-value="asJson(row)"
           :disabled="disabled"
           :data-testid="`expectation-value-${index}`"
           placeholder="期望值，支持 JSON"

@@ -28,8 +28,8 @@ import TraceExplorer from './TraceExplorer.vue';
 import TaskStaticAnalysis from './TaskStaticAnalysis.vue';
 import { sameJson } from '../utils/report-presentation';
 import { taskTitle } from '../utils/dashboard-data';
-const props = defineProps<{ id: string; returnPage?: string }>(),
-  emit = defineEmits<{ navigate: [path: string] }>();
+const props = defineProps<{ id: string; taskId?: string; returnPage?: string }>(),
+  emit = defineEmits<{ navigate: [path: string]; 'rerun-created': [taskId: string] }>();
 const writing = ref(false);
 async function writeback() {
   if (!sample.value || writing.value) return;
@@ -70,6 +70,9 @@ let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false,
   traceTicket = 0;
 const manifest = computed<any>(() => data.value?.run.manifest);
+const associatedTask = computed(() => readTaskLinks().find(t => t.runIds.includes(props.id)));
+const canRerun = computed(() => associatedTask.value?.kind === 'single' &&
+  ['completed', 'failed', 'cancelled'].includes(progress.value?.status ?? ''));
 const cases = computed(
   () =>
     manifest.value?.dataset.cases.filter(
@@ -141,11 +144,11 @@ const formatTime = (n: number | null) =>
 function openSample(id: string) {
   sampleId.value = id;
   turnIndex.value = 0;
-  void router.replace(`/tasks/${props.id}/samples/${id}`);
+  void router.replace(`/tasks/${props.taskId ?? associatedTask.value?.id ?? props.id}/samples/${id}`);
 }
 function back() {
   sampleId.value = '';
-  void router.replace(`/tasks/${props.id}`);
+  void router.replace(`/tasks/${props.taskId ?? associatedTask.value?.id ?? props.id}`);
 }
 function move(n: number) {
   const c = cases.value[currentPosition.value + n];
@@ -407,7 +410,7 @@ watch(sampleId, () => {
               并发 {{ manifest.max_parallel_cases }} · 超时 {{ manifest.timeout_seconds }} 秒 · 重试
               {{ manifest.max_retries }} 次
             </p>
-            <button class="secondary" @click="rerun = true">使用原配置重跑</button>
+            <button v-if="canRerun" class="secondary" @click="rerun = true">使用原配置重跑</button>
           </article>
           <article class="card">
             <h2>评估器配置</h2>
@@ -617,8 +620,9 @@ watch(sampleId, () => {
     <RerunDialog
       v-if="rerun"
       :id="id"
+      :task-id="taskId ?? associatedTask?.id"
       @close="rerun = false"
-      @created="(next) => emit('navigate', 'tasks/' + next)"
+      @created="(next) => { rerun = false; emit('rerun-created', next); }"
     />
   </div>
 </template>

@@ -120,9 +120,14 @@ export async function request<T>(
       assertLocallyEnabled(
         ((body as { evaluators?: { id: string }[] })?.evaluators ?? []).map((e) => e.id),
       );
-    if (/^\/runs\/[^/]+\/rerun$/.test(path)) {
+    const runRerun = /^\/runs\/[^/]+\/rerun$/.test(path);
+    const taskRerun = /^\/evaluation-tasks\/[^/]+\/rerun$/.test(path);
+    if (runRerun || taskRerun) {
+      const source = (body as { source_run_id?: string } | undefined)?.source_run_id;
+      if (taskRerun && (typeof source !== 'string' || !source.trim()))
+        throw Error('重跑请求缺少原运行记录。');
       const manifest = await request<{ primary_evaluator_ids: string[] }>(
-        path.replace(/\/rerun$/, '/manifest'),
+        runRerun ? path.replace(/\/rerun$/, '/manifest') : `/runs/${encodeURIComponent(source!)}/manifest`,
       );
       assertLocallyEnabled(manifest.primary_evaluator_ids);
     }

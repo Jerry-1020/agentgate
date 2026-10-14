@@ -5,13 +5,23 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from test_run_engine import pending_run
 
 from agentgate.application.dataset_management import DatasetManagement
 from agentgate.application.target_catalog import TargetCatalog
 from agentgate.demo.bootstrap import ensure_demo_target_descriptors
-from agentgate.domain import Case, CaseTurn, Dataset, DatasetVersion, RunStatus, utcnow
+from agentgate.domain import (
+    Case,
+    CaseTurn,
+    Dataset,
+    DatasetVersion,
+    EvaluationRun,
+    RunStatus,
+    utcnow,
+)
 from agentgate.domain.evaluation_task import EvaluationTask
+from agentgate.storage import mysql_schema
 from agentgate.storage.mysql import MySQLRepository
 from agentgate.storage.repository import AgentGateRepository
 
@@ -20,6 +30,61 @@ def test_mysql_implements_all_persistence_operations():
     for name, value in AgentGateRepository.__dict__.items():
         if callable(value) and not name.startswith("_"):
             assert callable(getattr(MySQLRepository, name, None)), name
+
+
+def test_task_rerun_is_atomic_preserves_history_and_deletes_all_executions(repository, execute_demo):
+    source, _ = execute_demo(repository, "loan-agent-v2-fixed")
+    task = EvaluationTask(id="stable-task", kind="single", name="原任务", run_ids=(source.id,))
+    repository.save_evaluation_task(task)
+    rerun = EvaluationRun(manifest=source.manifest)
+    updated = repository.save_task_rerun(task.id, source.id, rerun, user_team_id="")
+    assert (updated.id, updated.name, updated.created_at) == (task.id, task.name, task.created_at)
+    assert updated.run_ids == (rerun.id,)
+    assert updated.previous_run_ids == (source.id,)
+    assert repository.get_run(source.id) == source
+    assert repository.list_results(source.id) and repository.list_traces(source.id)
+    assert repository.list_results(rerun.id) == []
+    losing_rerun = EvaluationRun(manifest=source.manifest)
+    with pytest.raises(ValueError, match="execution changed"):
+        repository.save_task_rerun(task.id, source.id, losing_rerun, user_team_id="")
+    assert repository.get_run(losing_rerun.id) is None
+    saved = repository.save_evaluation_task(EvaluationTask(
+        id=task.id, name="新名称", kind="single", run_ids=(rerun.id,),
+    ))
+    assert saved.previous_run_ids == (source.id,)
+    with pytest.raises(ValueError):
+        repository.delete_task_record(task.id, user_team_id="other-team")
+    assert repository.get_evaluation_task(task.id).run_ids == (rerun.id,)
+    repository.delete_task_record(task.id, user_team_id="")
+    assert repository.get_evaluation_task(task.id) is None
+    for run_id in (source.id, rerun.id):
+        assert repository.get_run(run_id) is None
+        assert repository.list_results(run_id) == repository.list_traces(run_id) == []
+    if isinstance(repository, MySQLRepository):
+        with repository._transaction() as db:
+            assert db.execute(select(mysql_schema.run_asset_refs).where(
+                mysql_schema.run_asset_refs.c.run_id.in_([source.id, rerun.id]),
+            )).first() is None
+    else:
+        with repository._connect() as db:
+            assert db.execute("SELECT 1 FROM agentgate_run_asset_refs WHERE run_id IN (?, ?)",
+                              (source.id, rerun.id)).fetchone() is None
+
+
+def test_invalid_task_rerun_does_not_change_current_execution(repository, execute_demo):
+    source, _ = execute_demo(repository, "loan-agent-v2-fixed")
+    task = EvaluationTask(kind="single", run_ids=(source.id,))
+    repository.save_evaluation_task(task)
+    rerun = EvaluationRun(manifest=source.manifest, user_team_id="other")
+    with pytest.raises(ValueError, match="ownership"):
+        repository.save_task_rerun(task.id, source.id, rerun, user_team_id="")
+    assert repository.get_run(rerun.id) is None
+    assert repository.get_evaluation_task(task.id) == task
+    with pytest.raises(LookupError):
+        repository.save_task_rerun(
+            task.id, source.id, EvaluationRun(manifest=source.manifest), user_team_id="other",
+        )
+    assert repository.get_evaluation_task(task.id) == task
 
 
 def test_dataset_publish_and_stale_write(repository):

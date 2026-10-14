@@ -1,13 +1,14 @@
 """A user-facing task associates existing executions and static reports."""
 
+import re
 from datetime import datetime
 from enum import StrEnum
-import re
 from uuid import uuid4
 
 from pydantic import Field, field_validator, model_validator
 
 from .base import DomainModel, normalize_utc, require_non_blank, utcnow
+from .run import EvaluationRun, RunStatus
 
 
 class EvaluationTaskKind(StrEnum):
@@ -24,6 +25,7 @@ class EvaluationTask(DomainModel):
     name: str | None = Field(default=None, max_length=128)
     created_at: datetime = Field(default_factory=utcnow)
     run_ids: tuple[str, ...]
+    previous_run_ids: tuple[str, ...] = ()
     static_report_ids: tuple[str, ...] = ()
     git_commit_refs: tuple[str, ...] = ()
     credential_id: str | None = None
@@ -43,7 +45,7 @@ class EvaluationTask(DomainModel):
     def validate_created_at(cls, value: datetime) -> datetime:
         return normalize_utc(value, "created_at")
 
-    @field_validator("run_ids", "static_report_ids")
+    @field_validator("run_ids", "previous_run_ids", "static_report_ids")
     @classmethod
     def validate_references(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if any(not item.strip() for item in value):
@@ -61,6 +63,10 @@ class EvaluationTask(DomainModel):
 
     @model_validator(mode="after")
     def validate_cardinality(self) -> "EvaluationTask":
+        if set(self.run_ids).intersection(self.previous_run_ids):
+            raise ValueError("current and previous runs must be distinct")
+        if self.previous_run_ids and self.kind != EvaluationTaskKind.SINGLE:
+            raise ValueError("only single tasks support execution history")
         if self.kind == EvaluationTaskKind.STABILITY:
             if not 2 <= len(self.run_ids) <= 20:
                 raise ValueError("stability requires 2 to 20 runs")
@@ -77,3 +83,26 @@ class EvaluationTask(DomainModel):
         if self.git_commit_refs and len(self.git_commit_refs) != count:
             raise ValueError("Git references must match the number of runs")
         return self
+
+
+def task_with_rerun(
+    task: EvaluationTask, source: EvaluationRun, rerun: EvaluationRun,
+) -> EvaluationTask:
+    """Validate one current-to-history switch without changing either execution."""
+    if task.kind != EvaluationTaskKind.SINGLE:
+        raise ValueError("only single tasks can be rerun")
+    if task.run_ids != (source.id,):
+        raise ValueError("task execution changed; refresh before rerunning")
+    if source.status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}:
+        raise ValueError("only a terminal task execution can be rerun")
+    if rerun.status != RunStatus.PENDING or rerun.id in task.run_ids + task.previous_run_ids:
+        raise ValueError("rerun must be a new pending execution")
+    if rerun.manifest != source.manifest or any(
+        getattr(rerun, field) != getattr(source, field)
+        for field in ("user_team_id", "user_id", "user_name", "api_key")
+    ):
+        raise ValueError("rerun must preserve the source configuration and ownership")
+    return EvaluationTask.model_validate({
+        **task.model_dump(), "run_ids": (rerun.id,),
+        "previous_run_ids": task.previous_run_ids + (source.id,),
+    })
