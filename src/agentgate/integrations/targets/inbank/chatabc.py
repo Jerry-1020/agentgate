@@ -8,7 +8,7 @@ import math
 import os
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
@@ -17,7 +17,10 @@ import requests
 
 from agentgate.domain import TargetType, Trace, TraceSpan, utcnow
 from agentgate.integrations.observability.trace_server import (
+    InbankTraceSettings,
     TraceServerClient,
+    inbank_trace_snapshot,
+    load_inbank_trace_settings,
     prepare_inbank_trace_events,
 )
 from agentgate.integrations.targets.inbank.diagnostics import (
@@ -38,7 +41,6 @@ from agentgate.run.target_protocol import (
 
 LOGGER = logging.getLogger(__name__)
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-_TRACE_WAIT_SECONDS = 10.0
 _CHATABC_SUCCESS_CODE = "FAIAG0000"
 _DELETE_SUCCESS_CODES = frozenset({"0", "0000", _CHATABC_SUCCESS_CODE})
 
@@ -439,6 +441,7 @@ class ChatABCSettings:
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
     debug_sse_failures: bool = False
+    trace_settings: InbankTraceSettings = field(default_factory=InbankTraceSettings)
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -458,6 +461,8 @@ class ChatABCSettings:
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
+        if not isinstance(self.trace_settings, InbankTraceSettings):
+            raise TypeError("trace_settings must be InbankTraceSettings")
 
 
 class InbankChatABCTargetAdapter:
@@ -752,10 +757,17 @@ class InbankChatABCTargetAdapter:
                     request_id,
                     customer_task_id=_task_id_from_run_id(request.run_id),
                     final_output=final_output,
-                    timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds, _TRACE_WAIT_SECONDS),
+                    timeout=min(
+                        request.timeout_seconds,
+                        self.settings.request_timeout_seconds,
+                        self.settings.trace_settings.wait_seconds,
+                    ),
                 )
                 turn_spans = normalize_turn_evidence(
                     request, turn, project_id=project_id, request_id=request_id, events=events,
+                )
+                outcomes[turn.id]["state"] = json.loads(
+                    turn_spans[0].attributes["agentgate.turn.state"]
                 )
             except TargetExecutionError as exc:
                 turn_spans = (output_only_turn_span(
@@ -799,8 +811,12 @@ class InbankChatABCTargetAdapter:
                 "invalid_request", "Trace wait timeout must be finite and positive"
             )
         deadline = self._monotonic() + timeout
+        trace_settings = self.settings.trace_settings
         attempt = 0
         reason = "not_queried"
+        previous_snapshot = None
+        stable_since = None
+        stable_samples = 0
         while (remaining := deadline - self._monotonic()) > 0:
             attempt += 1
             try:
@@ -815,26 +831,55 @@ class InbankChatABCTargetAdapter:
                 ):
                     raise
                 reason = "trace_not_found" if exc.message == "inbank trace not found" else exc.code
+                previous_snapshot = stable_since = None
+                stable_samples = 0
             else:
                 prepared = prepare_inbank_trace_events(
                     events, project_id=project_id, customer_task_id=customer_task_id,
                     trace_id=trace_id, final_output=final_output,
                 )
+                snapshot = inbank_trace_snapshot(events)
+                now = self._monotonic()
+                if prepared is None:
+                    previous_snapshot = stable_since = None
+                    stable_samples = 0
+                    reason = "evidence_pending"
+                else:
+                    if snapshot != previous_snapshot:
+                        previous_snapshot, stable_since = snapshot, now
+                        stable_samples = 0
+                    stable_samples += 1
+                    reason = "snapshot_settling"
+                    if (
+                        stable_samples < trace_settings.stable_samples
+                        or now - stable_since < trace_settings.settle_seconds
+                    ):
+                        prepared = None
                 if prepared is not None:
                     if self._monotonic() >= deadline:
                         break
-                    LOGGER.debug(
-                        "inbank_trace_ready adapter=chatabc run_id=%r source_trace_id=%r attempt=%d",
+                    next(e for e in prepared if e["event_type"] == "trace")["inbank_source"]["readiness"] = {
+                        "basis": "stable_snapshot",
+                        "attempts": attempt,
+                        "stable_samples": stable_samples,
+                        "stable_seconds": now - stable_since,
+                        "snapshot_sha256": snapshot,
+                    }
+                    LOGGER.info(
+                        "inbank_trace_ready adapter=chatabc run_id=%r source_trace_id=%r attempt=%d "
+                        "basis=stable_snapshot stable_samples=%d stable_seconds=%.3f snapshot=%s",
                         self._run_id,
                         trace_id,
                         attempt,
+                        stable_samples,
+                        now - stable_since,
+                        snapshot,
                     )
                     return prepared
-                reason = "evidence_pending"
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 break
-            delay = min(2.0, remaining)
+            delay = min(trace_settings.poll_interval_seconds, remaining)
             LOGGER.info(
                 "inbank_trace_wait adapter=chatabc run_id=%r source_trace_id=%r "
                 "attempt=%d reason=%s retry_delay_seconds=%.3f",
@@ -960,6 +1005,7 @@ def load_chatabc_settings(
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 180.0
         ),
+        trace_settings=load_inbank_trace_settings(values),
         health_wait_seconds=_positive_float(values, "AGENTGATE_INBANK_HEALTH_WAIT_SECONDS", 300.0),
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
