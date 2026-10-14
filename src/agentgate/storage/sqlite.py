@@ -30,7 +30,7 @@ from agentgate.domain import (
     transition_run,
 )
 from agentgate.domain.credential import ApiKeyMetadata
-from agentgate.domain.evaluation_task import EvaluationTask
+from agentgate.domain.evaluation_task import EvaluationTask, task_with_rerun
 from agentgate.evaluator.versioning import (
     publish_evaluator_draft as build_evaluator_publication,
 )
@@ -324,6 +324,10 @@ class SQLiteRepository:
                     (task_id,),
                 )
             ]
+            if any(db.execute(
+                f"SELECT 1 FROM {_T_RUNS} WHERE id=? AND user_team_id=?", (run_id, user_team_id),
+            ).fetchone() is None for run_id in run_ids):
+                raise ValueError("task does not exist")
             db.execute(f"DELETE FROM {_T_EVALUATION_TASK_RUNS} WHERE task_id=?", (task_id,))
             for run_id in run_ids:
                 db.execute(f"DELETE FROM {_T_OPTIMIZATION_REPORTS} WHERE run_id=?", (run_id,))
@@ -332,7 +336,35 @@ class SQLiteRepository:
                 db.execute(f"DELETE FROM {_T_RUNS} WHERE id=?", (run_id,))
             db.execute(f"DELETE FROM {_T_EVALUATION_TASKS} WHERE id=?", (task_id,))
 
+    def save_task_rerun(
+        self, task_id: str, source_run_id: str, rerun: EvaluationRun, *, user_team_id: str,
+    ) -> EvaluationTask:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                f"SELECT payload FROM {_T_EVALUATION_TASKS} WHERE id=?", (task_id,),
+            ).fetchone()
+            source_row = db.execute(
+                f"SELECT payload FROM {_T_RUNS} WHERE id=? AND user_team_id=?",
+                (source_run_id, user_team_id),
+            ).fetchone()
+            if row is None or source_row is None:
+                raise LookupError("unknown evaluation task")
+            updated = task_with_rerun(
+                EvaluationTask.model_validate_json(row["payload"]),
+                EvaluationRun.model_validate_json(source_row["payload"]), rerun,
+            )
+            self._insert_task_run(db, rerun)
+            db.execute(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)", (rerun.id, task_id))
+            db.execute(
+                f"UPDATE {_T_EVALUATION_TASKS} SET payload=? WHERE id=?",
+                (canonical_json(updated), task_id),
+            )
+        return updated
+
     def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
+        if task.previous_run_ids:
+            raise ValueError("new task cannot contain execution history")
         if task.run_ids != tuple(r.id for r in runs):
             raise ValueError("invalid task run associations")
         if any(r.status not in {RunStatus.PENDING, RunStatus.SCHEDULED} for r in runs):
@@ -342,13 +374,22 @@ class SQLiteRepository:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             for run in runs:
-                references = self._run_asset_references(db, run)
-                db.execute(f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name,api_key) VALUES(?,?,?,?,?,?,?,?,?)",
-                           (run.id, run.status, run.created_at.isoformat(), run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run),
-                            run.user_team_id, run.user_id, run.user_name, run.api_key))
-                db.executemany(f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)", references)
+                self._insert_task_run(db, run)
             db.execute(f"INSERT INTO {_T_EVALUATION_TASKS} VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
             db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)", [(r.id, task.id) for r in runs])
+
+    def _insert_task_run(self, db: sqlite3.Connection, run: EvaluationRun) -> None:
+        references = self._run_asset_references(db, run)
+        db.execute(
+            f"INSERT INTO {_T_RUNS}(id,status,created_at,scheduled_for,payload,user_team_id,user_id,user_name,api_key) VALUES(?,?,?,?,?,?,?,?,?)",
+            (run.id, run.status, run.created_at.isoformat(),
+             run.scheduled_for.isoformat() if run.scheduled_for else None, canonical_json(run),
+             run.user_team_id, run.user_id, run.user_name, run.api_key),
+        )
+        db.executemany(
+            f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)",
+            references,
+        )
 
     def get_optimization_report(self, evidence_key: str) -> OptimizationReport | None:
         with self._connect() as db:
@@ -368,6 +409,8 @@ class SQLiteRepository:
             row = db.execute(f"SELECT payload FROM {_T_EVALUATION_TASKS} WHERE id=?", (task.id,)).fetchone()
             if row:
                 previous = EvaluationTask.model_validate_json(row["payload"])
+                if task.previous_run_ids and task.previous_run_ids != previous.previous_run_ids:
+                    raise ValueError("task execution history is immutable")
                 for field in ("kind", "run_ids", "git_commit_refs", "credential_id"):
                     if getattr(previous, field) != getattr(task, field):
                         raise ValueError("task identity and run associations are immutable")
@@ -382,6 +425,8 @@ class SQLiteRepository:
                     **previous.model_dump(), "name": task.name if task.name is not None else previous.name,
                     "static_report_ids": tuple(reports_by_target.values()),
                 })
+            elif task.previous_run_ids:
+                raise ValueError("new task cannot contain execution history")
             for report_id in task.static_report_ids:
                 if db.execute(f"SELECT 1 FROM {_T_SKILL_ANALYSIS_REPORTS} WHERE id=?", (report_id,)).fetchone() is None:
                     raise ValueError("unknown static report")

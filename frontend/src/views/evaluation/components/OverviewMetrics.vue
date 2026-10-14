@@ -1,12 +1,35 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue';
-import { api, score } from '../../../api/evaluations';
+import { ref, shallowRef, computed, watch, onUnmounted } from 'vue';
+import { api, score, type EvaluationRun } from '../../../api/evaluations';
+import { readTaskLinks, refreshTaskLinks } from '../utils/task-links';
 const props = defineProps<{ days?: number }>();
 const emit = defineEmits<{ 'update:days': [value: number] }>();
 const days = ref(props.days ?? 7),
   data = ref<any>(null),
   error = ref(''),
   loading = ref(false);
+const taskRuns = shallowRef<EvaluationRun[]>([]);
+const taskCount = computed(() => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days.value - 1));
+  const tasks = readTaskLinks();
+  const assigned = new Set(
+    tasks.flatMap((task) => [...task.runIds, ...(task.previousRunIds ?? [])]),
+  );
+  return (
+    tasks.filter(
+      (task) =>
+        new Date(
+          task.createdAt ??
+            taskRuns.value.find((run) => run.id === task.runIds[0])?.created_at ??
+            '',
+        ) >= start,
+    ).length +
+    taskRuns.value.filter((run) => !assigned.has(run.id) && new Date(run.created_at) >= start)
+      .length
+  );
+});
 watch(
   () => props.days,
   (v) => {
@@ -23,7 +46,7 @@ async function load() {
   start.setHours(0, 0, 0, 0);
   start.setDate(start.getDate() - (days.value - 1));
   try {
-    const [overview, runs] = await Promise.all([api.overview(), api.runs()]);
+    const [overview, runs] = await Promise.all([api.overview(), api.runs(), refreshTaskLinks()]);
     const period = runs.filter((r) => new Date(r.created_at) >= start),
       completed = period.filter((r) => r.status === 'completed');
     const reports = [];
@@ -39,11 +62,11 @@ async function load() {
       }
     }
     if (ticket !== sequence) return;
+    taskRuns.value = runs;
     const scores = reports
       .map((r) => r.metrics.find((m) => m.level === 'overall')?.score)
       .filter((n): n is number => typeof n === 'number');
     data.value = {
-      total_runs: period.length,
       average_score: incomplete
         ? null
         : scores.length
@@ -74,13 +97,13 @@ onUnmounted(() => sequence++);
     <div class="overview-metrics">
       <article class="card">
         <div class="metric-label">测评任务总数</div>
-        <div class="metric-value">{{ data?.total_runs ?? '—' }}</div>
+        <div class="metric-value">{{ data ? taskCount : '—' }}</div>
         <small>所选区间内创建的任务</small>
       </article>
       <article class="card">
         <div class="metric-label">平均综合分</div>
         <div class="metric-value">{{ score(data?.average_score) }}<small> / 100</small></div>
-        <small>{{ data?.scored_runs ?? '—' }} 个已完成且有有效评分的任务</small>
+        <small>{{ data?.scored_runs ?? '—' }} 次已完成且有有效评分的执行</small>
       </article>
       <article class="card">
         <div class="metric-label">测评完成样本数</div>

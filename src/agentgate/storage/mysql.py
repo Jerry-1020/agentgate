@@ -39,7 +39,7 @@ from agentgate.domain import (
     transition_run,
 )
 from agentgate.domain.credential import ApiKeyMetadata
-from agentgate.domain.evaluation_task import EvaluationTask
+from agentgate.domain.evaluation_task import EvaluationTask, task_with_rerun
 from agentgate.evaluator.versioning import publish_evaluator_draft as build_publication
 from agentgate.storage import mysql_schema as s
 from agentgate.storage.configuration import TDSQLConfig
@@ -371,7 +371,16 @@ class MySQLRepository:
             )
             if task is None:
                 raise ValueError("task does not exist")
-            for run_id in task.run_ids:
+            if any(_one(db, s.runs, EvaluationRun, id=run_id, user_team_id=user_team_id) is None
+                   for run_id in task.run_ids + task.previous_run_ids):
+                raise ValueError("task does not exist")
+            for run_id in task.run_ids + task.previous_run_ids:
+                db.execute(
+                    s.run_asset_refs.delete().where(s.run_asset_refs.c.run_key == _digest(run_id))
+                )
+                db.execute(
+                    s.optimization_reports.delete().where(s.optimization_reports.c.run_key == _digest(run_id))
+                )
                 db.execute(
                     s.results.delete().where(s.results.c.run_key == _digest(run_id))
                 )
@@ -381,6 +390,9 @@ class MySQLRepository:
                 db.execute(
                     s.runs.delete().where(s.runs.c.id_key == _digest(run_id))
                 )
+            db.execute(
+                s.evaluation_task_runs.delete().where(s.evaluation_task_runs.c.task_key == _digest(task_id))
+            )
             db.execute(
                 s.evaluation_tasks.delete().where(
                     s.evaluation_tasks.c.id_key == _digest(task_id)
@@ -1018,7 +1030,26 @@ class MySQLRepository:
             items = _models(db, s.results, EvaluationResult, run_id=run_id)
         return sorted(items, key=lambda item: (item.case_id, item.evaluator_id, item.id))
 
+    def save_task_rerun(
+        self, task_id: str, source_run_id: str, rerun: EvaluationRun, *, user_team_id: str,
+    ) -> EvaluationTask:
+        with self._transaction() as db:
+            task = _one(db, s.evaluation_tasks, EvaluationTask, id=task_id, lock=True)
+            source = _one(db, s.runs, EvaluationRun, id=source_run_id, user_team_id=user_team_id)
+            if task is None or source is None:
+                raise LookupError("unknown evaluation task")
+            updated = task_with_rerun(task, source, rerun)
+            self._insert_run(db, rerun)
+            db.execute(s.evaluation_task_runs.insert().values(
+                run_key=_digest(rerun.id), run_id=rerun.id,
+                task_key=_digest(task_id), task_id=task_id,
+            ))
+            _update(db, s.evaluation_tasks, updated)
+        return updated
+
     def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
+        if task.previous_run_ids:
+            raise ValueError("new task cannot contain execution history")
         if task.run_ids != tuple(run.id for run in runs):
             raise ValueError("invalid task run associations")
         if any(run.status not in {RunStatus.PENDING, RunStatus.SCHEDULED} for run in runs):
@@ -1038,6 +1069,8 @@ class MySQLRepository:
                 raise ValueError("unknown EvaluationRun")
         previous = _one(db, s.evaluation_tasks, EvaluationTask, id=task.id, lock=True)
         if previous:
+            if task.previous_run_ids and task.previous_run_ids != previous.previous_run_ids:
+                raise ValueError("task execution history is immutable")
             for field in ("kind", "run_ids", "git_commit_refs", "credential_id"):
                 if getattr(previous, field) != getattr(task, field):
                     raise ValueError("task identity and run associations are immutable")
@@ -1055,6 +1088,8 @@ class MySQLRepository:
             )
             _update(db, s.evaluation_tasks, task)
         else:
+            if task.previous_run_ids:
+                raise ValueError("new task cannot contain execution history")
             _insert(db, s.evaluation_tasks, task)
             for run_id in task.run_ids:
                 db.execute(
