@@ -8,6 +8,7 @@ import pytest
 from agentgate.integrations.observability.trace_server import (
     TraceServerClient,
     detail_to_events,
+    inbank_trace_snapshot,
     prepare_inbank_trace_events,
 )
 from agentgate.run.target_protocol import TargetExecutionError
@@ -289,6 +290,93 @@ def test_inbank_returned_parent_is_not_detached_when_it_appears_later(inbank_det
 def test_task_project_alias_requires_explicit_current_pod_binding(customer_task_id):
     with pytest.raises(TargetExecutionError, match="binding mismatch"):
         fetch_inbank(sparse_inbank_detail(DETAIL, "48b2b018"), customer_task_id=customer_task_id)
+
+
+def test_inbank_count_excluding_context_preserves_all_spans_and_raw_count(inbank_detail):
+    detail = deepcopy(inbank_detail)
+    template = detail["spans"][0]
+    for index in range(6):
+        detail["spans"].append(dict(
+            template, id=f"extra-{index}", eventId=f"extra-event-{index}",
+            parentSpanId="sp-1", spanType="context" if index == 0 else "chain",
+        ))
+    detail["trace"]["spanCount"] = 7
+    events = fetch_inbank(detail)
+    before = deepcopy(events)
+    prepared = prepare_inbank_trace_events(
+        events, project_id="bank-tested-agents", customer_task_id="pod-task",
+        trace_id="t-1", final_output={"output": "answer"},
+    )
+    assert events == before
+    assert len(prepared[1:]) == prepared[0]["span_count"] == 9
+    assert prepared[1:] == events[1:]
+    assert prepared[0]["inbank_source"]["raw_trace"]["spanCount"] == 7
+    assert prepared[0]["inbank_source"]["derived_fields"]["span_count"] == "received_spans_including_context"
+
+    # An unexplained discrepancy is not rewritten to make validation pass.
+    events[0]["span_count"] = 6
+    assert prepare_inbank_trace_events(
+        events, project_id="bank-tested-agents", customer_task_id="pod-task",
+        trace_id="t-1", final_output={},
+    ) is None
+
+
+def test_snapshot_is_order_independent_but_detects_content_updates_and_logs_no_content(caplog):
+    from test_inbank_evidence import skill_detail
+
+    caplog.set_level("INFO")
+    events = detail_to_events(skill_detail(), [])
+    original = deepcopy(events)
+    fingerprint = inbank_trace_snapshot(events)
+    assert fingerprint == inbank_trace_snapshot(list(reversed(events)))
+    events[-1]["output"]["content"] = "customer-secret-tool-result"
+    assert fingerprint != inbank_trace_snapshot(events)
+    assert "customer-secret-tool-result" not in caplog.text
+    assert "Synthetic prompt" not in caplog.text
+    assert "file_path" not in caplog.text
+    assert "received_spans=3" in caplog.text
+    assert "span_ids=['model', 'llm', 'tool-0']" in caplog.text
+    assert original[-1]["output"]["content"] == "Synthetic tool result"
+
+
+def test_snapshot_fingerprints_responses_without_requiring_matching_tool_spans():
+    from test_inbank_evidence import skill_detail
+
+    events = detail_to_events(skill_detail(), [])
+    missing = deepcopy(events[:-1])
+    missing[0]["output"] = {"messages": [events[-1]["output"]]}
+    missing_fingerprint = inbank_trace_snapshot(missing)
+    assert isinstance(missing_fingerprint, str)
+    wrong = deepcopy(events)
+    wrong[-1]["output"]["tool_call_id"] = "previous-turn-call"
+    wrong_fingerprint = inbank_trace_snapshot(wrong)
+    assert isinstance(wrong_fingerprint, str)
+    fingerprint = inbank_trace_snapshot(events)
+    assert len({missing_fingerprint, wrong_fingerprint, fingerprint}) == 3
+    events[-1]["status"] = "error"
+    events[-1]["output"]["status"] = "error"
+    assert isinstance(inbank_trace_snapshot(events), str)
+    assert inbank_trace_snapshot(events) != fingerprint
+
+
+def test_snapshot_does_not_treat_history_as_new_requests():
+    events = detail_to_events(DETAIL, [])
+    history = {"role": "assistant", "tool_calls": [{"id": "old-call", "name": "read_file"}]}
+    events[0]["output"] = {"messages": [history]}
+    events[1].update(span_type="llm", input=[history], output={"content": "answer"})
+    assert inbank_trace_snapshot(events) is not None
+
+
+def test_snapshot_detects_removed_spans_without_requiring_tool_call_ids():
+    from test_inbank_evidence import skill_detail
+
+    events = detail_to_events(skill_detail(skills=("one", "two")), [])
+    for event in events[-2:]:
+        event["output"].pop("tool_call_id")
+    fingerprint = inbank_trace_snapshot(events)
+    reduced = inbank_trace_snapshot(events[:-1])
+    assert isinstance(reduced, str)
+    assert reduced != fingerprint
 
 
 @pytest.mark.parametrize("part, field", [

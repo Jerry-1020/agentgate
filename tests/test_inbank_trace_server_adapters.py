@@ -4,6 +4,7 @@ import json
 import logging
 import threading
 from copy import deepcopy
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
@@ -16,10 +17,12 @@ from agentgate.integrations.observability.trace_server import TraceServerClient
 from agentgate.integrations.targets.inbank.chatabc import (
     ChatABCSettings,
     InbankChatABCTargetAdapter,
+    load_chatabc_settings,
 )
 from agentgate.integrations.targets.inbank.yunxia import (
     InbankYunxiaTargetAdapter,
     YunxiaSettings,
+    load_yunxia_settings,
 )
 from agentgate.run.target_protocol import (
     CaseExecutionRequest,
@@ -242,6 +245,9 @@ def _request(arrange_type: str) -> CaseExecutionRequest:
 def _adapter(
     arrange_type: str, transport, trace_server, *, base_url="https://bank.test", **options
 ):
+    if "sleep" not in options and "monotonic" not in options:
+        clock = _Clock()
+        options.update(sleep=clock.sleep, monotonic=clock.monotonic)
     settings = {
         "create_base_url": base_url,
         "health_base_url": base_url,
@@ -278,7 +284,7 @@ def test_builds_multiturn_trace_from_trace_server(arrange_type: str) -> None:
     assert result.inline_trace is not None
     assert transport.deleted is True
     assert [call[:2] for call in trace_server.calls] == [
-        ("customer-agent-id", request_id) for request_id in transport.request_ids
+        ("customer-agent-id", request_id) for request_id in transport.request_ids for _ in range(3)
     ]
     assert len(set(transport.request_ids)) == 2
     assert len(result.inline_trace.spans) == 4
@@ -286,6 +292,7 @@ def test_builds_multiturn_trace_from_trace_server(arrange_type: str) -> None:
         outcome = result.inline_trace.turn_outcomes[turn.id]
         assert outcome["input"] == turn.input
         assert outcome["output"]["output"] == "customer answer"
+        assert outcome["state"] == {"execution_status": "success"}
         if arrange_type == "yunxia":
             assert outcome["output"]["intent_code"] == "lookup-intent"
             assert outcome["output"]["slots"] == {"city": "上海"}
@@ -298,6 +305,68 @@ def test_builds_multiturn_trace_from_trace_server(arrange_type: str) -> None:
         assert turn_trace.spans[1].operation_type == "tool"
         assert turn_trace.spans[1].name == "lookup"
         assert turn_trace.spans[1].attributes["arguments"] == {"city": "上海"}
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("missing_turns", [(), (1,), (2,), (1, 2)])
+def test_execution_state_reaches_rules_without_leaking_across_turns(arrange_type, missing_turns, monkeypatch):
+    from test_rule_state import evaluator_spec
+
+    from agentgate.domain import Equals, StateExpectation
+    from agentgate.evaluator.executor import execute_evaluators
+    from agentgate.evaluator.rule.state import FinalStateEvaluator
+
+    transport = _Transport(arrange_type)
+    trace_server = _TraceServer()
+    fetch = trace_server.fetch_events
+
+    def selective_fetch(project_id, trace_id, *, timeout, customer_task_id):
+        if transport.chat_count in missing_turns:
+            raise TargetExecutionError("unavailable", "inbank trace not found")
+        events = fetch(project_id, trace_id, timeout=timeout)
+        # A failed tool or contradictory output must not replace the root status.
+        events[0]["output"] = {"execution_status": "error"}
+        events[1]["status"] = "error"
+        return events
+
+    monkeypatch.setattr(trace_server, "fetch_events", selective_fetch)
+    clock = _Clock()
+    adapter = _adapter(arrange_type, transport, trace_server, sleep=clock.sleep, monotonic=clock.monotonic)
+    request = _request(arrange_type)
+    turns = tuple(
+        turn.model_copy(update={"expectations": (StateExpectation(
+            path="execution_status", condition=Equals(expected=expected),
+        ),)})
+        for turn, expected in zip(request.case.turns, ("success", "error"), strict=True)
+    )
+    request = replace(request, case=request.case.model_copy(update={"turns": turns}))
+    try:
+        trace = adapter.wait(adapter.start(request), 30).inline_trace
+    finally:
+        adapter.close()
+
+    result = execute_evaluators(
+        request.case, trace, (evaluator_spec(),), {("final_state", "1"): FinalStateEvaluator()},
+    )[0]
+    assert len(result.checks) == 2
+    for index, (turn, check) in enumerate(zip(turns, result.checks, strict=True), 1):
+        scoped = trace.for_turn(turn.id)
+        state = {} if index in missing_turns else {"execution_status": "success"}
+        assert scoped.final_state == trace.turn_outcomes[turn.id]["state"] == state
+        assert check.turn_id == turn.id
+        if index in missing_turns:
+            assert check.outcome.value == "not_applicable"
+            assert check.actual_missing
+        else:
+            assert check.outcome.value == ("pass" if index == 1 else "fail")
+            assert check.actual == "success"
+            assert not check.actual_missing
+        assert scoped.final_output["output"] == "customer answer"
+        if arrange_type == "yunxia":
+            assert scoped.final_output["intent_code"] == "lookup-intent"
+    assert trace.final_state == trace.turn_outcomes[turns[-1].id]["state"]
+    assert transport.chat_count == len(set(transport.request_ids)) == 2
+    assert transport.deleted
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
@@ -337,7 +406,7 @@ def test_sse_trace_references_are_not_used_for_query_binding(arrange_type, refer
                for span in trace.spans if span.operation_type == "turn")
     assert adapter.get_status("execution-1") is CaseExecutionStatus.COMPLETED
     assert [call[:2] for call in trace_server.calls] == [
-        ("customer-agent-id", request_id) for request_id in transport.request_ids
+        ("customer-agent-id", request_id) for request_id in transport.request_ids for _ in range(3)
     ]
     assert transport.deleted is True
 
@@ -402,6 +471,8 @@ def test_trace_failure_keeps_output_without_synthetic_evidence(arrange_type, fai
         trace = result.inline_trace
         assert len(trace.spans) == 2
         assert trace.final_output["output"] == "customer answer"
+        assert trace.final_state == {}
+        assert all(outcome["state"] == {} for outcome in trace.turn_outcomes.values())
         for span, request_id in zip(trace.spans, transport.request_ids, strict=True):
             assert span.operation_type == "turn"
             assert span.attributes["inbank.evidence_mode"] == "output_only"
@@ -470,15 +541,11 @@ def test_trace_readiness_retries_without_replaying_chat(arrange_type, pending, m
     try:
         result = adapter.wait(adapter.start(_request(arrange_type)), 30)
         assert result.inline_trace.final_output["output"] == "customer answer"
-        if pending in {"output", "duration", "started-at"}:
-            assert [call[1] for call in trace_server.calls] == transport.request_ids
-            assert clock.sleeps == []
-        else:
-            assert [call[1] for call in trace_server.calls] == [
-                *([transport.request_ids[0]] * 3), transport.request_ids[1],
-            ]
-            assert clock.sleeps == [2, 2]
-            assert [call[2] for call in trace_server.calls] == [10, 8, 6, 10]
+        assert [call[1] for call in trace_server.calls] == [
+            *([transport.request_ids[0]] * 5), *([transport.request_ids[1]] * 3),
+        ]
+        assert clock.sleeps == [2] * 6
+        assert [call[2] for call in trace_server.calls] == [10, 8, 6, 4, 2, 10, 8, 6]
         assert transport.chat_count == 2
     finally:
         adapter.close()
@@ -654,8 +721,8 @@ def test_export_boundary_keeps_seven_real_spans_and_observations_per_turn(arrang
         result = adapter.wait(adapter.start(request), 30)
     finally:
         adapter.close()
-    assert queried == transport.request_ids
-    assert len(queried) == 2 and transport.deleted
+    assert queried == [request_id for request_id in transport.request_ids for _ in range(3)]
+    assert len(queried) == 6 and transport.deleted
     for turn in request.case.turns:
         spans = result.inline_trace.for_turn(turn.id).spans
         assert len(spans) == 8  # Seven source spans plus the existing turn wrapper.
@@ -834,15 +901,401 @@ def test_adapters_fetch_trace_server_over_http(arrange_type, initial_404, monkey
             )
             expected = [
                 f"/web/agent_trace_otel/projects/customer-agent-id/traces/{request_id}"
-                for request_id in peer.request_ids
+                for request_id in peer.request_ids for _ in range(3)
             ]
             if initial_404:
                 expected.insert(0, expected[0])
             assert [urlparse(path).path for path in queried] == expected
-            assert clock.sleeps == ([2] if initial_404 else [])
+            assert clock.sleeps == [2] * (5 if initial_404 else 4)
             assert peer.chat_count == 2
         finally:
             adapter.close()
             server.shutdown()
             thread.join(timeout=5)
     assert peer.deleted is True
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+def test_adapted_multicase_multiturn_evidence_reaches_rules_judge_and_saved_report(tmp_path, arrange_type):
+    from test_inbank_evidence import skill_detail
+    from test_judge_evaluator import RecordingModel, judge_spec
+
+    from agentgate.application import ResultReader, RunManagement
+    from agentgate.application.dataset_management import DatasetManagement
+    from agentgate.application.evaluator_management import build_default_evaluator_management
+    from agentgate.domain import TargetDescriptor
+    from agentgate.integrations.observability.trace_server import detail_to_events
+    from agentgate.integrations.targets.inbank.chatabc import resolve_chatabc_trace
+    from agentgate.integrations.targets.inbank.yunxia import resolve_yunxia_trace
+    from agentgate.storage.sqlite import SQLiteRepository
+
+    class SkillTraceServer(_TraceServer):
+        def fetch_events(self, project_id, trace_id, *, timeout=30, customer_task_id=None):
+            self.calls.append((project_id, trace_id, timeout))
+            sequence = len({call[1] for call in self.calls})
+            detail = skill_detail(trace_id, (f"skill-{sequence}",))
+            detail["trace"]["projectId"] = project_id
+            # Two provisional snapshots precede the tool's arrival on each Turn.
+            if sum(call[1] == trace_id for call in self.calls) <= 2:
+                detail["trace"]["spanCount"] = 0
+                detail["spans"] = detail["spans"][:2]
+            return detail_to_events(detail, [])
+
+    repo = SQLiteRepository(tmp_path / "inbank-report.db")
+    datasets = DatasetManagement(repo)
+    dataset = datasets.create_dataset("Synthetic customer evidence")
+    datasets.create_draft(dataset.id)
+    state_expectations = (
+        {"kind": "state", "path": "execution_status",
+         "condition": {"kind": "equals", "expected": "success"}},
+    )
+    for case_index in range(2):
+        turns = []
+        for turn_index in range(2):
+            name = f"skill-{case_index * 2 + turn_index + 1}"
+            turns.append(CaseTurn(
+                id=f"turn-{turn_index + 1}", input={"txt": f"case-{case_index} turn-{turn_index}"},
+                expectations=(
+                    {"kind": "skill_route", "condition": {"kind": "equals", "expected": name}},
+                    {"kind": "tool_call", "tool": "read_file"},
+                    {"kind": "tool_call", "tool": "delete", "mode": "forbidden"},
+                    {"kind": "tool_argument", "tool": "read_file", "path": "arguments.file_path",
+                     "condition": {"kind": "equals",
+                                   "expected": f"/mnt/oneagent-skills/bundle/skills/{name}/SKILL.md"}},
+                    {"kind": "output", "path": "output",
+                     "condition": {"kind": "equals", "expected": "customer answer"}},
+                ) + state_expectations,
+            ))
+        datasets.save_case(dataset.id, Case(id=f"case-{case_index}", name="Customer case", turns=tuple(turns)))
+    datasets.publish_draft(dataset.id)
+    target = _request(arrange_type).target
+    descriptor = TargetDescriptor(ref=target.ref, display_name=target.display_name)
+    repo.save_target_descriptor(descriptor)
+    target = TargetSnapshot(**{
+        **target.model_dump(exclude={"content_sha256", "descriptor_sha256"}),
+        "descriptor_sha256": descriptor.content_sha256,
+    })
+    model = RecordingModel()
+    evaluators = build_default_evaluator_management(
+        repo, judge_client=model, judge_model_id="mock-only", judge_credential_ref="env:UNUSED_TEST_KEY",
+    )
+    spec = judge_spec(input_selection="full_trajectory", max_input_chars=100000)
+    judge, _ = evaluators.create_evaluator(
+        "Synthetic trajectory judge", kind=spec.kind, dimension=spec.dimension, metric=spec.metric,
+        implementation_id=spec.implementation_id, config=spec.config,
+    )
+    evaluators.publish_draft(judge.id)
+    evaluators.update_evaluator(judge.id, enabled=True)
+    runs = RunManagement(repo, evaluators)
+    run = runs.create_run(target, dataset_id=dataset.id, evaluator_ids=[
+        "skill-routing", "required-tool", "forbidden-tool", "tool-arguments", "final-output", "final-state", judge.id,
+    ])
+    transport = _Transport(arrange_type)
+    trace_server = SkillTraceServer()
+    adapter = _adapter(arrange_type, transport, trace_server)
+    resolver = resolve_yunxia_trace if arrange_type == "yunxia" else resolve_chatabc_trace
+    try:
+        completed = runs.execute_run(run.id, adapter, resolver)
+    finally:
+        adapter.close()
+    assert completed.status.value == "completed"
+    report = ResultReader(repo).get_report(run.id)
+    assert len(report.results) == 14
+    assert all(result.outcome.value == "pass" for result in report.results)
+    assert len(model.requests) == 2
+    assert len(trace_server.calls) == 20
+    assert len({call[1] for call in trace_server.calls}) == 4
+    reopened = SQLiteRepository(tmp_path / "inbank-report.db")
+    assert ResultReader(reopened).get_report(run.id).results == report.results
+    seen_route_ids = set()
+    for case_index in range(2):
+        trace = reopened.get_trace(run.id, f"case-{case_index}")
+        assert trace == repo.get_trace(run.id, f"case-{case_index}")
+        assert trace.final_state == {"execution_status": "success"}
+        for turn_index in range(2):
+            turn_trace = trace.for_turn(f"turn-{turn_index + 1}")
+            assert turn_trace.final_state == {"execution_status": "success"}
+            route = next(s for s in turn_trace.spans if s.operation_type == "routing")
+            tool = next(s for s in turn_trace.spans if s.operation_type == "tool")
+            name = f"skill-{case_index * 2 + turn_index + 1}"
+            assert route.attributes["selected_skill"] == name
+            assert tool.attributes["arguments"]["file_path"].endswith(f"/{name}/SKILL.md")
+            assert tool.attributes["tool_call_id"] == "call-0"  # Same source ID in every turn.
+            assert route.span_id not in seen_route_ids
+            seen_route_ids.add(route.span_id)
+        prompt = model.requests[case_index].user_prompt
+        assert f'"selected_skill":"skill-{case_index * 2 + 1}"' in prompt
+        assert f'"selected_skill":"skill-{case_index * 2 + 2}"' in prompt
+        assert f'"selected_skill":"skill-{(1 - case_index) * 2 + 1}"' not in prompt
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+def test_customer_prefix_snapshots_four_then_two_spans_wait_for_all_nine(arrange_type, caplog):
+    from test_inbank_evidence import skill_detail
+
+    caplog.set_level(logging.INFO)
+    transport = _Transport(arrange_type)
+    queries = []
+    clock = _Clock()
+
+    def opener(request, **_kwargs):
+        trace_id = request.full_url.rsplit("/", 1)[-1]
+        queries.append(trace_id)
+        detail = skill_detail(trace_id)
+        model, llm, tool = detail["spans"]
+        detail["trace"].update(projectId="customer-agent-id", spanCount=7)
+        call_id = f"call-{trace_id}"
+        llm["output"]["tool_calls"][0]["id"] = call_id
+        tool["output"]["tool_call_id"] = call_id
+        tool["parentSpanId"] = "tools"
+        model["parentSpanId"] = "root"
+        detail["spans"] = [
+            dict(model, id="context-1", eventId="context-1", spanType="context", parentSpanId="model"),
+            llm, model, tool,
+            dict(model, id="tools", eventId="tools"),
+            dict(model, id="context-2", eventId="context-2", spanType="context", parentSpanId="model-2"),
+            dict(llm, id="llm-2", eventId="llm-2", parentSpanId="model-2", output={"content": "answer"}),
+            dict(model, id="model-2", eventId="model-2"),
+            dict(model, id="root", eventId="root", parentSpanId=None),
+        ]
+        if queries.count(trace_id) <= 2:
+            detail["trace"]["spanCount"] = 0
+            detail["spans"] = detail["spans"][:4 if transport.chat_count == 1 else 2]
+        return Response({"code": "0", "data": detail})
+
+    client = TraceServerClient("https://trace.test", mode="inbank", token="task-token", opener=opener)
+    adapter = _adapter(arrange_type, transport, client, sleep=clock.sleep, monotonic=clock.monotonic)
+    try:
+        trace = adapter.wait(adapter.start(_request(arrange_type)), 30).inline_trace
+    finally:
+        adapter.close()
+    assert transport.chat_count == 2 and transport.deleted
+    assert queries == [item for request_id in transport.request_ids for item in [request_id] * 5]
+    for turn, request_id in zip(("turn-1", "turn-2"), transport.request_ids):
+        scoped = trace.for_turn(turn)
+        source_spans = [s for s in scoped.spans if "trace_sdk.span_id" in s.attributes]
+        assert len(source_spans) == 9
+        tool = next(s for s in source_spans if s.operation_type == "tool")
+        assert tool.attributes["arguments"]["limit"] == 1000
+        assert tool.attributes["tool_call_id"] == f"call-{request_id}"
+        source = scoped.spans[0].attributes["inbank.trace_source"]
+        assert source["raw_trace"]["spanCount"] == 7
+        assert source["readiness"]["attempts"] == 5
+        assert source["readiness"]["stable_samples"] == 3
+        assert source["readiness"]["stable_seconds"] == 4
+    assert "received_spans=4" in caplog.text
+    assert "received_spans=2" in caplog.text
+    assert "received_spans=9" in caplog.text
+    assert "reason=snapshot_settling" in caplog.text
+    assert "basis=stable_snapshot" in caplog.text
+    assert "Synthetic prompt" not in caplog.text and "task-token" not in caplog.text
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("span_count", [0, 2])
+def test_stable_snapshot_without_tool_span_is_accepted_without_synthetic_tools(
+    arrange_type, span_count, monkeypatch,
+):
+    from test_inbank_evidence import skill_detail
+
+    from agentgate.integrations.observability.trace_server import detail_to_events
+
+    transport = _Transport(arrange_type)
+    server = _TraceServer()
+    queries = []
+    clock = _Clock()
+
+    def fetch(project_id, trace_id, **_kwargs):
+        queries.append(trace_id)
+        detail = skill_detail(trace_id)
+        detail["trace"].update(projectId=project_id, spanCount=span_count)
+        detail["spans"] = detail["spans"][:2]
+        return detail_to_events(detail, [])
+
+    monkeypatch.setattr(server, "fetch_events", fetch)
+    adapter = _adapter(arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic)
+    try:
+        trace = adapter.wait(adapter.start(_request(arrange_type)), 30).inline_trace
+    finally:
+        adapter.close()
+    assert transport.chat_count == 2 and transport.deleted
+    assert queries == [item for request_id in transport.request_ids for item in [request_id] * 3]
+    assert clock.now == 8
+    assert trace.final_output["output"] == "customer answer"
+    for turn in ("turn-1", "turn-2"):
+        scoped = trace.for_turn(turn)
+        root = scoped.spans[0]
+        assert root.attributes["inbank.evidence_mode"] == "trace_server"
+        assert "inbank.trace_fallback_reason" not in root.attributes
+        readiness = root.attributes["inbank.trace_source"]["readiness"]
+        assert readiness["stable_samples"] == 3
+        assert readiness["stable_seconds"] == 4
+        assert len([s for s in scoped.spans if "trace_sdk.span_id" in s.attributes]) == 2
+        assert not any(s.operation_type == "tool" for s in scoped.spans)
+        llm = next(s for s in scoped.spans if s.operation_type == "llm")
+        assert llm.attributes["trace_sdk.output"]["tool_calls"][0]["name"] == "read_file"
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("problem", ["changing-content", "interrupted-stability"])
+def test_unstable_snapshot_times_out_without_synthetic_tools(arrange_type, problem, monkeypatch):
+    from test_inbank_evidence import skill_detail
+
+    from agentgate.integrations.observability.trace_server import detail_to_events
+
+    transport = _Transport(arrange_type)
+    server = _TraceServer()
+    queries = []
+    clock = _Clock()
+
+    def fetch(project_id, trace_id, **_kwargs):
+        queries.append(trace_id)
+        detail = skill_detail(trace_id)
+        detail["trace"].update(projectId=project_id, spanCount=0)
+        if problem == "changing-content":
+            detail["spans"][-1]["output"]["content"] = str(len(queries))
+        elif queries.count(trace_id) % 3 == 0:
+            raise TargetExecutionError("unavailable", "trace server request failed")
+        return detail_to_events(detail, [])
+
+    monkeypatch.setattr(server, "fetch_events", fetch)
+    adapter = _adapter(arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic)
+    try:
+        trace = adapter.wait(adapter.start(_request(arrange_type)), 30).inline_trace
+    finally:
+        adapter.close()
+    assert transport.chat_count == 2 and transport.deleted
+    assert len(queries) == 10 and clock.now == 20
+    assert len(trace.spans) == 2
+    assert trace.final_output["output"] == "customer answer"
+    for span in trace.spans:
+        assert span.operation_type == "turn"
+        assert span.attributes["inbank.evidence_mode"] == "output_only"
+        assert span.attributes["inbank.trace_fallback_reason"] == "timeout"
+
+
+def _trace_wait_settings(arrange_type, value=None):
+    prefix = "YUNXIA" if arrange_type == "yunxia" else "CHATABC"
+    environ = {
+        "AGENTGATE_INBANK_CREATE_BASE_URL": "https://bank.test",
+        f"AGENTGATE_INBANK_{prefix}_HEALTH_BASE_URL": "https://bank.test",
+        f"AGENTGATE_INBANK_{prefix}_POD_API_BASE_URL": "https://bank.test",
+        f"AGENTGATE_INBANK_{prefix}_DELETE_BASE_URL": "https://bank.test",
+        "AGENTGATE_INBANK_YUNXIA_AGENT_NAMESPACE": "chatabc",
+        "AGENTGATE_INBANK_YUNXIA_TEST_CUSTOMER_PREFIX": "test",
+        "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS": "600",
+    }
+    if value is not None:
+        environ["AGENTGATE_INBANK_TRACE_WAIT_SECONDS"] = value
+    loader = load_yunxia_settings if arrange_type == "yunxia" else load_chatabc_settings
+    return loader(environ)
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("value,expected", [(None, 60.0), ("20", 20.0), ("24.5", 24.5)])
+def test_trace_wait_settings_default_and_environment_override(arrange_type, value, expected):
+    settings = _trace_wait_settings(arrange_type, value)
+    assert settings.trace_wait_seconds == expected
+    assert settings.request_timeout_seconds == 600
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf", "", "not-a-number"])
+def test_trace_wait_settings_reject_invalid_environment(arrange_type, value):
+    with pytest.raises(ValueError, match="TRACE_WAIT_SECONDS|trace_wait_seconds"):
+        _trace_wait_settings(arrange_type, value)
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), float("-inf"), True])
+def test_trace_wait_settings_reject_invalid_direct_values(arrange_type, value):
+    with pytest.raises(ValueError, match="trace_wait_seconds"):
+        replace(_trace_wait_settings(arrange_type), trace_wait_seconds=value)
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("wait_setting,available_at,mode", [
+    (None, 6, "trace_server"),
+    ("10", 6, "output_only"),
+    ("20", 12, "trace_server"),
+    (None, 62, "output_only"),
+    ("20", 22, "output_only"),
+])
+def test_configured_trace_wait_handles_delayed_evidence_per_turn(
+    arrange_type, wait_setting, available_at, mode, monkeypatch,
+):
+    transport, server, clock = _Transport(arrange_type), _TraceServer(), _Clock()
+    fetch = server.fetch_events
+    first_query = {}
+
+    def delayed(project_id, trace_id, *, timeout, customer_task_id):
+        first_query.setdefault(trace_id, clock.now)
+        events = fetch(project_id, trace_id, timeout=timeout)
+        if clock.now - first_query[trace_id] < available_at:
+            raise TargetExecutionError("rejected", "trace server HTTP 404")
+        return events
+
+    monkeypatch.setattr(server, "fetch_events", delayed)
+    adapter = _adapter(
+        arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+    adapter.settings = _trace_wait_settings(arrange_type, wait_setting)
+    budget = adapter.settings.trace_wait_seconds
+    request = replace(_request(arrange_type), timeout_seconds=600)
+    try:
+        trace = adapter.wait(adapter.start(request), 600).inline_trace
+    finally:
+        adapter.close()
+
+    assert transport.chat_count == 2 and transport.deleted
+    assert len(first_query) == 2
+    assert {call[1] for call in server.calls} == set(transport.request_ids)
+    assert clock.now == 2 * (available_at + 4 if mode == "trace_server" else budget)
+    for turn in request.case.turns:
+        scoped = trace.for_turn(turn.id)
+        root = scoped.spans[0]
+        assert root.attributes["inbank.evidence_mode"] == mode
+        assert scoped.final_output["output"] == "customer answer"
+        if mode == "trace_server":
+            readiness = root.attributes["inbank.trace_source"]["readiness"]
+            assert readiness["stable_samples"] == 3
+            assert readiness["stable_seconds"] == 4
+            assert any(s.operation_type == "tool" for s in scoped.spans)
+        else:
+            assert root.attributes["inbank.trace_fallback_reason"] == "timeout"
+            assert f"within {budget:g}s" in root.attributes["inbank.trace_fallback_detail"]
+            assert len(scoped.spans) == 1
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("case_timeout,http_timeout,budget", [(12, 600, 12), (600, 12, 12)])
+def test_configured_trace_wait_respects_other_timeout_limits(
+    arrange_type, case_timeout, http_timeout, budget, monkeypatch,
+):
+    transport, server, clock = _Transport(arrange_type), _TraceServer(), _Clock()
+    fetch = server.fetch_events
+
+    def unavailable(project_id, trace_id, *, timeout, customer_task_id):
+        fetch(project_id, trace_id, timeout=timeout)
+        raise TargetExecutionError("rejected", "trace server HTTP 404")
+
+    monkeypatch.setattr(server, "fetch_events", unavailable)
+    adapter = _adapter(
+        arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+    adapter.settings = replace(
+        _trace_wait_settings(arrange_type), request_timeout_seconds=http_timeout,
+    )
+    request = replace(_request(arrange_type), timeout_seconds=case_timeout)
+    try:
+        trace = adapter.wait(adapter.start(request), 600).inline_trace
+    finally:
+        adapter.close()
+
+    assert clock.now == 2 * budget
+    assert max(call[2] for call in server.calls) == budget
+    assert transport.chat_count == 2 and transport.deleted
+    for turn in request.case.turns:
+        root = trace.for_turn(turn.id).spans[0]
+        assert root.attributes["inbank.evidence_mode"] == "output_only"
+        assert f"within {budget:g}s" in root.attributes["inbank.trace_fallback_detail"]

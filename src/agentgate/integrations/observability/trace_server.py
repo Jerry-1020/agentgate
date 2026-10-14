@@ -7,7 +7,9 @@ are camelCase projections, rebuilt into the SDK NDJSON shape validated by
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import math
 import os
 import time
@@ -23,6 +25,8 @@ from agentgate.run.target_protocol import TargetExecutionError
 DEFAULT_BASE_URL = "http://127.0.0.1:8210"
 BASE_URL_ENV = "AGENTGATE_TRACE_SERVER_URL"
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
+INBANK_TRACE_SETTLE_SECONDS = 4.0
+LOGGER = logging.getLogger(__name__)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -202,6 +206,22 @@ def _inbank_events(
     return events
 
 
+def inbank_trace_snapshot(events: list[dict]) -> str:
+    """Fingerprint response contents and log structural diagnostics only."""
+    encoded = sorted(json.dumps(e, sort_keys=True, ensure_ascii=True) for e in events)
+    fingerprint = hashlib.sha256("\n".join(encoded).encode()).hexdigest()
+    root = next(e for e in events if e.get("event_type") == "trace")
+    spans = [e for e in events if e.get("event_type") == "span"]
+    LOGGER.info(
+        "inbank_trace_snapshot source_trace_id=%r declared_spans=%r received_spans=%d "
+        "tool_spans=%d span_ids=%r snapshot=%s",
+        root.get("trace_id"), root.get("span_count"), len(spans),
+        sum(e.get("span_type") == "tool" or bool(e.get("tool_name")) for e in spans),
+        [e.get("span_id") for e in spans], fingerprint,
+    )
+    return fingerprint
+
+
 def prepare_inbank_trace_events(
     events: list[dict], *, project_id: str, customer_task_id: str,
     trace_id: str, final_output: dict,
@@ -229,6 +249,21 @@ def prepare_inbank_trace_events(
             or any(e.get("duration_ms") is None or e.get("started_at") is None for e in spans)
         )
     ):
+        return None
+
+    # The customer's count may exclude context spans. Preserve every source span
+    # and its original count; other positive-count discrepancies must keep waiting.
+    context_count = sum(
+        e.get("span_type") == "context"
+        or (isinstance(e.get("metadata"), dict)
+            and e["metadata"].get("trace_server.span_type") == "context")
+        for e in spans
+    )
+    excludes_context = (
+        isinstance(count, int) and count > 0 and context_count > 0
+        and count == len(spans) - context_count
+    )
+    if isinstance(count, int) and count > 0 and count != len(spans) and not excludes_context:
         return None
 
     source = {**root.get("inbank_source", {
@@ -259,6 +294,9 @@ def prepare_inbank_trace_events(
         if count == 0:
             prepared_root["span_count"] = len(spans)
             derived["span_count"] = "received_spans"
+        elif excludes_context:
+            prepared_root["span_count"] = len(spans)
+            derived["span_count"] = "received_spans_including_context"
     if response_project_id != project_id:
         derived["project_id"] = "current_pod_task_binding"
     span_ids = {e["span_id"] for e in spans if isinstance(e.get("span_id"), str)}

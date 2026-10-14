@@ -12,7 +12,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 from test_agent_platform_target import RecordingDispatcher, submission
-from test_inbank_trace_server_adapters import _TraceServer, _Transport
+from test_inbank_trace_server_adapters import _Clock, _TraceServer, _Transport
 from test_run_engine import pending_run
 from test_target_execution_factory import configure_inbank, target_snapshot
 from test_trace_server_client import DETAIL, Response, sparse_inbank_detail
@@ -150,6 +150,13 @@ def persisted_target(request, tmp_path, monkeypatch):
     transport = RecordingTransport()
     transport.arrange_type = request.param
     module = chatabc if adapter_type == "inbank_chatabc" else yunxia
+    adapter_class = module.InbankChatABCTargetAdapter if module is chatabc else module.InbankYunxiaTargetAdapter
+    clock = _Clock()
+    constructor = Mock(side_effect=lambda settings, **kwargs: adapter_class(
+        settings, sleep=clock.sleep, monotonic=clock.monotonic, **kwargs,
+    ))
+    constructor.adapter_type = adapter_class.adapter_type
+    monkeypatch.setattr(execution_factory, adapter_class.__name__, constructor)
     for method in ("request", "post", "get"):
         monkeypatch.setattr(module.requests, method, getattr(transport, method))
     trace_server = _TraceServer()
@@ -198,11 +205,11 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
     assert all(trace.final_output["output"] == "answer" for trace in traces)
     assert all(len(trace.turn_outcomes) == 2 for trace in traces)
     assert all(sum(span.operation_type == "tool" for span in trace.spans) == 2 for trace in traces)
-    assert len(context.trace_server.calls) == 4
+    assert len(context.trace_server.calls) == 12
     assert len({trace_id for _, trace_id, _ in context.trace_server.calls}) == 4
     assert [call[:2] for call in context.trace_server.calls] == [
         (context.run.manifest.target.ref.external_target_id, request_id)
-        for request_id in context.transport.request_ids
+        for request_id in context.transport.request_ids for _ in range(3)
     ]
     context.trace_client_factory.assert_called_once_with(
         "http://trace.invalid", mode="inbank", token="bank-task-secret", source_timezone="Asia/Shanghai",
@@ -404,6 +411,13 @@ def test_bank_submission_to_worker_evaluation_and_report(mode, sparse_root, tmp_
     transport.arrange_type = mode
     transport.missing_trace = True
     module = yunxia if mode == "claw" else chatabc
+    adapter_class = module.InbankYunxiaTargetAdapter if module is yunxia else module.InbankChatABCTargetAdapter
+    clock = _Clock()
+    constructor = Mock(side_effect=lambda settings, **kwargs: adapter_class(
+        settings, sleep=clock.sleep, monotonic=clock.monotonic, **kwargs,
+    ))
+    constructor.adapter_type = adapter_class.adapter_type
+    monkeypatch.setattr(execution_factory, adapter_class.__name__, constructor)
     for method in ("request", "post", "get"):
         monkeypatch.setattr(module.requests, method, getattr(transport, method))
     queries = []
@@ -512,7 +526,8 @@ def test_bank_submission_to_worker_evaluation_and_report(mode, sparse_root, tmp_
                         assert source["raw_trace"]["output"] is None
                         assert source["raw_trace"]["spanCount"] == 0
                         assert source["derived_fields"]["output"] == "dialogue"
-        assert queries == transport.request_ids and len(set(queries)) == 4
+        assert queries == [request_id for request_id in transport.request_ids for _ in range(3)]
+        assert len(set(queries)) == 4
         assert transport.created == transport.deleted == 1
         assert len(transport.messages) == 4
     assert b"task-login-token" not in path.read_bytes()
@@ -656,10 +671,12 @@ def test_judge_initialization_failure_closes_target(persisted_target, monkeypatc
 @pytest.fixture
 def lifecycle_target(persisted_target):
     context = persisted_target
-    sleep = Mock()
+    clock = _Clock()
+    sleep = Mock(side_effect=clock.sleep)
     kwargs = {
         "trace_client": context.trace_server,
         "sleep": sleep,
+        "monotonic": clock.monotonic,
     }
     if context.run.manifest.target.adapter_type == "inbank_yunxia":
         adapter = yunxia.InbankYunxiaTargetAdapter(
@@ -732,7 +749,8 @@ def test_create_pod_retries_only_creation(
         assert result.inline_trace.final_output["output"] == "answer"
         assert context.adapter.pod_lifecycle["create"] == "succeeded"
         assert context.adapter.pod_lifecycle["health"] == "succeeded"
-        assert len(context.transport.messages) == len(context.trace_server.calls) == 2
+        assert len(context.transport.messages) == 2
+        assert len(context.trace_server.calls) == 6
         health_calls = [call for call in calls.call_args_list if "/health" in call.args[1]]
         assert len(health_calls) == 1
 
@@ -748,7 +766,9 @@ def test_create_pod_retries_only_creation(
         **({"branchId": "branch-review"}
            if context.request.target.adapter_type == "inbank_yunxia" else {}),
     }
-    assert [call.args[0] for call in context.sleep.call_args_list] == [10] * min(failure_count, 2)
+    assert [call.args[0] for call in context.sleep.call_args_list] == (
+        [10] * min(failure_count, 2) + ([2] * 4 if failure_count < 3 else [])
+    )
     if failure_count:
         assert "phase=create attempt=1 max_attempts=3 retry_delay_seconds=10" in caplog.text
     context.adapter.close()
@@ -785,7 +805,8 @@ def test_init_session_retries_without_recreating_pod_or_replaying_turns(
         result = context.adapter.wait(context.adapter.start(context.request), 600)
         assert result.inline_trace.final_output["output"] == "answer"
         assert len(context.transport.sessions) == 1
-        assert len(context.transport.messages) == len(context.trace_server.calls) == 2
+        assert len(context.transport.messages) == 2
+        assert len(context.trace_server.calls) == 6
         assert all(message["session_id"] == "session-0" for message in context.transport.messages)
 
     attempts = [call for call in calls.call_args_list if "/init_session" in call.args[1]]
@@ -793,7 +814,9 @@ def test_init_session_retries_without_recreating_pod_or_replaying_turns(
     assert all(call == attempts[0] for call in attempts)
     assert attempts[0].kwargs["payload"]["requestId"]
     assert attempts[0].kwargs["headers"]["traceparent"] == context.request.traceparent
-    assert [call.args[0] for call in context.sleep.call_args_list] == [5] * min(failure_count, 9)
+    assert [call.args[0] for call in context.sleep.call_args_list] == (
+        [5] * min(failure_count, 9) + ([2] * 4 if failure_count < 10 else [])
+    )
     assert context.transport.created == 1
     health_calls = [call for call in calls.call_args_list if "/health" in call.args[1]]
     assert len(health_calls) == 1
@@ -820,8 +843,11 @@ def test_worker_persists_outcome_after_lifecycle_retries(
     adapter_class = (
         yunxia.InbankYunxiaTargetAdapter if is_yunxia else chatabc.InbankChatABCTargetAdapter
     )
-    sleep = Mock()
-    constructor = Mock(side_effect=lambda settings, **kwargs: adapter_class(settings, sleep=sleep, **kwargs))
+    clock = _Clock()
+    sleep = Mock(side_effect=clock.sleep)
+    constructor = Mock(side_effect=lambda settings, **kwargs: adapter_class(
+        settings, sleep=sleep, monotonic=clock.monotonic, **kwargs,
+    ))
     constructor.adapter_type = adapter_class.adapter_type
     monkeypatch.setattr(execution_factory, adapter_class.__name__, constructor)
     failure_count = max_attempts if exhausted else max_attempts - 1
@@ -849,5 +875,7 @@ def test_worker_persists_outcome_after_lifecycle_retries(
     attempts = [call for call in calls.call_args_list if endpoint in call.args[1]]
     expected_calls = max_attempts + (endpoint == "/init_session" and not exhausted)
     assert len(attempts) == expected_calls
-    assert [call.args[0] for call in sleep.call_args_list] == [delay] * (max_attempts - 1)
+    assert [call.args[0] for call in sleep.call_args_list] == (
+        [delay] * (max_attempts - 1) + ([] if exhausted else [2] * 8)
+    )
     assert context.transport.deleted == (0 if exhausted and endpoint == "/createAgent" else 1)

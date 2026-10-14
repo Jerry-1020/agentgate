@@ -17,7 +17,9 @@ import requests
 
 from agentgate.domain import TargetType, Trace, TraceSpan, utcnow
 from agentgate.integrations.observability.trace_server import (
+    INBANK_TRACE_SETTLE_SECONDS,
     TraceServerClient,
+    inbank_trace_snapshot,
     prepare_inbank_trace_events,
 )
 from agentgate.integrations.targets.inbank.diagnostics import (
@@ -38,7 +40,6 @@ from agentgate.run.target_protocol import (
 
 LOGGER = logging.getLogger(__name__)
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
-_TRACE_WAIT_SECONDS = 10.0
 _DELETE_SUCCESS_CODES = frozenset({"0", "0000", "FAIAG0000"})
 
 
@@ -354,6 +355,7 @@ class YunxiaSettings:
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
     debug_sse_failures: bool = False
+    trace_wait_seconds: float = 60.0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -378,6 +380,13 @@ class YunxiaSettings:
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
+        if (
+            isinstance(self.trace_wait_seconds, bool)
+            or not isinstance(self.trace_wait_seconds, (int, float))
+            or not math.isfinite(self.trace_wait_seconds)
+            or self.trace_wait_seconds <= 0
+        ):
+            raise ValueError("trace_wait_seconds must be a finite positive number")
 
 
 class InbankYunxiaTargetAdapter:
@@ -682,10 +691,17 @@ class InbankYunxiaTargetAdapter:
                     request_id,
                     customer_task_id=_task_id_from_run_id(request.run_id),
                     final_output=final_output,
-                    timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds, _TRACE_WAIT_SECONDS),
+                    timeout=min(
+                        request.timeout_seconds,
+                        self.settings.request_timeout_seconds,
+                        self.settings.trace_wait_seconds,
+                    ),
                 )
                 turn_spans = normalize_turn_evidence(
                     request, turn, project_id=project_id, request_id=request_id, events=events,
+                )
+                outcomes[turn.id]["state"] = json.loads(
+                    turn_spans[0].attributes["agentgate.turn.state"]
                 )
             except TargetExecutionError as exc:
                 turn_spans = (output_only_turn_span(
@@ -732,6 +748,9 @@ class InbankYunxiaTargetAdapter:
         deadline = self._monotonic() + timeout
         attempt = 0
         reason = "not_queried"
+        previous_snapshot = None
+        stable_since = None
+        stable_samples = 0
         while (remaining := deadline - self._monotonic()) > 0:
             attempt += 1
             try:
@@ -746,22 +765,48 @@ class InbankYunxiaTargetAdapter:
                 ):
                     raise
                 reason = "trace_not_found" if exc.message == "inbank trace not found" else exc.code
+                previous_snapshot = stable_since = None
+                stable_samples = 0
             else:
                 prepared = prepare_inbank_trace_events(
                     events, project_id=project_id, customer_task_id=customer_task_id,
                     trace_id=trace_id, final_output=final_output,
                 )
+                snapshot = inbank_trace_snapshot(events)
+                now = self._monotonic()
+                if prepared is None:
+                    previous_snapshot = stable_since = None
+                    stable_samples = 0
+                    reason = "evidence_pending"
+                else:
+                    if snapshot != previous_snapshot:
+                        previous_snapshot, stable_since = snapshot, now
+                        stable_samples = 0
+                    stable_samples += 1
+                    reason = "snapshot_settling"
+                    if stable_samples < 3 or now - stable_since < INBANK_TRACE_SETTLE_SECONDS:
+                        prepared = None
                 if prepared is not None:
                     if self._monotonic() >= deadline:
                         break
-                    LOGGER.debug(
-                        "inbank_trace_ready adapter=yunxia run_id=%r source_trace_id=%r attempt=%d",
+                    next(e for e in prepared if e["event_type"] == "trace")["inbank_source"]["readiness"] = {
+                        "basis": "stable_snapshot",
+                        "attempts": attempt,
+                        "stable_samples": stable_samples,
+                        "stable_seconds": now - stable_since,
+                        "snapshot_sha256": snapshot,
+                    }
+                    LOGGER.info(
+                        "inbank_trace_ready adapter=yunxia run_id=%r source_trace_id=%r attempt=%d "
+                        "basis=stable_snapshot stable_samples=%d stable_seconds=%.3f snapshot=%s",
                         self._run_id,
                         trace_id,
                         attempt,
+                        stable_samples,
+                        now - stable_since,
+                        snapshot,
                     )
                     return prepared
-                reason = "evidence_pending"
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 break
@@ -903,6 +948,9 @@ def load_yunxia_settings(
         **{field: values[name] for field, name in required.items()},
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 180.0
+        ),
+        trace_wait_seconds=_positive_float(
+            values, "AGENTGATE_INBANK_TRACE_WAIT_SECONDS", 60.0
         ),
         health_wait_seconds=_positive_float(values, "AGENTGATE_INBANK_HEALTH_WAIT_SECONDS", 300.0),
         health_poll_interval_seconds=_positive_float(
