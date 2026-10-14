@@ -1,17 +1,79 @@
 import json
 from copy import deepcopy
+from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta
 from urllib.error import HTTPError
 
 import pytest
 
 from agentgate.integrations.observability.trace_server import (
+    InbankTraceSettings,
     TraceServerClient,
     detail_to_events,
     inbank_trace_snapshot,
+    load_inbank_trace_settings,
     prepare_inbank_trace_events,
 )
 from agentgate.run.target_protocol import TargetExecutionError
+
+
+def test_inbank_trace_settings_defaults_and_overrides():
+    assert load_inbank_trace_settings({}) == InbankTraceSettings(60.0, 2.0, 4.0, 3)
+    assert load_inbank_trace_settings({
+        "AGENTGATE_INBANK_TRACE_WAIT_SECONDS": "90",
+        "AGENTGATE_INBANK_TRACE_POLL_INTERVAL_SECONDS": "1.5",
+        "AGENTGATE_INBANK_TRACE_SETTLE_SECONDS": "6",
+        "AGENTGATE_INBANK_TRACE_STABLE_SAMPLES": "4",
+    }) == InbankTraceSettings(90.0, 1.5, 6.0, 4)
+    assert load_inbank_trace_settings({
+        "AGENTGATE_INBANK_TRACE_WAIT_SECONDS": "0.5",
+        "AGENTGATE_INBANK_TRACE_STABLE_SAMPLES": "1",
+    }) == InbankTraceSettings(0.5, 2.0, 4.0, 1)
+
+
+def test_inbank_trace_settings_read_environment_at_call_time(monkeypatch):
+    for name in ("WAIT_SECONDS", "POLL_INTERVAL_SECONDS", "SETTLE_SECONDS", "STABLE_SAMPLES"):
+        monkeypatch.delenv(f"AGENTGATE_INBANK_TRACE_{name}", raising=False)
+    first = load_inbank_trace_settings()
+    monkeypatch.setenv("AGENTGATE_INBANK_TRACE_WAIT_SECONDS", "120")
+    assert load_inbank_trace_settings().wait_seconds == 120
+    assert first.wait_seconds == 60
+    assert load_inbank_trace_settings({}).wait_seconds == 60
+    assert InbankTraceSettings().wait_seconds == 60
+
+
+def test_inbank_trace_settings_are_immutable():
+    settings = InbankTraceSettings()
+    with pytest.raises(FrozenInstanceError):
+        settings.wait_seconds = 120
+
+
+@pytest.mark.parametrize("name", ["wait_seconds", "poll_interval_seconds", "settle_seconds"])
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), float("-inf"), True, "2", None])
+def test_inbank_trace_settings_reject_invalid_seconds(name, value):
+    with pytest.raises(ValueError, match=f"AGENTGATE_INBANK_TRACE_{name.upper()}"):
+        InbankTraceSettings(**{name: value})
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, 3.0, True, "3", None])
+def test_inbank_trace_settings_reject_invalid_sample_counts(value):
+    with pytest.raises(ValueError, match="AGENTGATE_INBANK_TRACE_STABLE_SAMPLES"):
+        InbankTraceSettings(stable_samples=value)
+
+
+@pytest.mark.parametrize("name", ["WAIT_SECONDS", "POLL_INTERVAL_SECONDS", "SETTLE_SECONDS"])
+@pytest.mark.parametrize("value", ["", "invalid", "0", "-1", "nan", "inf", "-inf"])
+def test_inbank_trace_settings_reject_invalid_environment_seconds(name, value):
+    key = f"AGENTGATE_INBANK_TRACE_{name}"
+    with pytest.raises(ValueError, match=key):
+        load_inbank_trace_settings({key: value})
+
+
+@pytest.mark.parametrize("value", ["", "invalid", "0", "-1", "1.5", "3.0", "nan", "inf"])
+def test_inbank_trace_settings_reject_invalid_environment_sample_counts(value):
+    key = "AGENTGATE_INBANK_TRACE_STABLE_SAMPLES"
+    with pytest.raises(ValueError, match=key):
+        load_inbank_trace_settings({key: value})
 
 
 class Response:

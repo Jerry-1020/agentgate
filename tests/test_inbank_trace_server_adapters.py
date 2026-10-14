@@ -13,7 +13,7 @@ import pytest
 from test_trace_server_client import DETAIL, Response, sparse_inbank_detail
 
 from agentgate.domain import Case, CaseTurn, TargetRef, TargetSnapshot, TargetType
-from agentgate.integrations.observability.trace_server import TraceServerClient
+from agentgate.integrations.observability.trace_server import InbankTraceSettings, TraceServerClient
 from agentgate.integrations.targets.inbank.chatabc import (
     ChatABCSettings,
     InbankChatABCTargetAdapter,
@@ -1174,7 +1174,7 @@ def test_unstable_snapshot_times_out_without_synthetic_tools(arrange_type, probl
         assert span.attributes["inbank.trace_fallback_reason"] == "timeout"
 
 
-def _trace_wait_settings(arrange_type, value=None):
+def _trace_wait_settings(arrange_type, value=None, *, trace_environment=None):
     prefix = "YUNXIA" if arrange_type == "yunxia" else "CHATABC"
     environ = {
         "AGENTGATE_INBANK_CREATE_BASE_URL": "https://bank.test",
@@ -1187,6 +1187,7 @@ def _trace_wait_settings(arrange_type, value=None):
     }
     if value is not None:
         environ["AGENTGATE_INBANK_TRACE_WAIT_SECONDS"] = value
+    environ.update(trace_environment or {})
     loader = load_yunxia_settings if arrange_type == "yunxia" else load_chatabc_settings
     return loader(environ)
 
@@ -1195,22 +1196,103 @@ def _trace_wait_settings(arrange_type, value=None):
 @pytest.mark.parametrize("value,expected", [(None, 60.0), ("20", 20.0), ("24.5", 24.5)])
 def test_trace_wait_settings_default_and_environment_override(arrange_type, value, expected):
     settings = _trace_wait_settings(arrange_type, value)
-    assert settings.trace_wait_seconds == expected
+    assert settings.trace_settings == InbankTraceSettings(wait_seconds=expected)
     assert settings.request_timeout_seconds == 600
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf", "", "not-a-number"])
 def test_trace_wait_settings_reject_invalid_environment(arrange_type, value):
-    with pytest.raises(ValueError, match="TRACE_WAIT_SECONDS|trace_wait_seconds"):
+    with pytest.raises(ValueError, match="TRACE_WAIT_SECONDS"):
         _trace_wait_settings(arrange_type, value)
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
 @pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), float("-inf"), True])
 def test_trace_wait_settings_reject_invalid_direct_values(arrange_type, value):
-    with pytest.raises(ValueError, match="trace_wait_seconds"):
-        replace(_trace_wait_settings(arrange_type), trace_wait_seconds=value)
+    with pytest.raises(ValueError, match="TRACE_WAIT_SECONDS"):
+        replace(
+            _trace_wait_settings(arrange_type),
+            trace_settings=InbankTraceSettings(wait_seconds=value),
+        )
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("value", [None, {}, 60])
+def test_inbank_adapters_reject_invalid_trace_settings(arrange_type, value):
+    with pytest.raises(TypeError, match="trace_settings must be InbankTraceSettings"):
+        replace(_trace_wait_settings(arrange_type), trace_settings=value)
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("name", ["POLL_INTERVAL_SECONDS", "SETTLE_SECONDS", "STABLE_SAMPLES"])
+def test_inbank_adapters_validate_shared_trace_environment(arrange_type, name):
+    key = f"AGENTGATE_INBANK_TRACE_{name}"
+    with pytest.raises(ValueError, match=key):
+        _trace_wait_settings(arrange_type, trace_environment={key: "0"})
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+@pytest.mark.parametrize("interval,settle,samples,attempts,elapsed", [
+    (0.5, 0.5, 4, 4, 1.5),
+    (1.5, 4.5, 2, 4, 4.5),
+])
+def test_inbank_adapters_use_configured_polling_and_both_stability_conditions(
+    arrange_type, interval, settle, samples, attempts, elapsed,
+):
+    transport, server, clock = _Transport(arrange_type), _TraceServer(), _Clock()
+    adapter = _adapter(
+        arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+    adapter.settings = _trace_wait_settings(arrange_type, "90", trace_environment={
+        "AGENTGATE_INBANK_TRACE_POLL_INTERVAL_SECONDS": str(interval),
+        "AGENTGATE_INBANK_TRACE_SETTLE_SECONDS": str(settle),
+        "AGENTGATE_INBANK_TRACE_STABLE_SAMPLES": str(samples),
+    })
+    assert adapter.settings.trace_settings == InbankTraceSettings(90, interval, settle, samples)
+    request = replace(_request(arrange_type), timeout_seconds=600)
+    try:
+        trace = adapter.wait(adapter.start(request), 600).inline_trace
+    finally:
+        adapter.close()
+
+    assert transport.chat_count == 2 and transport.deleted
+    assert len(server.calls) == 2 * attempts
+    assert clock.now == 2 * elapsed
+    assert clock.sleeps == [interval] * (2 * (attempts - 1))
+    for turn in request.case.turns:
+        root = trace.for_turn(turn.id).spans[0]
+        assert root.attributes["inbank.evidence_mode"] == "trace_server"
+        readiness = root.attributes["inbank.trace_source"]["readiness"]
+        assert readiness["stable_samples"] == attempts
+        assert readiness["stable_seconds"] == elapsed
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
+def test_inbank_adapters_cap_configured_poll_interval_at_deadline_and_fall_back(arrange_type):
+    transport, server, clock = _Transport(arrange_type), _TraceServer(), _Clock()
+    adapter = _adapter(
+        arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic,
+    )
+    adapter.settings = _trace_wait_settings(arrange_type, "5", trace_environment={
+        "AGENTGATE_INBANK_TRACE_POLL_INTERVAL_SECONDS": "3",
+        "AGENTGATE_INBANK_TRACE_SETTLE_SECONDS": "8",
+        "AGENTGATE_INBANK_TRACE_STABLE_SAMPLES": "2",
+    })
+    request = _request(arrange_type)
+    try:
+        trace = adapter.wait(adapter.start(request), 30).inline_trace
+    finally:
+        adapter.close()
+
+    assert transport.chat_count == 2 and transport.deleted
+    assert len(server.calls) == 4 and clock.now == 10
+    assert clock.sleeps == [3, 2, 3, 2]
+    for turn in request.case.turns:
+        root = trace.for_turn(turn.id).spans[0]
+        assert root.attributes["inbank.evidence_mode"] == "output_only"
+        assert root.attributes["inbank.trace_fallback_reason"] == "timeout"
+        assert "within 5s" in root.attributes["inbank.trace_fallback_detail"]
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
@@ -1240,7 +1322,7 @@ def test_configured_trace_wait_handles_delayed_evidence_per_turn(
         arrange_type, transport, server, sleep=clock.sleep, monotonic=clock.monotonic,
     )
     adapter.settings = _trace_wait_settings(arrange_type, wait_setting)
-    budget = adapter.settings.trace_wait_seconds
+    budget = adapter.settings.trace_settings.wait_seconds
     request = replace(_request(arrange_type), timeout_seconds=600)
     try:
         trace = adapter.wait(adapter.start(request), 600).inline_trace

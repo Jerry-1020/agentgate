@@ -13,6 +13,8 @@ import logging
 import math
 import os
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 from urllib.error import HTTPError, URLError
@@ -27,6 +29,53 @@ BASE_URL_ENV = "AGENTGATE_TRACE_SERVER_URL"
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024
 INBANK_TRACE_SETTLE_SECONDS = 4.0
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class InbankTraceSettings:
+    """Shared wait limits for the in-bank adapters; callers own polling."""
+
+    wait_seconds: float = 60.0
+    poll_interval_seconds: float = 2.0
+    settle_seconds: float = INBANK_TRACE_SETTLE_SECONDS
+    stable_samples: int = 3
+
+    def __post_init__(self) -> None:
+        for name in ("wait_seconds", "poll_interval_seconds", "settle_seconds"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0
+            ):
+                raise ValueError(
+                    f"AGENTGATE_INBANK_TRACE_{name.upper()} must be a finite positive number"
+                )
+        if (
+            isinstance(self.stable_samples, bool) or not isinstance(self.stable_samples, int)
+            or self.stable_samples <= 0
+        ):
+            raise ValueError("AGENTGATE_INBANK_TRACE_STABLE_SAMPLES must be a positive integer")
+
+
+def load_inbank_trace_settings(
+    environ: Mapping[str, str] | None = None,
+) -> InbankTraceSettings:
+    """Read the supplied environment at call time; startup owns loading .env."""
+    values = os.environ if environ is None else environ
+    overrides = {}
+    for name, convert in (
+        ("wait_seconds", float),
+        ("poll_interval_seconds", float),
+        ("settle_seconds", float),
+        ("stable_samples", int),
+    ):
+        key = f"AGENTGATE_INBANK_TRACE_{name.upper()}"
+        if key in values:
+            try:
+                overrides[name] = convert(values[key])
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} has an invalid numeric value") from None
+    return InbankTraceSettings(**overrides)
 
 
 class NoRedirect(HTTPRedirectHandler):

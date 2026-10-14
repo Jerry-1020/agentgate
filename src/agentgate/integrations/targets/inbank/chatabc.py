@@ -8,7 +8,7 @@ import math
 import os
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
@@ -17,9 +17,10 @@ import requests
 
 from agentgate.domain import TargetType, Trace, TraceSpan, utcnow
 from agentgate.integrations.observability.trace_server import (
-    INBANK_TRACE_SETTLE_SECONDS,
+    InbankTraceSettings,
     TraceServerClient,
     inbank_trace_snapshot,
+    load_inbank_trace_settings,
     prepare_inbank_trace_events,
 )
 from agentgate.integrations.targets.inbank.diagnostics import (
@@ -440,7 +441,7 @@ class ChatABCSettings:
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
     debug_sse_failures: bool = False
-    trace_wait_seconds: float = 60.0
+    trace_settings: InbankTraceSettings = field(default_factory=InbankTraceSettings)
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -460,13 +461,8 @@ class ChatABCSettings:
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
-        if (
-            isinstance(self.trace_wait_seconds, bool)
-            or not isinstance(self.trace_wait_seconds, (int, float))
-            or not math.isfinite(self.trace_wait_seconds)
-            or self.trace_wait_seconds <= 0
-        ):
-            raise ValueError("trace_wait_seconds must be a finite positive number")
+        if not isinstance(self.trace_settings, InbankTraceSettings):
+            raise TypeError("trace_settings must be InbankTraceSettings")
 
 
 class InbankChatABCTargetAdapter:
@@ -764,7 +760,7 @@ class InbankChatABCTargetAdapter:
                     timeout=min(
                         request.timeout_seconds,
                         self.settings.request_timeout_seconds,
-                        self.settings.trace_wait_seconds,
+                        self.settings.trace_settings.wait_seconds,
                     ),
                 )
                 turn_spans = normalize_turn_evidence(
@@ -815,6 +811,7 @@ class InbankChatABCTargetAdapter:
                 "invalid_request", "Trace wait timeout must be finite and positive"
             )
         deadline = self._monotonic() + timeout
+        trace_settings = self.settings.trace_settings
         attempt = 0
         reason = "not_queried"
         previous_snapshot = None
@@ -853,7 +850,10 @@ class InbankChatABCTargetAdapter:
                         stable_samples = 0
                     stable_samples += 1
                     reason = "snapshot_settling"
-                    if stable_samples < 3 or now - stable_since < INBANK_TRACE_SETTLE_SECONDS:
+                    if (
+                        stable_samples < trace_settings.stable_samples
+                        or now - stable_since < trace_settings.settle_seconds
+                    ):
                         prepared = None
                 if prepared is not None:
                     if self._monotonic() >= deadline:
@@ -879,7 +879,7 @@ class InbankChatABCTargetAdapter:
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 break
-            delay = min(2.0, remaining)
+            delay = min(trace_settings.poll_interval_seconds, remaining)
             LOGGER.info(
                 "inbank_trace_wait adapter=chatabc run_id=%r source_trace_id=%r "
                 "attempt=%d reason=%s retry_delay_seconds=%.3f",
@@ -1005,9 +1005,7 @@ def load_chatabc_settings(
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 180.0
         ),
-        trace_wait_seconds=_positive_float(
-            values, "AGENTGATE_INBANK_TRACE_WAIT_SECONDS", 60.0
-        ),
+        trace_settings=load_inbank_trace_settings(values),
         health_wait_seconds=_positive_float(values, "AGENTGATE_INBANK_HEALTH_WAIT_SECONDS", 300.0),
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
