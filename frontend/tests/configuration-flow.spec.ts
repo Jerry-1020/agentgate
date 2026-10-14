@@ -41,17 +41,22 @@ test('analysis capability prevents unavailable requests and findings filter prec
 
 test('rerun requires preview and preserves exact manifest',async({page,request})=>{
  const list=(await (await request.get('/api/runs?limit=100')).json()).data
- const source=list.find((r:any)=>r.status==='completed')
+ const tasks=(await (await request.get('/api/evaluation-tasks')).json()).data
+ const source=list.find((r:any)=>r.status==='completed'&&tasks.some((t:any)=>t.kind==='single'&&t.run_ids[0]===r.id))
+ const task=tasks.find((t:any)=>t.kind==='single'&&t.run_ids[0]===source?.id)
  expect(source).toBeTruthy()
  await page.goto('/#tasks/'+source.id)
+ await page.getByRole('button',{name:'任务配置',exact:true}).click()
  await page.getByRole('button',{name:'使用原配置重跑'}).click()
- const dialog=page.getByRole('dialog',{name:'确认原配置重跑'})
+ const dialog=page.getByRole('dialog',{name:'重新运行当前任务'})
  await expect(dialog.getByTestId('run-configuration')).toBeVisible()
  await expect(dialog).toContainText(source.manifest.target.ref.external_version_id)
  const pending=page.waitForResponse(r=>r.url().endsWith('/rerun')&&r.request().method()==='POST')
- await dialog.getByRole('button',{name:'确认创建新任务'}).click()
+ await dialog.getByRole('button',{name:'开始测评',exact:true}).click()
  const response=await pending;expect(response.ok()).toBeTruthy()
- const newId=(await response.json()).data.run_id
+ const updated=(await response.json()).data
+ expect(updated.id).toBe(task.id)
+ const newId=updated.run_ids[0]
  expect(newId).not.toBe(source.id)
  const next=(await (await request.get('/api/runs/'+newId+'/samples')).json()).data
  expect(next.run.manifest).toEqual(source.manifest)

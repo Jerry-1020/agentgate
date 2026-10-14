@@ -10,7 +10,7 @@ import {
   type Report,
   type RunProgress,
 } from '../../../api/evaluations';
-import { refreshTaskLinks, type TaskLink } from '../utils/task-links';
+import { readTaskLinks, refreshTaskLinks, includeCurrentTaskRuns } from '../utils/task-links';
 import { downloadCsv } from '../utils/task-report';
 import { taskTitle } from '../utils/dashboard-data';
 const emit = defineEmits<{
@@ -19,11 +19,11 @@ const emit = defineEmits<{
   action: [id: string, action: 'cancel' | 'rerun'];
 }>();
 const runs = shallowRef<EvaluationRun[]>([]),
-  links = ref<TaskLink[]>([]),
   reports = ref<Record<string, Report>>({}),
   progress = ref<Record<string, RunProgress>>({}),
   error = ref(''),
   busy = ref(false);
+const links = computed(readTaskLinks);
 const status = ref(''),
   days = ref(7),
   taskTab = ref(''),
@@ -37,6 +37,8 @@ let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false;
 const link = (id: string) => links.value.find((t) => t.runIds.includes(id));
 const title = (r: EvaluationRun) => taskTitle(r, link(r.id)?.kind, link(r.id)?.name);
+const previousRunIds = computed(() => new Set(links.value.flatMap(t => t.previousRunIds ?? [])));
+const createdAt = (r: EvaluationRun) => link(r.id)?.createdAt ?? r.created_at;
 function state(r: EvaluationRun) {
   const states = (link(r.id)?.runIds ?? [r.id]).map(
     (id) => runs.value.find((x) => x.id === id)?.status,
@@ -54,6 +56,7 @@ function state(r: EvaluationRun) {
 const filtered = computed(() =>
   runs.value.filter(
     (r) =>
+      !previousRunIds.value.has(r.id) &&
       (!link(r.id) || link(r.id)?.runIds[0] === r.id) &&
       (!status.value ||
         (status.value === 'pending'
@@ -61,15 +64,15 @@ const filtered = computed(() =>
           : state(r) === status.value)) &&
       (!taskTab.value || (link(r.id)?.kind ?? 'single') === taskTab.value) &&
       (!kind.value || (link(r.id)?.kind ?? 'single') === kind.value) &&
-      `${title(r)} ${r.id}`.toLowerCase().includes(query.value.toLowerCase()) &&
-      (!from.value || Date.parse(r.created_at) >= Date.parse(from.value + 'T00:00:00')) &&
-      (!to.value || Date.parse(r.created_at) <= Date.parse(to.value + 'T23:59:59.999')) &&
+      `${title(r)} ${link(r.id)?.id ?? r.id} ${r.id}`.toLowerCase().includes(query.value.toLowerCase()) &&
+      (!from.value || Date.parse(createdAt(r)) >= Date.parse(from.value + 'T00:00:00')) &&
+      (!to.value || Date.parse(createdAt(r)) <= Date.parse(to.value + 'T23:59:59.999')) &&
       (!days.value ||
         (() => {
           const start = new Date();
           start.setHours(0, 0, 0, 0);
           start.setDate(start.getDate() - (days.value - 1));
-          return Date.parse(r.created_at) >= start.getTime();
+          return Date.parse(createdAt(r)) >= start.getTime();
         })()),
   ),
 );
@@ -107,7 +110,7 @@ async function deleteTask(id: string) {
     return;
   }
   try {
-    await request(`/evaluation-tasks/${id}`, 'DELETE');
+    await request(`/evaluation-tasks/${encodeURIComponent(id)}`, 'DELETE');
     ElMessage.success('任务已删除');
     await load();
   } catch (e) {
@@ -128,7 +131,7 @@ function exportTasks(ids?: string[]) {
           statusLabel(state(r)),
           strategy(r),
           score(reports.value[r.id]?.metrics.find((m) => m.level === 'overall')?.score ?? null),
-          r.created_at,
+          createdAt(r),
         ]),
     ],
     '测评任务.csv',
@@ -158,10 +161,10 @@ async function details() {
 async function load() {
   busy.value = true;
   try {
-    const [r, l] = await Promise.all([api.runs(), refreshTaskLinks()]);
+    const [r] = await Promise.all([api.runs(), refreshTaskLinks()]);
+    const records = await includeCurrentTaskRuns(r);
     if (disposed) return;
-    runs.value = r;
-    links.value = l;
+    runs.value = records;
     error.value = '';
     await details();
   } catch (e) {
@@ -267,7 +270,7 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="r.id">
+          <tr v-for="r in rows" :key="link(r.id)?.id ?? r.id">
             <td>
               <input
                 type="checkbox"
@@ -277,9 +280,10 @@ onUnmounted(() => {
               />
             </td>
             <td class="name-cell">
-              <button class="link" :title="title(r)" @click="emit('navigate', 'tasks/' + r.id)">
+              <button class="link" :title="title(r)" @click="emit('navigate', 'tasks/' + (link(r.id)?.id ?? r.id))">
                 {{ title(r) }}</button
-              ><small>{{ new Date(r.created_at).toLocaleString() }}</small>
+              ><small>{{ new Date(createdAt(r)).toLocaleString() }}</small>
+              <small v-if="link(r.id)?.previousRunIds?.length">已重跑 {{ link(r.id)!.previousRunIds!.length }} 次</small>
             </td>
             <td>
               <span>{{
@@ -350,7 +354,12 @@ onUnmounted(() => {
               >
                 取消
               </button>
-              <button class="link danger" @click="deleteTask(r.id)">删除</button>
+              <button
+                v-if="(link(r.id)?.kind ?? 'single') === 'single' && ['completed', 'failed', 'cancelled'].includes(r.status)"
+                class="link"
+                @click="emit('action', r.id, 'rerun')"
+              >重跑</button>
+              <button class="link danger" @click="deleteTask(link(r.id)?.id ?? r.id)">删除</button>
             </td>
           </tr>
         </tbody>

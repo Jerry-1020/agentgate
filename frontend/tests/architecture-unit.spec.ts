@@ -27,12 +27,37 @@ test('model preview state uses Pinia without sharing mutable seed data across ap
   expect(second.catalog.teams[0].name).not.toBe('changed');
 });
 
+test('overlapping task refreshes wait for the latest association snapshot', async () => {
+  const previous = http.defaults.adapter;
+  const pending: (() => void)[] = [];
+  try {
+    http.defaults.adapter = config => new Promise(resolve => {
+      const index = pending.length;
+      pending.push(() => resolve({
+        data: [{ id: 'task', kind: 'single', run_ids: [index ? 'new-run' : 'old-run'], static_report_ids: [] }],
+        status: 200, statusText: 'OK', headers: {}, config,
+      }));
+    });
+    const store = useTaskLinksStore(createPinia());
+    let firstReturned = false;
+    const first = store.refreshTaskLinks().then(value => { firstReturned = true; return value; });
+    const second = store.refreshTaskLinks();
+    await expect.poll(() => pending.length).toBe(2);
+    pending[0]();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(firstReturned).toBe(false);
+    pending[1]();
+    const values = await Promise.all([first, second]);
+    expect(values.map(links => links[0].runIds)).toEqual([['new-run'], ['new-run']]);
+  } finally { http.defaults.adapter = previous; }
+});
+
 
 test('single task static report association survives reload with its exact descriptor', async () => {
   const previous = http.defaults.adapter;
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dispatchEvent: () => true } });
-  const stored = { id: 'task-a', name: 'Loan task', kind: 'single', run_ids: ['run-a'], static_report_ids: [] as string[] };
+  const stored = { id: 'task-a', name: 'Loan task', kind: 'single', run_ids: ['run-a'], previous_run_ids: ['run-original'], created_at: '2026-10-14T08:00:00Z', static_report_ids: [] as string[] };
   try {
     http.defaults.adapter = async config => {
       let data: unknown;
@@ -48,7 +73,7 @@ test('single task static report association survives reload with its exact descr
     await store.saveTaskLink({ id: 'task-a', name: 'Loan task', kind: 'single', runIds: ['run-a'], staticReports: [{ version: 'v1', descriptorHash: 'exact-target-hash', reportId: 'report-a' }] });
     const reloaded = useTaskLinksStore(createPinia());
     await reloaded.refreshTaskLinks();
-    expect(reloaded.readTaskLinks()).toEqual([{ id: 'task-a', name: 'Loan task', kind: 'single', runIds: ['run-a'], staticReports: [{ version: 'v1', descriptorHash: 'exact-target-hash', reportId: 'report-a' }] }]);
+    expect(reloaded.readTaskLinks()).toEqual([{ id: 'task-a', name: 'Loan task', kind: 'single', runIds: ['run-a'], previousRunIds: ['run-original'], createdAt: '2026-10-14T08:00:00Z', staticReports: [{ version: 'v1', descriptorHash: 'exact-target-hash', reportId: 'report-a' }] }]);
   } finally {
     http.defaults.adapter = previous;
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);

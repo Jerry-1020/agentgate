@@ -2,9 +2,11 @@
 
 from datetime import timedelta, timezone
 
+from agentgate.application.run_management import RunManagement
 from agentgate.domain.evaluation_task import EvaluationTask, EvaluationTaskKind
-from agentgate.storage.repository import AgentGateRepository
+from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.server.user_context import get_user_info
+from agentgate.storage.repository import AgentGateRepository
 
 
 def _team_id() -> str:
@@ -48,6 +50,21 @@ class EvaluationTaskManagement:
         if task is None or any(self.repository.get_run(run_id, user_team_id=_team_id()) is None for run_id in task.run_ids):
             raise LookupError("unknown evaluation task")
         return self._with_name(task)
+
+    def rerun(
+        self, task_id: str, source_run_id: str, runs: RunManagement, dispatcher: JobDispatcher,
+    ) -> EvaluationTask:
+        task = self.get(task_id)
+        if task.kind != EvaluationTaskKind.SINGLE:
+            raise ValueError("only single tasks can be rerun")
+        if task.run_ids != (source_run_id,):
+            raise ValueError("task execution changed; refresh before rerunning")
+        new_run = runs.create_rerun(source_run_id, persist=False)
+        updated = self.repository.save_task_rerun(
+            task.id, source_run_id, new_run, user_team_id=_team_id(),
+        )
+        runs.dispatch_run(new_run.id, dispatcher)
+        return updated
 
     def _with_name(self, task: EvaluationTask) -> EvaluationTask:
         if task.name is not None:
