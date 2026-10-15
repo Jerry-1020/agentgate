@@ -69,6 +69,17 @@ def execution_trace() -> Trace:
     )
 
 
+@pytest.mark.parametrize("selection", ["final_output", "output_and_tools", "full_trajectory"])
+def test_turn_extensions_are_not_included_in_judge_evidence(selection):
+    original = multi_turn_case()
+    data = original.model_dump(mode="json")
+    for turn in data["turns"]:
+        turn["extensions"] = [{"key": "background", "value": "仅保存，不参与评分"}]
+    annotated = Case.model_validate(data)
+    trace = execution_trace()
+    assert select_material(annotated, trace, selection) == select_material(original, trace, selection)
+
+
 def redact(value: Any) -> Any:
     if isinstance(value, dict) or isinstance(value, FrozenJsonObject):
         return {key: redact(item) for key, item in value.items()}

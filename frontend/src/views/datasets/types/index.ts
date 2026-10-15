@@ -55,6 +55,7 @@ export type SerializedExpectation =
 export interface CaseTurn {
   id: string;
   input: JsonObject;
+  extensions?: { key: string; value: string }[];
   expected_skill: string | null;
   expectations: Expectation[];
   required_tools: string[];

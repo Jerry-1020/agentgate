@@ -202,6 +202,120 @@ async function save(page: Page, datasetId: string, method = 'PUT') {
   return (await saved.json()).data.cases[0];
 }
 
+test('background persists without changing expectations, preserves other extensions and clears', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: original.turns.map(turn => ({
+      ...turn, extensions: [{ key: 'custom', value: 'keep' }],
+    })) },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  const background = page.getByLabel('背景知识', { exact: true });
+  await expect(background).toHaveValue('');
+  await background.fill('客户已完成身份核验\n仅供记录');
+  await expect(page.getByTestId('dirty')).toHaveText('true');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].extensions).toEqual([
+    { key: 'custom', value: 'keep' },
+    { key: 'background', value: '客户已完成身份核验\n仅供记录' },
+  ]);
+  expect(saved.turns[0].input).toEqual(original.turns[0].input);
+  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  await page.reload();
+  await expect(background).toHaveValue('客户已完成身份核验\n仅供记录');
+  await background.fill('');
+  const cleared = await save(page, datasetId);
+  expect(cleared.turns[0].extensions).toEqual([{ key: 'custom', value: 'keep' }]);
+  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
+  await page.reload();
+  await expect(background).toHaveValue('');
+});
+
+test('background stays with each turn, survives publication and becomes read-only', async ({ page }) => {
+  const datasetId = await open(page);
+  const background = page.getByLabel('背景知识', { exact: true });
+  await page.getByLabel('用户输入', { exact: true }).fill('第一轮输入');
+  await page.getByLabel('期望输出', { exact: true }).fill('第一轮输出');
+  await background.fill('第一轮背景');
+  await page.getByRole('button', { name: '添加新轮次' }).click();
+  await expect(background).toHaveValue('');
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
+  await page.getByLabel('期望输出', { exact: true }).fill('第二轮输出');
+  await background.fill('第二轮背景');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  await expect(background).toHaveValue('第一轮背景');
+  const saved = await save(page, datasetId, 'POST');
+  expect(saved.turns.map((turn: { extensions: unknown }) => turn.extensions)).toEqual([
+    [{ key: 'background', value: '第一轮背景' }],
+    [{ key: 'background', value: '第二轮背景' }],
+  ]);
+  await page.reload();
+  await expect(background).toHaveValue('第一轮背景');
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expect(background).toHaveValue('第二轮背景');
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await expect(background).toBeDisabled();
+  await page.reload();
+  await expect(background).toBeDisabled();
+  await expect(background).toHaveValue('第一轮背景');
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expect(background).toHaveValue('第二轮背景');
+  await test.info().attach('background-description-published', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
+});
+
+test('custom variables persist per turn as strings, clear independently and become read-only', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const background = page.getByLabel('背景知识', { exact: true });
+  const variables = page.getByLabel('自定义变量', { exact: true });
+  const firstValue = '{"cust_id":"001","amount":100}\n备注=保持原文';
+  await expect(variables).toHaveValue('');
+  await background.fill('保留背景');
+  await variables.fill(firstValue);
+  await expect(page.getByTestId('dirty')).toHaveText('true');
+  await page.getByRole('button', { name: '添加新轮次' }).click();
+  await expect(variables).toHaveValue('');
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
+  await variables.fill('channel=mobile');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  await expect(variables).toHaveValue(firstValue);
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].input).toEqual(original.turns[0].input);
+  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  expect(saved.turns[0].extensions).toEqual([
+    { key: 'background', value: '保留背景' },
+    { key: 'custom_variables', value: firstValue },
+  ]);
+  expect(saved.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=mobile' }]);
+  await page.reload();
+  await expect(variables).toHaveValue(firstValue);
+  await variables.fill('');
+  const cleared = await save(page, datasetId);
+  expect(cleared.turns[0].extensions).toEqual([{ key: 'background', value: '保留背景' }]);
+  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expect(variables).toHaveValue('channel=mobile');
+  await variables.fill('channel=web');
+  const edited = await save(page, datasetId);
+  expect(edited.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=web' }]);
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await page.reload();
+  await expect(variables).toHaveValue('');
+  await expect(background).toHaveValue('保留背景');
+  await expect(variables).toBeDisabled();
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expect(variables).toHaveValue('channel=web');
+  await expect(variables).toBeDisabled();
+});
+
 test('classification saves negative, reopens, changes to boundary and becomes read-only when published', async ({ page }) => {
   const datasetId = await open(page);
   const category = page.getByLabel('样本分类', { exact: true });

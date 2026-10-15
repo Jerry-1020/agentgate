@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    Field,
+    SerializerFunctionWrapHandler,
+    StrictStr,
+    ValidationInfo,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .base import DomainModel, FrozenJsonObject, require_non_blank
 from .expectation import Expectation
@@ -35,6 +44,18 @@ class CaseDifficulty(StrEnum):
     HARD = "hard"
 
 
+class TurnExtension(DomainModel):
+    """One immutable string-valued annotation on a conversation turn."""
+
+    key: StrictStr
+    value: StrictStr
+
+    @field_validator("key")
+    @classmethod
+    def validate_key(cls, value: str) -> str:
+        return require_non_blank(value, "TurnExtension key")
+
+
 class CaseTurn(DomainModel):
     """One user input and its expected outcomes within an evaluation Case."""
 
@@ -42,6 +63,23 @@ class CaseTurn(DomainModel):
     input: FrozenJsonObject
     expectations: tuple[Expectation, ...] = ()
     notes: str = ""
+    extensions: tuple[TurnExtension, ...] = ()
+
+    @field_validator("extensions")
+    @classmethod
+    def validate_extensions(
+        cls, value: tuple[TurnExtension, ...]
+    ) -> tuple[TurnExtension, ...]:
+        _require_unique_non_blank(tuple(item.key for item in value), "extension keys")
+        return value
+
+    @model_serializer(mode="wrap")
+    def serialize_turn(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data = handler(self)
+        # Empty annotations must not change existing dataset and run hashes.
+        if not self.extensions:
+            data.pop("extensions", None)
+        return data
 
     @field_validator("id")
     @classmethod

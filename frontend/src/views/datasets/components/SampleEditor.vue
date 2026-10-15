@@ -30,6 +30,36 @@ const originalOutputs = ref<{ text: string; json: boolean }[]>([]);
 const baseline = ref(''),
   inputField = ref<'query' | 'txt'>('txt');
 const turn = computed(() => form.value?.turns[index.value]);
+const background = computed({
+  get: () => turn.value?.extensions?.find((item) => item.key === 'background')?.value ?? '',
+  set: (value: string) => {
+    if (!turn.value) return;
+    const extensions = [...(turn.value.extensions ?? [])];
+    const existing = extensions.findIndex((item) => item.key === 'background');
+    if (value) {
+      const entry = { key: 'background', value };
+      if (existing < 0) extensions.push(entry);
+      else extensions[existing] = entry;
+    } else if (existing >= 0) extensions.splice(existing, 1);
+    if (extensions.length) turn.value.extensions = extensions;
+    else delete turn.value.extensions;
+  },
+});
+const customVariables = computed({
+  get: () => turn.value?.extensions?.find((item) => item.key === 'custom_variables')?.value ?? '',
+  set: (value: string) => {
+    if (!turn.value) return;
+    const extensions = [...(turn.value.extensions ?? [])];
+    const existing = extensions.findIndex((item) => item.key === 'custom_variables');
+    if (value) {
+      const entry = { key: 'custom_variables', value };
+      if (existing < 0) extensions.push(entry);
+      else extensions[existing] = entry;
+    } else if (existing >= 0) extensions.splice(existing, 1);
+    if (extensions.length) turn.value.extensions = extensions;
+    else delete turn.value.extensions;
+  },
+});
 function snapshot() {
   return JSON.stringify([
     form.value,
@@ -281,6 +311,26 @@ defineExpose({ save });
               :disabled="!editable"
               @update:model-value="outputRules[index] = $event as OutputRule[]"
             />
+            <label>
+              背景知识
+              <textarea
+                v-model="background"
+                :disabled="!editable"
+                rows="3"
+                aria-label="背景知识"
+                placeholder="仅作补充说明保存，不参与测评或发送给 Agent"
+              />
+            </label>
+            <label>
+              自定义变量
+              <textarea
+                v-model="customVariables"
+                :disabled="!editable"
+                rows="3"
+                aria-label="自定义变量"
+                placeholder="按文本保存，不解析或参与测评，不发送给 Agent"
+              />
+            </label>
           </section>
           <section class="evaluation-section" aria-label="高级测评项">
             <h3>高级测评项</h3>

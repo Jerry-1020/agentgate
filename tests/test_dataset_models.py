@@ -10,6 +10,7 @@ from agentgate.domain import (
     DatasetVersion,
     DatasetVersionStatus,
 )
+from agentgate.domain.base import content_sha256
 
 
 def _case(case_id: str = "case") -> Case:
@@ -105,3 +106,37 @@ def test_content_hash_tracks_ordered_case_content_but_not_operational_metadata()
 
     assert metadata_change.content_sha256 == baseline.content_sha256
     assert reordered.content_sha256 != baseline.content_sha256
+
+
+def test_existing_dataset_hash_remains_valid_without_extensions():
+    old_case = {
+        "id": "case",
+        "name": "case",
+        "turns": [{"id": "turn", "input": {"txt": "hello"}, "expectations": [], "notes": ""}],
+        "initial_state": {},
+        "category": "positive",
+        "difficulty": "medium",
+        "tags": [],
+        "notes": "",
+    }
+    old_hash = content_sha256({"dataset_id": "dataset", "cases": [old_case], "notes": ""})
+    version = DatasetVersion.model_validate(
+        {"dataset_id": "dataset", "cases": [old_case], "content_sha256": old_hash}
+    )
+    assert version.model_dump(mode="json")["cases"] == [old_case]
+    assert DatasetVersion.model_validate_json(version.model_dump_json()).content_sha256 == old_hash
+
+
+def test_extension_values_are_covered_by_dataset_content_hash():
+    versions = [
+        DatasetVersion(
+            dataset_id="dataset",
+            cases=[Case(id="case", name="case", turns=[CaseTurn(
+                id="turn", input={"txt": "hello"},
+                extensions=[{"key": "background", "value": value}],
+            )])],
+        )
+        for value in ("first", "second")
+    ]
+    assert versions[0].content_sha256 != versions[1].content_sha256
+    assert DatasetVersion.model_validate_json(versions[0].model_dump_json()) == versions[0]

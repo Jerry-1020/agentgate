@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import timedelta
 from uuid import uuid4
@@ -7,6 +8,39 @@ import pytest
 from agentgate.application import DatasetManagement
 from agentgate.domain import Case, CaseTurn, Dataset, DatasetVersion, DatasetVersionStatus
 from agentgate.storage.sqlite import SQLiteRepository, _T_DATASETS, _T_DATASET_VERSIONS, _T_RUNS
+
+
+def test_turn_extensions_persist_in_payload_and_published_snapshot(tmp_path):
+    path = tmp_path / "extensions.db"
+    repository = SQLiteRepository(path)
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("Background storage")
+    service.create_draft(dataset.id)
+    case = Case(
+        name="Two turns",
+        turns=[
+            CaseTurn(
+                input={"txt": "input"},
+                extensions=[{"key": "background", "value": value}],
+            )
+            for value in ("first", "second")
+        ],
+    )
+    saved = service.save_case(dataset.id, case)
+    with sqlite3.connect(path) as db:
+        payload = json.loads(db.execute(
+            f"SELECT payload FROM {_T_DATASET_VERSIONS} WHERE id=?", (saved.id,)
+        ).fetchone()[0])
+    assert [turn["extensions"] for turn in payload["cases"][0]["turns"]] == [
+        [{"key": "background", "value": "first"}],
+        [{"key": "background", "value": "second"}],
+    ]
+    reopened = SQLiteRepository(path)
+    assert reopened.get_dataset_draft(dataset.id, user_team_id="") == saved
+    published = service.publish_draft(dataset.id)
+    assert reopened.get_published_dataset_version(dataset.id, 1, user_team_id="") == published
+    next_draft = service.create_draft(dataset.id)
+    assert next_draft.cases == published.cases == (case,)
 
 
 def test_sqlite_connection_enforces_pragmas_and_closes(tmp_path):
