@@ -1,6 +1,50 @@
 # AgentGate Project Progress
 
-Last updated: 2026-10-08
+Last updated: 2026-10-16
+
+## Workflow Case initialization and structured turn inputs — 2026-10-16
+
+- Scope approved: in-bank workflows only, Case-scoped initialization and per-turn text
+  or complete business JSON; no attachments, database migration or changes to other
+  Agent protocols. The user explicitly waived per-file approval for this feature.
+- Branch: `feature/workflow-structured-input`, based on updated `refactor-1` (`102ed29`).
+  Reused the existing immutable Case model, JSON/Excel exchange, session lifecycle,
+  Trace and evaluator pipeline. No old branch implementation was copied.
+- The existing sample editor now edits `initial_state.config_variables`; annotations
+  keep their existing non-executable meaning. The **背景知识** and **自定义变量**
+  inputs have been removed from the editor at the user's request; saved extensions
+  remain intact. Task submission accepts this configuration
+  and complete business objects only for in-bank workflows. The adapter serializes the
+  full business object into chat `txt` without extracting or dropping individual fields.
+- The initialization area now uses compact Key/Value rows under **初始变量**,
+  a default-collapsed section sharing the typography, color and native disclosure
+  style of **其他规则条件与备注**. Collapsing retains entered values.
+  The value-type selector has been removed: new values are text, while existing
+  non-string values remain editable as JSON and preserve their types. Add/remove,
+  read-only display and the stored protocol
+  remain scoped to the existing sample editor. The Case badge and explanatory text
+  have been removed; initialization is optional and blank added rows are ignored on
+  save without discarding named empty-string values.
+  The current UI passed all **20 sample-editor browser tests**, including optional
+  initialization, matching disclosure styles, saving while collapsed and preserving
+  hidden historical annotations. TypeScript, affected-component ESLint, formatting
+  and diff checks passed. The local preview runs on `127.0.0.1:5198` with a separate
+  temporary database.
+- Local API acceptance covers dataset creation/publication, task snapshot, execution,
+  persisted per-turn Trace, pass/fail scoring and rerun snapshot/history preservation.
+  Customer request-contract assertions cover the exact three string initialization
+  variables, complete business JSON in chat `txt`, shared envelope fields and separate
+  Case sessions. Related adapter/application regression: **297 passed**.
+  The new end-to-end test now compares results by Case ID instead of assuming random
+  UUID result order matches creation order; five repeated runs passed.
+- Validation: full backend **2408 passed / 56 skipped**; frontend unit tests **91 passed**;
+  browser regression **51 passed / 2 failed**. Both browser failures (legacy A/B static
+  analysis availability and uncovered-case confirmation) were reproduced unchanged on
+  `102ed29`; no out-of-scope behavior or test expectations were changed to hide them.
+  Type checking, affected-file ESLint, Python Ruff checks and production build passed.
+  Initial BJS subprocess failures were resolved by supplying the expected local test
+  virtual environment, without application changes. Real in-bank deployment is not
+  claimed; see [workflow input instructions](inbank-evidence-acceptance.md#workflow-business-inputs--2026-10-16).
 
 ## LLM 评估器保存、发布与按版本运行 — 2026-10-08
 

@@ -6,8 +6,10 @@ import threading
 from copy import deepcopy
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import time
 from typing import Any
 from urllib.parse import urlparse
+from uuid import UUID
 
 import pytest
 from test_trace_server_client import DETAIL, Response, sparse_inbank_detail
@@ -267,6 +269,143 @@ def _adapter(
     return InbankChatABCTargetAdapter(
         ChatABCSettings(**settings), http=transport, trace_client=trace_server, **options
     )
+
+
+def test_workflow_preserves_complete_business_inputs_and_case_sessions(monkeypatch):
+    transport = _Transport("workflow")
+    initializations, chats, payloads = [], [], []
+    request_json, request_bytes = transport.request_json, transport.request_bytes
+
+    def capture_json(method, url, **kwargs):
+        if url.endswith("/init_session"):
+            assert method == "POST" and url.endswith("/chatabc/init_session")
+            payloads.append(deepcopy(kwargs["payload"]))
+            initializations.append(deepcopy(kwargs["payload"]["data"]))
+            return {"resCode": "FAIAG0000", "data": {
+                "session_id": f"session-{len(initializations)}"
+            }}
+        return request_json(method, url, **kwargs)
+
+    def capture_chat(method, url, **kwargs):
+        assert method == "POST" and url.endswith("/chatabc/chat")
+        payloads.append(deepcopy(kwargs["payload"]))
+        chats.append(deepcopy(kwargs["payload"]["data"]))
+        return request_bytes(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_json", capture_json)
+    monkeypatch.setattr(transport, "request_bytes", capture_chat)
+    variables = [{"name": "centreId", "value": "810000"},
+                 {"name": "userId", "value": "hk_yat"},
+                 {"name": "bankNo", "value": "810000"}]
+    inputs = [
+        {"user_input_text": "帮我查一下收文"},
+        {"user_input_text": "请翻译 acquisition", "menuId": "TRANSLATE",
+         "lang_src": "auto_detect", "lang_tar": "fr_FR",
+         "form": {"items": [0, False, None, {"amount": 12.5}]},
+         "session_id": "business-value-not-transport-session"},
+        {"user_input_text": "换一个例子", "intent": "follow-up", "collected_data": {}},
+    ]
+    request = _request("workflow")
+    case = Case(name="Structured workflow", initial_state={"config_variables": variables},
+                turns=[CaseTurn(id=f"turn-{i}", input=value, extensions=[
+                    {"key": "custom_variables", "value": "annotation-not-sent"}
+                ]) for i, value in enumerate(inputs)])
+    adapter = _adapter("workflow", transport, _TraceServer())
+    before_ms = int(time() * 1000)
+    try:
+        first = adapter.wait(adapter.start(replace(request, case=case)), 30)
+        second = adapter.wait(adapter.start(replace(
+            request, execution_id="execution-2", case=case.model_copy(update={"id": "case-2"})
+        )), 30)
+    finally:
+        adapter.close()
+    after_ms = int(time() * 1000)
+    assert initializations == [{"config_variables": variables}] * 2
+    assert [chat["session_id"] for chat in chats] == (
+        ["session-1"] * len(inputs) + ["session-2"] * len(inputs)
+    )
+    assert [json.loads(chat["txt"]) for chat in chats] == inputs * 2
+    assert all(chat["files"] == [] and chat["stream"] is True for chat in chats)
+    assert all(set(chat) == {"session_id", "txt", "files", "stream"} for chat in chats)
+    assert len(payloads) == 2 * (len(inputs) + 1)
+    assert len({payload["requestId"] for payload in payloads}) == len(payloads)
+    for payload in payloads:
+        assert set(payload) == {"appId", "trCode", "trVersion", "timestamp", "requestId", "data"}
+        assert payload["appId"] == "BDC201704_01"
+        assert payload["trCode"] == "AISPNLPCHATBOT"
+        assert payload["trVersion"] == "1"
+        assert isinstance(payload["timestamp"], int)
+        assert before_ms <= payload["timestamp"] <= after_ms
+        assert str(UUID(payload["requestId"])) == payload["requestId"]
+    for result in (first, second):
+        trace = result.inline_trace
+        assert [trace.turn_outcomes[turn.id]["input"].to_dict()
+                for turn in case.turns] == inputs
+        assert trace.final_output["output"] == "customer answer"
+        assert {span.attributes["agentgate.turn.id"] for span in trace.spans
+                if span.operation_type == "turn"} == {turn.id for turn in case.turns}
+
+
+def test_workflow_mixes_text_json_strings_and_business_objects_without_double_encoding(monkeypatch):
+    transport = _Transport("workflow")
+    actual, original = [], transport.request_bytes
+
+    def capture(method, url, **kwargs):
+        actual.append(kwargs["payload"]["data"]["txt"])
+        return original(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_bytes", capture)
+    encoded = '{"user_input_text":"帮我查一下收文"}'
+    values = [{"txt": "普通文本"}, {"txt": encoded}, {"form": {"enabled": True}}]
+    case = Case(name="Mixed inputs", turns=[CaseTurn(input=value) for value in values])
+    adapter = _adapter("workflow", transport, _TraceServer())
+    try:
+        adapter.wait(adapter.start(replace(_request("workflow"), case=case)), 30)
+    finally:
+        adapter.close()
+    assert actual[:2] == ["普通文本", encoded]
+    assert json.loads(actual[2]) == values[2]
+
+
+@pytest.mark.parametrize("variables", [
+    ["invalid"], [{"name": " ", "value": "x"}], [{"name": "missing"}],
+    [{"name": "same", "value": 0}, {"name": "same", "value": False}],
+])
+def test_workflow_rejects_malformed_initial_variables_before_remote_calls(variables):
+    adapter = _adapter("workflow", _Transport("workflow"), _TraceServer())
+    request = _request("workflow")
+    case = request.case.model_copy(update={
+        "initial_state": request.case.initial_state.__class__({"config_variables": variables})
+    })
+    try:
+        with pytest.raises(TargetExecutionError, match="config_variables"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "yunxia"])
+def test_business_json_does_not_enable_other_agent_protocols(arrange_type):
+    request = _request(arrange_type)
+    case = Case(name="Unsupported JSON", turns=[CaseTurn(input={"menuId": "QUERY"})])
+    adapter = _adapter(arrange_type, _Transport(arrange_type), _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError, match="input"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("value", [{"txt": " "}, {"txt": "hello", "files": ["file"]}])
+def test_workflow_rejects_empty_text_and_attachment_envelopes(value):
+    adapter = _adapter("workflow", _Transport("workflow"), _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError):
+            adapter.start(replace(_request("workflow"), case=Case(
+                name="Invalid envelope", turns=[CaseTurn(input=value)]
+            )))
+    finally:
+        adapter.close()
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])

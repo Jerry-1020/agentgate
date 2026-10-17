@@ -610,7 +610,50 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
-    if (platform && !localTarget) {
+    const bankWorkflow =
+      platform &&
+      !localTarget &&
+      auth.loginMode === 'bank' &&
+      platform.target.typeGroup === 'base/workflow' &&
+      (platform.target.platformArrangeType ?? platform.target.platformAgentType) === 'workflow';
+    if (bankWorkflow) {
+      const object = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === 'object' && !Array.isArray(value);
+      const incompatible = exact.cases.filter((c) => {
+        const initial = c.initial_state ?? {};
+        if (!object(initial) || Object.keys(initial).some((key) => key !== 'config_variables'))
+          return true;
+        const variables = 'config_variables' in initial ? initial.config_variables : [];
+        if (!Array.isArray(variables)) return true;
+        const names = new Set<string>();
+        for (const variable of variables) {
+          if (
+            !object(variable) ||
+            typeof variable.name !== 'string' ||
+            !variable.name.trim() ||
+            !('value' in variable) ||
+            names.has(variable.name)
+          )
+            return true;
+          names.add(variable.name);
+        }
+        return c.turns.some((turn: { input?: unknown }) => {
+          const input = turn.input;
+          if (!object(input) || !Object.keys(input).length) return true;
+          if (Object.keys(input).every((key) => key === 'txt' || key === 'files'))
+            return (
+              typeof input.txt !== 'string' ||
+              !input.txt.trim() ||
+              ('files' in input && (!Array.isArray(input.files) || input.files.length > 0))
+            );
+          return false;
+        });
+      });
+      if (incompatible.length)
+        invalid(
+          `所选工作流有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 config_variables，以及每轮文本或非空业务 JSON，不支持附件上传。`,
+        );
+    } else if (platform && !localTarget) {
       const incompatible = exact.cases.filter(
         (c) =>
           Object.keys(c.initial_state ?? {}).length > 0 ||

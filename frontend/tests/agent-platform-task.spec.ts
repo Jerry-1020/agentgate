@@ -594,7 +594,7 @@ const sampleCases = [
     turns: [{ input: { txt: '问题一' }, expectations: [{ kind: 'output' }] }],
   },
 ];
-async function openForm(page: Page, selected = false) {
+async function openForm(page: Page, selected = false, cases = sampleCases) {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
     [];
   await page.route('**/api/**', async (route) => {
@@ -628,11 +628,11 @@ async function openForm(page: Page, selected = false) {
     if (path.match(/\/datasets\/[^/]+$/))
       return reply(route, {
         versions: [
-          { version: 1, cases: sampleCases },
-          { version: 2, cases: sampleCases },
+          { version: 1, cases },
+          { version: 2, cases },
         ],
       });
-    if (path.includes('/datasets/')) return reply(route, { cases: sampleCases });
+    if (path.includes('/datasets/')) return reply(route, { cases });
     if (path === '/api/versions')
       return reply(route, [
         { id: 'old-1', label: '旧版一' },
@@ -701,6 +701,32 @@ async function selectFormTarget(page: Page, claw = false) {
   await choose(page, '智能体版本', claw ? 'v2' : bankVersionOne);
 }
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
+
+test('bank workflow accepts Case config and complete business JSON, but cloudshrimp does not', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId', value: '810000' }] },
+    turns: [{ input: { user_input_text: '翻译', menuId: 'TRANSLATE', form: { enabled: false } }, expectations: [{ kind: 'output' }] },
+      { input: { user_input_text: '第二轮', lang_tar: 'fr_FR' }, expectations: [{ kind: 'output' }] }] }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('workflow');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/平台目标仅支持纯文本/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+test('invalid workflow config is rejected before task submission', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId' }] } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
 
 test('form preserves dataset/execution choices through target changes and logout, without legacy catalogs', async ({
   page,

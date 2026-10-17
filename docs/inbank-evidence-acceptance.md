@@ -2,6 +2,81 @@
 
 本次补齐行内 Trace 查询和 BJS 失败处理。Skill 静态分析按用户要求暂缓：真实行内版本定义接口尚未提供，不使用本地 `/web/agent/capabilities` 扩展冒充。
 
+## Workflow business inputs — 2026-10-16
+
+This input feature applies only to in-bank workflows. Base orchestration, Yunxia,
+external mock execution, Trace collection and scoring retain their existing behavior.
+No database migration or attachment upload is included.
+
+In the sample editor:
+
+1. Expand **初始变量**, click **添加变量** and fill each variable's name and
+   value. This optional section starts collapsed; collapsing it does not clear values.
+   New values are saved as text, so identifiers such as `810000` keep their string
+   type. There is no value-type selector. Existing non-string JSON values remain
+   editable as JSON and keep their types on save. Use the names and required fields
+   specified by the selected workflow; no customer-specific defaults are inferred.
+   Rows can be removed, and
+   no rows are needed for workflows without initialization variables. Completely
+   blank added rows are ignored on save; named variables with empty string values
+   are preserved. Published versions and conversation previews are read-only. The stored representation
+   remains the `initial_state.config_variables` name/value array shown below.
+   The **背景知识** and **自定义变量** annotation fields are no longer shown in this
+   editor; existing saved extensions are preserved and are not sent to the Agent.
+2. For each turn, use ordinary text or enable **结构化 JSON 输入** and enter the
+   complete business object, not an HTTP envelope or a JSON-escaped string.
+3. Save, publish the dataset, select the in-bank workflow/version and submit the task.
+   Different cases initialize independent sessions; turns in one case reuse its session.
+4. Check the actual initialization request and each chat request, then inspect the
+   per-turn Trace and evaluation results. Reruns retain the published input snapshot.
+
+The canonical sample fields are:
+
+```json
+{
+  "name": "Workflow translation example",
+  "initial_state": {
+    "config_variables": [
+      {"name": "centreId", "value": "810000"},
+      {"name": "userId", "value": "test-user"},
+      {"name": "bankNo", "value": "810000"}
+    ]
+  },
+  "turns": [
+    {
+      "input": {
+        "user_input_text": "请翻译 acquisition",
+        "menuId": "TRANSLATE",
+        "lang_src": "auto_detect",
+        "lang_tar": "fr_FR",
+        "form": {"items": [0, false, null]}
+      }
+    },
+    {"input": {"user_input_text": "换一个例子", "menuId": "TRANSLATE"}}
+  ]
+}
+```
+
+`initial_state.config_variables` is sent once in `init_session.data.config_variables`.
+A complete business `input` object is JSON-encoded once into `chat.data.txt`.
+Nested objects, arrays, numbers, booleans and nulls are preserved; no question-only
+field is extracted. Existing text envelopes (`{"txt":"hello"}`, optionally with
+empty `files`) remain plain text. Inputs containing only `txt` / `files` are treated
+as text envelopes; enter a pre-encoded JSON string as text if those are the business
+object's only keys. Nonempty transport attachments are rejected.
+
+The runtime owns the HTTP envelope, authentication, session ID and request ID.
+Business fields never overwrite those transport fields. The existing **背景知识**
+and **自定义变量** annotations are not sent to the Agent.
+
+JSON and Excel exports preserve the Case configuration and each turn's complete input.
+The Excel columns remain `initial_state_json`, `input_json`, `case_id`, and `turn_order`;
+no separate column is required for each Agent's business fields.
+
+Local acceptance uses a temporary SQLite database and simulated customer responses.
+It verifies both passing and deliberately failing expectations and unchanged rerun
+snapshots; this does not replace real in-bank acceptance.
+
 ## 配置
 
 已有行内网关、数据库、登录认证、执行器配置保持不变，另外设置：

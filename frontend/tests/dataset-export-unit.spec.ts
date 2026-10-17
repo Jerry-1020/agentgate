@@ -9,6 +9,18 @@ const a=blankSample('样本甲'), b=blankSample('样本乙')
 a.turns[0].input={query:'输入甲'}; a.turns[0].required_tools=['lookup']
 b.turns[0].input={query:'输入乙'}
 const version={dataset_name:'导出测试',version:3,status:'published',cases:[a,b],content_sha256:'original'} as DatasetVersion
+for (const format of ['json', 'xlsx'] as const) test('workflow initialization and typed multi-turn inputs survive ' + format, async () => {
+ const sample = blankSample('Workflow business inputs');
+ sample.initial_state = { config_variables: [{ name: 'centreId', value: '810000' }, { name: 'options', value: { enabled: false, count: 0 } }] };
+ sample.turns[0].input = { user_input_text: '请翻译', menuId: 'TRANSLATE', form: { values: [0, false, null, { amount: 12.5 }] } };
+ sample.turns.push({ ...structuredClone(sample.turns[0]), id: crypto.randomUUID(), input: { user_input_text: '第二轮', collected_data: {} } });
+ const before = JSON.stringify(sample);
+ const blob = await sampleExportBlob({ ...version, cases: [sample] }, undefined, format);
+ const parsed = await parseSampleFile({ name: 'workflow.' + format, size: blob.size, arrayBuffer: () => blob.arrayBuffer() });
+ expect(parsed[0].initial_state).toEqual(sample.initial_state);
+ expect(parsed[0].turns.map(turn => turn.input)).toEqual(sample.turns.map(turn => turn.input));
+ expect(JSON.stringify(sample)).toBe(before);
+});
 test('selected exports preserve expectations and never impersonate published version hashes',()=>{
  const before=JSON.stringify(version), data=exportSamples(version,[a.id])
  expect(data.cases).toHaveLength(1)
