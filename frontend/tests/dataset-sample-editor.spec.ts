@@ -396,6 +396,83 @@ test('workflow initialization keeps text and JSON value types after save and rel
   expect((await save(page, datasetId)).initial_state.config_variables).toEqual(variables);
 });
 
+test('base initialization saves both variable groups and excludes workflow fields', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  await addInitializationVariable(page, 'centreId', '810000');
+  const types = page.getByRole('group', { name: '初始化类型', exact: true });
+  await types.getByRole('button', { name: '基础编排', exact: true }).click();
+  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toHaveCount(0);
+  for (const [label, name, value] of [['提示词变量', 'userId', 'hk_yat'], ['工具变量', 'bankNo', '810000']]) {
+    await page.getByRole('button', { name: `添加${label}`, exact: true }).click();
+    await page.getByLabel(`${label}名 1`, { exact: true }).fill(name);
+    await page.getByLabel(`${label}值 1`, { exact: true }).fill(value);
+  }
+  const initial = { ...sample('state').initial_state,
+    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
+    tool_variables: [{ name: 'bankNo', value: '810000' }] };
+  expect((await save(page, datasetId)).initial_state).toEqual(initial);
+  await page.reload();
+  await expandInitialization(page);
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toHaveValue('hk_yat');
+  await expect(page.getByLabel('工具变量值 1', { exact: true })).toHaveValue('810000');
+  await page.getByRole('button', { name: '对话预览', exact: true }).click();
+  await expect(types.getByRole('button', { name: '工作流', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('工具变量值 1', { exact: true })).toBeDisabled();
+  await test.info().attach('base-initialization', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+});
+
+test('switching initialization types only saves the selected fields without a confirmation dialog', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state,
+      prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
+      tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  const types = page.getByRole('group', { name: '初始化类型', exact: true });
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const dialogs: string[] = [];
+  page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
+  await types.getByRole('button', { name: '工作流', exact: true }).click();
+  await addInitializationVariable(page, 'centreId', '810000');
+  await types.getByRole('button', { name: '基础编排', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
+    tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] });
+  await types.getByRole('button', { name: '工作流', exact: true }).click();
+  await addInitializationVariable(page, 'centreId', '810000');
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    config_variables: [{ name: 'centreId', value: '810000' }] });
+  expect(dialogs).toEqual([]);
+});
+
+test('mixed imported initialization is reduced to the selected type and inactive invalid values do not block saving', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state,
+      config_variables: 'invalid inactive configuration',
+      prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  await page.getByRole('group', { name: '初始化类型', exact: true })
+    .getByRole('button', { name: '基础编排', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] });
+});
+
 async function expectAnnotationInputsAbsent(page: Page) {
   await expect(page.getByLabel('背景知识', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('自定义变量', { exact: true })).toHaveCount(0);

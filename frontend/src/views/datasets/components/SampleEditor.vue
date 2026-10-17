@@ -31,8 +31,26 @@ type ConfigVariableRow = {
   format: 'text' | 'json';
   extra: JsonObject;
 };
-const configVariables = ref<ConfigVariableRow[]>([]);
-const configVariablesRaw = ref<string | null>(null);
+type InitializationField = 'config_variables' | 'prompt_variables' | 'tool_variables';
+const initializationType = ref<'workflow' | 'base'>('workflow');
+const initializationGroups = computed<{ key: InitializationField; label: string }[]>(() =>
+  initializationType.value === 'workflow'
+    ? [{ key: 'config_variables', label: '初始化变量' }]
+    : [
+        { key: 'prompt_variables', label: '提示词变量' },
+        { key: 'tool_variables', label: '工具变量' },
+      ],
+);
+const configVariables = ref<Record<InitializationField, ConfigVariableRow[]>>({
+  config_variables: [],
+  prompt_variables: [],
+  tool_variables: [],
+});
+const configVariablesRaw = ref<Record<InitializationField, string | null>>({
+  config_variables: null,
+  prompt_variables: null,
+  tool_variables: null,
+});
 type OutputRule = Extract<Expectation, { kind: 'output' }>;
 const outputRules = ref<OutputRule[][]>([]);
 const originalOutputs = ref<{ text: string; json: boolean }[]>([]);
@@ -50,6 +68,7 @@ function snapshot() {
     inputField.value,
     requiredTools.value,
     forbiddenTools.value,
+    initializationType.value,
     configVariables.value,
     configVariablesRaw.value,
   ]);
@@ -67,7 +86,14 @@ watch(
     requiredTools.value = item?.turns.map((t) => t.required_tools.join('，')) ?? [];
     forbiddenTools.value = item?.turns.map((t) => t.forbidden_tools.join('，')) ?? [];
     form.value = item ? JSON.parse(JSON.stringify(item)) : null;
-    loadConfigVariables(item?.initial_state?.config_variables);
+    const initial = item?.initial_state ?? {};
+    initializationType.value =
+      !('config_variables' in initial) &&
+      ('prompt_variables' in initial || 'tool_variables' in initial)
+        ? 'base'
+        : 'workflow';
+    for (const key of ['config_variables', 'prompt_variables', 'tool_variables'] as const)
+      loadConfigVariables(key, initial[key]);
     index.value = 0;
     error.value = '';
     inputJson.value =
@@ -99,10 +125,10 @@ watch(
   },
   { immediate: true },
 );
-function loadConfigVariables(value: unknown) {
+function loadConfigVariables(key: InitializationField, value: unknown) {
   const variables = value === undefined ? [] : value;
-  configVariables.value = [];
-  configVariablesRaw.value = null;
+  configVariables.value[key] = [];
+  configVariablesRaw.value[key] = null;
   if (
     !Array.isArray(variables) ||
     variables.some(
@@ -115,10 +141,10 @@ function loadConfigVariables(value: unknown) {
     )
   ) {
     // Keep malformed imported data visible and editable instead of dropping it.
-    configVariablesRaw.value = JSON.stringify(variables, null, 2);
+    configVariablesRaw.value[key] = JSON.stringify(variables, null, 2);
     return;
   }
-  configVariables.value = variables.map(({ name, value, ...extra }) => ({
+  configVariables.value[key] = variables.map(({ name, value, ...extra }) => ({
     id: crypto.randomUUID(),
     name,
     value: typeof value === 'string' ? value : JSON.stringify(value),
@@ -126,8 +152,8 @@ function loadConfigVariables(value: unknown) {
     extra,
   }));
 }
-function addConfigVariable() {
-  configVariables.value.push({
+function addConfigVariable(key: InitializationField) {
+  configVariables.value[key].push({
     id: crypto.randomUUID(),
     name: '',
     value: '',
@@ -181,47 +207,49 @@ function save() {
   }
   try {
     const item: EvaluationCase = JSON.parse(JSON.stringify(form.value));
-    const variables =
-      configVariablesRaw.value !== null
-        ? JSON.parse(configVariablesRaw.value)
-        : configVariables.value.flatMap((variable, i) => {
-            if (
-              !variable.name.trim() &&
-              variable.value === '' &&
-              !Object.keys(variable.extra).length
-            )
-              return [];
-            let value: unknown = variable.value;
-            if (variable.format === 'json') {
-              try {
-                value = JSON.parse(variable.value);
-              } catch {
-                throw Error(`第 ${i + 1} 项初始化变量的值不是有效 JSON`);
+    for (const key of ['config_variables', 'prompt_variables', 'tool_variables'] as const)
+      if (!initializationGroups.value.some((group) => group.key === key))
+        delete item.initial_state[key];
+    for (const { key } of initializationGroups.value) {
+      const variables =
+        configVariablesRaw.value[key] !== null
+          ? JSON.parse(configVariablesRaw.value[key]!)
+          : configVariables.value[key].flatMap((variable, i) => {
+              if (
+                !variable.name.trim() &&
+                variable.value === '' &&
+                !Object.keys(variable.extra).length
+              )
+                return [];
+              let value: unknown = variable.value;
+              if (variable.format === 'json') {
+                try {
+                  value = JSON.parse(variable.value);
+                } catch {
+                  throw Error(`第 ${i + 1} 项初始化变量的值不是有效 JSON`);
+                }
               }
-            }
-            return [{ ...variable.extra, name: variable.name, value }];
-          });
-    if (!Array.isArray(variables)) throw Error('初始化变量必须为 JSON 数组');
-    const names = new Set<string>();
-    for (const variable of variables) {
-      if (
-        !variable ||
-        typeof variable !== 'object' ||
-        Array.isArray(variable) ||
-        typeof variable.name !== 'string' ||
-        !variable.name.trim() ||
-        !('value' in variable)
-      )
-        throw Error('初始化变量需填写变量名，并包含值字段');
-      if (names.has(variable.name)) throw Error(`初始化变量名“${variable.name}”不能重复`);
-      names.add(variable.name);
+              return [{ ...variable.extra, name: variable.name, value }];
+            });
+      if (!Array.isArray(variables)) throw Error('初始化变量必须为 JSON 数组');
+      const names = new Set<string>();
+      for (const variable of variables) {
+        if (
+          !variable ||
+          typeof variable !== 'object' ||
+          Array.isArray(variable) ||
+          typeof variable.name !== 'string' ||
+          !variable.name.trim() ||
+          !('value' in variable)
+        )
+          throw Error('初始化变量需填写变量名，并包含值字段');
+        if (names.has(variable.name)) throw Error(`初始化变量名“${variable.name}”不能重复`);
+        names.add(variable.name);
+      }
+      const current = item.initial_state[key];
+      if (variables.length) item.initial_state[key] = variables;
+      else if (!Array.isArray(current) || current.length) delete item.initial_state[key];
     }
-    if (variables.length) item.initial_state.config_variables = variables;
-    else if (
-      !Array.isArray(item.initial_state.config_variables) ||
-      item.initial_state.config_variables.length
-    )
-      delete item.initial_state.config_variables;
     item.turns.forEach((t, i) => {
       if (!inputs.value[i].trim()) throw Error('第 ' + (i + 1) + ' 轮用户输入不能为空');
       t.input = inputJson.value[i]
@@ -286,70 +314,98 @@ defineExpose({ save });
       </div>
       <details :key="form.id" class="case-initialization" aria-label="初始变量">
         <summary>初始变量</summary>
-        <div
-          v-if="editable && !preview && configVariablesRaw === null"
-          class="initialization-heading"
-        >
-          <button class="add-variable" type="button" @click="addConfigVariable">
-            <span aria-hidden="true">＋</span> 添加变量
+        <div class="initialization-type" role="group" aria-label="初始化类型">
+          <button
+            type="button"
+            :aria-pressed="initializationType === 'workflow'"
+            :disabled="!editable || preview"
+            @click="initializationType = 'workflow'"
+          >
+            工作流
+          </button>
+          <button
+            type="button"
+            :aria-pressed="initializationType === 'base'"
+            :disabled="!editable || preview"
+            @click="initializationType = 'base'"
+          >
+            基础编排
           </button>
         </div>
-        <template v-if="configVariablesRaw !== null">
-          <p class="initialization-warning">已有初始化配置格式不正确，请修正后保存。</p>
-          <JsonCodeEditor
-            :model-value="configVariablesRaw"
-            :disabled="!editable || preview"
-            label="初始化变量原始 JSON"
-            @update:model-value="configVariablesRaw = $event"
-          />
-        </template>
-        <div v-else-if="configVariables.length" class="variable-table">
-          <div class="variable-columns" aria-hidden="true">
-            <span>变量名 · Key</span><span>值 · Value</span><span />
-          </div>
-          <div v-for="(variable, i) in configVariables" :key="variable.id" class="variable-row">
-            <input
-              v-model="variable.name"
-              :disabled="!editable || preview"
-              :aria-label="`初始化变量名 ${i + 1}`"
-              placeholder="如 centreId"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <div class="variable-value">
-              <textarea
-                v-if="variable.format === 'json'"
-                v-model="variable.value"
-                :disabled="!editable || preview"
-                :aria-label="`初始化变量值 ${i + 1}`"
-                rows="2"
-                placeholder="填写 JSON 值"
-                spellcheck="false"
-              />
-              <input
-                v-else
-                v-model="variable.value"
-                :disabled="!editable || preview"
-                :aria-label="`初始化变量值 ${i + 1}`"
-                placeholder="填写变量值"
-                autocomplete="off"
-              />
-            </div>
+        <div v-for="group in initializationGroups" :key="group.key" class="initialization-group">
+          <div class="initialization-heading">
+            <span v-if="initializationType === 'base'">{{ group.label }}</span>
             <button
-              v-if="editable && !preview"
-              class="remove-variable"
+              v-if="editable && !preview && configVariablesRaw[group.key] === null"
+              class="add-variable"
               type="button"
-              :aria-label="`删除初始化变量 ${i + 1}`"
-              title="删除变量"
-              @click="configVariables.splice(i, 1)"
+              @click="addConfigVariable(group.key)"
+              :aria-label="initializationType === 'workflow' ? '添加变量' : `添加${group.label}`"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16">
-                <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7" />
-              </svg>
+              <span aria-hidden="true">＋</span> 添加变量
             </button>
           </div>
+          <template v-if="configVariablesRaw[group.key] !== null">
+            <p class="initialization-warning">已有初始化配置格式不正确，请修正后保存。</p>
+            <JsonCodeEditor
+              :model-value="configVariablesRaw[group.key]!"
+              :disabled="!editable || preview"
+              :label="`${group.label}原始 JSON`"
+              @update:model-value="configVariablesRaw[group.key] = $event"
+            />
+          </template>
+          <div v-else-if="configVariables[group.key].length" class="variable-table">
+            <div class="variable-columns" aria-hidden="true">
+              <span>变量名 · Key</span><span>值 · Value</span><span />
+            </div>
+            <div
+              v-for="(variable, i) in configVariables[group.key]"
+              :key="variable.id"
+              class="variable-row"
+            >
+              <input
+                v-model="variable.name"
+                :disabled="!editable || preview"
+                :aria-label="`${group.label}名 ${i + 1}`"
+                :placeholder="initializationType === 'workflow' ? '如 centreId' : '填写变量名'"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="variable-value">
+                <textarea
+                  v-if="variable.format === 'json'"
+                  v-model="variable.value"
+                  :disabled="!editable || preview"
+                  :aria-label="`${group.label}值 ${i + 1}`"
+                  rows="2"
+                  placeholder="填写 JSON 值"
+                  spellcheck="false"
+                />
+                <input
+                  v-else
+                  v-model="variable.value"
+                  :disabled="!editable || preview"
+                  :aria-label="`${group.label}值 ${i + 1}`"
+                  placeholder="填写变量值"
+                  autocomplete="off"
+                />
+              </div>
+              <button
+                v-if="editable && !preview"
+                class="remove-variable"
+                type="button"
+                :aria-label="`删除${group.label} ${i + 1}`"
+                title="删除变量"
+                @click="configVariables[group.key].splice(i, 1)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16">
+                  <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p v-else class="initialization-empty">暂无初始化变量，无需配置时可留空。</p>
         </div>
-        <p v-else class="initialization-empty">暂无初始化变量，无需配置时可留空。</p>
       </details>
       <div class="conversation-layout">
         <aside>
@@ -523,11 +579,35 @@ defineExpose({ save });
 .case-initialization {
   border-bottom: 1px solid #e1e7f1;
 }
+.initialization-type {
+  display: inline-flex;
+  border: 1px solid #dbe2ee;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.initialization-type button {
+  border: 0;
+  padding: 6px 14px;
+  background: #fff;
+  color: #70829a;
+  font: inherit;
+  cursor: pointer;
+}
+.initialization-type button[aria-pressed='true'] {
+  background: #eaf7f2;
+  color: #008b76;
+}
+.initialization-type button:disabled {
+  cursor: default;
+}
 .initialization-heading {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   margin: 12px 0;
+}
+.initialization-heading > span {
+  margin-right: auto;
 }
 .case-initialization[open] > summary {
   margin-bottom: 12px;

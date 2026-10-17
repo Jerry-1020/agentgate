@@ -610,13 +610,14 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
-    const bankWorkflow =
+    const bankArrangeType =
       platform &&
       !localTarget &&
       auth.loginMode === 'bank' &&
-      platform.target.typeGroup === 'base/workflow' &&
-      (platform.target.platformArrangeType ?? platform.target.platformAgentType) === 'workflow';
-    if (bankWorkflow) {
+      platform.target.typeGroup === 'base/workflow'
+        ? (platform.target.platformArrangeType ?? platform.target.platformAgentType)
+        : null;
+    if (bankArrangeType === 'workflow') {
       const object = (value: unknown): value is Record<string, unknown> =>
         !!value && typeof value === 'object' && !Array.isArray(value);
       const incompatible = exact.cases.filter((c) => {
@@ -652,6 +653,32 @@ async function submit() {
       if (incompatible.length)
         invalid(
           `所选工作流有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 config_variables，以及每轮文本或非空业务 JSON，不支持附件上传。`,
+        );
+    } else if (bankArrangeType === 'base') {
+      const incompatible = exact.cases.filter((c) => {
+        const initial = c.initial_state ?? {};
+        return (
+          !initial ||
+          typeof initial !== 'object' ||
+          Array.isArray(initial) ||
+          Object.keys(initial).some(
+            (key) => !['prompt_variables', 'tool_variables'].includes(key),
+          ) ||
+          ['prompt_variables', 'tool_variables'].some(
+            (key) => key in initial && !Array.isArray(initial[key]),
+          ) ||
+          c.turns.some(
+            (turn: { input?: Record<string, unknown> }) =>
+              !turn.input ||
+              Object.keys(turn.input).length !== 1 ||
+              typeof turn.input.txt !== 'string' ||
+              !turn.input.txt.trim(),
+          )
+        );
+      });
+      if (incompatible.length)
+        invalid(
+          `所选基础编排有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 prompt_variables、tool_variables，以及每轮文本输入。`,
         );
     } else if (platform && !localTarget) {
       const incompatible = exact.cases.filter(

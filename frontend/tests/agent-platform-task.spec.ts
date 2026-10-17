@@ -669,6 +669,7 @@ async function openForm(page: Page, selected = false, cases = sampleCases) {
         : path.endsWith('/agents')
           ? batch([
               { id: 'workflow', name: '工作流', agentType: 'workflow' },
+              { id: 'base', name: '基础编排', agentType: 'base' },
               { id: 'claw', name: '云虾', agentType: 'abcclaw2' },
             ])
           : path.endsWith('branchTree')
@@ -725,6 +726,49 @@ test('invalid workflow config is rejected before task submission', async ({ page
   await selectFormTarget(page);
   await start(page).click();
   await expect(page.getByText(/初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base accepts both initialization arrays without enabling workflow business JSON', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: {
+    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
+    tool_variables: [{ name: 'bankNo', value: '810000', type: 'str' }],
+  } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('base');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/所选工作流.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+for (const initial of [
+  { config_variables: [{ name: 'centreId', value: '810000' }] },
+  { config_variables: [], prompt_variables: [{ name: 'userId', value: 'hk_yat' }] },
+  { prompt_variables: 'not-an-array' },
+]) test('bank base rejects incompatible initialization ' + JSON.stringify(initial), async ({ page }) => {
+  const requests = await openForm(page, false, [{ ...sampleCases[0], initial_state: initial }] as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base retains text-only turn input checks', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { prompt_variables: [] },
+    turns: [{ input: { user_input_text: '业务 JSON' }, expectations: [{ kind: 'output' }] }] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
   expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
 });
 
