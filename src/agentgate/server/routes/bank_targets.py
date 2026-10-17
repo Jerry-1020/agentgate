@@ -121,6 +121,7 @@ def model_runtime(dependencies: Dependencies):
     origin = urlunsplit((raw.scheme, raw.netloc.rsplit("@", 1)[-1], raw.path, "", ""))
     configured = dependencies._judge_client is not None
     rows = [{"role": role, "model": os.getenv("AGENTGATE_JUDGE_MODEL_ID", ""),
+             "provider_id": dependencies._judge_client.provider_id if configured else "",
              "base_url": origin, "configured": configured, "connection_verified": False}
             for role in ("LLM 评估器默认连接", "Skill 静态分析", "调优根因分析")]
     try:

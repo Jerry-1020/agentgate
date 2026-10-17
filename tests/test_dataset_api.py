@@ -86,6 +86,11 @@ def test_web_dataset_workflow_persists_and_runs_selected_version(tmp_path, monke
         assert output["outcome"] == "pass"
         assert output["checks"][0]["expected"]["expected"] == "pending_review"
         assert output["checks"][0]["actual"] == "pending_review"
+        deleted = client.delete(f"/api/datasets/{dataset_id}/versions/1")
+        assert deleted.status_code == 204
+        assert client.get(f"/api/datasets/{dataset_id}").status_code == 404
+        assert client.get(f"/api/runs/{run_id}").json()["data"] == report
+        assert client.delete(f"/api/datasets/{dataset_id}/versions/1").status_code == 404
 
 
 def test_publish_returns_domain_validation_message(tmp_path):

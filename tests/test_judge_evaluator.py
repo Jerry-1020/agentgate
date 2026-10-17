@@ -143,6 +143,13 @@ def test_validate_spec_accepts_valid_configuration_without_model_call() -> None:
         {"unexpected": True},
         {"instruction": " "},
         {"rubric": {}},
+        {"instruction": "Judge {{unknown}}", "render_template": True},
+        {"user_prompt": "Judge {{reference}}", "render_template": True},
+        {"user_prompt": " "},
+        {"user_prompt": 123},
+        {"render_template": 1},
+        {"render_template": "true"},
+        {"render_template": None},
     ],
 )
 def test_validate_spec_rejects_invalid_configuration(
@@ -200,6 +207,38 @@ def test_pass_verdict_maps_to_result_and_records_provenance() -> None:
     assert result.judge_record.output_tokens == 10
     assert result.judge_record.latency_ms == 12.5
     assert len(model.requests) == 1
+
+
+def test_prompt_configuration_executes_and_records_rendered_evidence() -> None:
+    model = RecordingModel()
+    spec = judge_spec(
+        instruction="Evaluate conciseness.\n<input>{{input}}</input>\n<output>{{output}}</output>",
+        user_prompt="Give a score and reason for {{output}}.",
+        render_template=True,
+    )
+
+    result = execute(model, spec=spec)
+
+    assert result.outcome == Outcome.PASS
+    assert result.score == 1.0
+    assert result.checks[0].reason == "looks right"
+    assert "hello" in model.requests[0].system_prompt
+    assert "continue" in model.requests[0].system_prompt
+    assert '<output>{"answer":"approved"}</output>' in model.requests[0].system_prompt
+    assert model.requests[0].user_prompt.startswith('Give a score and reason for {"answer":"approved"}.')
+    assert result.judge_record.request_system_prompt == model.requests[0].system_prompt
+    assert result.judge_record.request_user_prompt == model.requests[0].user_prompt
+    assert spec.config["instruction"].endswith("<output>{{output}}</output>")
+
+
+def test_historical_prompt_literals_remain_executable_without_template_switch() -> None:
+    model = RecordingModel()
+    spec = judge_spec(instruction="Explain the literal {{reference}} and {{input}}.")
+
+    result = execute(model, spec=spec)
+
+    assert result.outcome == Outcome.PASS
+    assert model.requests[0].system_prompt.startswith("Explain the literal {{reference}} and {{input}}.")
 
 
 @pytest.mark.parametrize(

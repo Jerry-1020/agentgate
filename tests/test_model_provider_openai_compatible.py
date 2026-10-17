@@ -11,6 +11,7 @@ from agentgate.evaluator.judge import (
     JudgeModelUnavailable,
     JudgeRequest,
 )
+from agentgate.integrations.model_providers import openai_compatible
 from agentgate.integrations.model_providers.openai_compatible import (
     OpenAICompatibleModelClient,
 )
@@ -288,3 +289,174 @@ def test_repr_never_contains_api_key() -> None:
     assert "top-secret" not in rendered
     assert "provider" in rendered
     client.close()
+
+
+@pytest.mark.parametrize("thinking", ["enabled", "disabled"])
+def test_sends_explicit_thinking_setting_with_provider_token_budget(thinking) -> None:
+    captured = {}
+
+    def handler(http_request):
+        captured.update(json.loads(http_request.content))
+        return httpx.Response(200, json=completion_response())
+
+    client, transport = client_with_handler(
+        handler, thinking=thinking, output_token_field="max_tokens"
+    )
+    client.complete(request())
+    assert captured["thinking"] == {"type": thinking}
+    assert captured["max_tokens"] == 500
+    assert "max_completion_tokens" not in captured
+    transport.close()
+
+
+def test_rejects_invalid_thinking_mode_before_sending() -> None:
+    with pytest.raises(ValueError, match="thinking"):
+        OpenAICompatibleModelClient(
+            provider_id="test", base_url="https://models.example", thinking="sometimes"
+        )
+
+
+class CompletionClock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class TimedResponseStream(httpx.SyncByteStream):
+    def __init__(self, clock, chunks, http_request):
+        self.clock = clock
+        self.chunks = chunks
+        self.http_request = http_request
+        self.read_timeouts = []
+        self.closed = False
+
+    def __iter__(self):
+        for delay, chunk in self.chunks:
+            self.read_timeouts.append(self.http_request.extensions["timeout"]["read"])
+            self.clock.now += delay
+            yield chunk
+
+    def close(self):
+        self.closed = True
+
+
+def test_accepts_whitespace_heartbeats_within_completion_budget(monkeypatch):
+    clock = CompletionClock()
+    monkeypatch.setattr(openai_compatible, "time", clock)
+    streams = []
+
+    def handler(http_request):
+        stream = TimedResponseStream(
+            clock,
+            [(0.4, b"\n"), (0.4, b" "), (0.2, json.dumps(completion_response()).encode())],
+            http_request,
+        )
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    client, transport = client_with_handler(handler)
+    response = client.complete(request())
+
+    assert response.text == '{"verdict":"pass"}'
+    assert response.latency_ms == pytest.approx(1000)
+    assert streams[0].closed is True
+    transport.close()
+
+
+def test_continuous_heartbeats_expire_total_budget_and_close_without_retry(monkeypatch):
+    clock = CompletionClock()
+    monkeypatch.setattr(openai_compatible, "time", clock)
+    streams = []
+
+    def handler(http_request):
+        stream = TimedResponseStream(clock, [(0.75, b"\n")] * 20, http_request)
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    client, transport = client_with_handler(handler, max_attempts=3, backoff_seconds=0)
+
+    with pytest.raises(JudgeModelTimeout, match="3 seconds"):
+        client.complete(request())
+
+    assert clock.now == 3
+    assert len(streams) == 1
+    assert len(streams[0].read_timeouts) == 4
+    assert streams[0].closed is True
+    transport.close()
+
+
+def test_body_uses_remaining_timeout_and_rejects_completion_arriving_after_budget(monkeypatch):
+    clock = CompletionClock()
+    monkeypatch.setattr(openai_compatible, "time", clock)
+    streams = []
+
+    def handler(http_request):
+        clock.now += 1
+        # A synchronous transport can return only after an in-flight read ends.
+        stream = TimedResponseStream(
+            clock, [(4, json.dumps(completion_response()).encode())], http_request
+        )
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    client, transport = client_with_handler(handler)
+
+    with pytest.raises(JudgeModelTimeout):
+        client.complete(request())
+
+    assert streams[0].read_timeouts == [2]
+    assert clock.now == 5
+    assert streams[0].closed is True
+    transport.close()
+
+
+def test_retries_share_budget_with_prior_attempt_and_backoff(monkeypatch):
+    clock = CompletionClock()
+    monkeypatch.setattr(openai_compatible, "time", clock)
+    timeouts = []
+
+    def handler(http_request):
+        timeouts.append(dict(http_request.extensions["timeout"]))
+        clock.now += 0.9
+        if len(timeouts) == 1:
+            return httpx.Response(429, text="provider-private-body")
+        return httpx.Response(200, json=completion_response())
+
+    client, transport = client_with_handler(handler, max_attempts=2, backoff_seconds=0.5)
+    response = client.complete(request())
+
+    assert response.attempt_count == 2
+    assert timeouts[0]["read"] == 3
+    assert timeouts[1]["read"] == pytest.approx(1.6)
+    assert clock.sleeps == [0.5]
+    transport.close()
+
+
+def test_backoff_is_clipped_to_remaining_budget_without_another_request(monkeypatch):
+    clock = CompletionClock()
+    monkeypatch.setattr(openai_compatible, "time", clock)
+    calls = []
+
+    def handler(http_request):
+        calls.append(http_request)
+        clock.now += 2.75
+        return httpx.Response(503, text="provider-private-body")
+
+    client, transport = client_with_handler(handler, max_attempts=3, backoff_seconds=10)
+
+    with pytest.raises(JudgeModelTimeout) as raised:
+        client.complete(request())
+
+    assert len(calls) == 1
+    assert clock.sleeps == [0.25]
+    assert clock.now == 3
+    assert "provider-private-body" not in str(raised.value)
+    assert "top-secret" not in str(raised.value)
+    transport.close()

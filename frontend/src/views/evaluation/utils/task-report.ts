@@ -1,4 +1,41 @@
 import type { EvaluationResult } from '../../../api/client';
+import type { EvaluationRun } from '../types/run';
+
+export type EvaluatorSnapshot = NonNullable<EvaluationRun['manifest']['evaluator_specs']>[number];
+export interface WeightedChildResult {
+  result: EvaluationResult;
+  weight: number | null;
+}
+export interface EvaluatorResultGroup {
+  result: EvaluationResult;
+  children: WeightedChildResult[];
+}
+export function groupEvaluatorResults(
+  results: EvaluationResult[],
+  specs: EvaluatorSnapshot[] = [],
+): EvaluatorResultGroup[] {
+  const grouped = results.map((result) => {
+    const parent = specs.find(
+      (s) =>
+        s.id === result.evaluator_id &&
+        s.version === result.evaluator_version &&
+        s.kind === 'llm_group',
+    );
+    const children = (parent?.children ?? []).flatMap((ref) => {
+      const child = results.find(
+        (r) =>
+          r.case_id === result.case_id &&
+          r.evaluator_id === ref.evaluator_id &&
+          r.evaluator_version === ref.evaluator_version,
+      );
+      return child ? [{ result: child, weight: ref.weight }] : [];
+    });
+    return { result, children };
+  });
+  const nested = new Set(grouped.flatMap((g) => g.children.map((c) => c.result)));
+  return grouped.filter((g) => !nested.has(g.result));
+}
+
 export type ScoreColumn = { key: string; name: string; evaluatorId: string };
 export function scoreColumns(manifest: any): ScoreColumn[] {
   return (manifest.evaluator_specs ?? [])

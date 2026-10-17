@@ -37,12 +37,19 @@ from agentgate.domain import (
     content_sha256,
     normalize_utc,
     transition_run,
+    utcnow,
 )
 from agentgate.domain.credential import ApiKeyMetadata
 from agentgate.domain.evaluation_task import EvaluationTask, task_with_rerun
 from agentgate.evaluator.versioning import publish_evaluator_draft as build_publication
 from agentgate.storage import mysql_schema as s
 from agentgate.storage.configuration import TDSQLConfig
+from agentgate.storage.evaluator_groups import (
+    validate_draft_update,
+    validate_group_draft,
+    validate_group_publications,
+    validate_identity_update,
+)
 
 M = TypeVar("M", bound=BaseModel)
 _KEY_FIELDS = {
@@ -169,6 +176,30 @@ def _version(value: str) -> int:
     return number
 
 
+def _next_evaluator_version(db: Connection, evaluator_id: str) -> int:
+    items = _models(db, s.evaluator_versions, EvaluatorSpec, evaluator_id=evaluator_id)
+    return max((_version(item.version) for item in items), default=0) + 1
+
+
+def _cleanup_owned_evaluator_drafts(
+    db: Connection,
+    evaluator_id: str,
+    user_team_id: str,
+    *,
+    keep: set[str] | None = None,
+) -> None:
+    candidates = _models(db, s.evaluators, Evaluator, user_team_id=user_team_id)
+    for child in sorted(candidates, key=lambda item: item.id):
+        if child.owner_evaluator_id != evaluator_id or child.id in (keep or set()):
+            continue
+        _one(db, s.evaluators, Evaluator, id=child.id, lock=True)
+        db.execute(s.evaluator_drafts.delete().where(
+            s.evaluator_drafts.c.evaluator_key == _digest(child.id),
+        ))
+        if _next_evaluator_version(db, child.id) == 1:
+            db.execute(s.evaluators.delete().where(s.evaluators.c.id_key == _digest(child.id)))
+
+
 def _ordered(items: list[M], field: str = "created_at", *, reverse=True) -> list[M]:
     # Python sorts complete IDs; MySQL LONGTEXT ordering can truncate comparisons.
     return sorted(
@@ -234,6 +265,8 @@ class MySQLRepository:
             if stored:
                 if dataset.created_at != stored.created_at:
                     raise ValueError("Dataset created_at is immutable")
+                if dataset.deleted_version_high_watermark < stored.deleted_version_high_watermark:
+                    raise ValueError("Dataset deleted version watermark cannot decrease")
                 if dataset.updated_at < stored.updated_at:
                     raise ValueError("cannot save a stale Dataset")
                 _update(db, s.datasets, dataset)
@@ -348,6 +381,30 @@ class MySQLRepository:
             db.execute(
                 s.dataset_versions.delete().where(s.dataset_versions.c.id_key == _digest(draft.id))
             )
+            if not _rows(db, s.dataset_versions, dataset_id=dataset_id, user_team_id=user_team_id):
+                db.execute(
+                    s.datasets.delete().where(
+                        s.datasets.c.id_key == _digest(dataset_id),
+                        s.datasets.c.user_team_key == _digest(user_team_id),
+                    )
+                )
+
+    def delete_dataset_version(self, dataset_id: str, version: int, *, user_team_id: str) -> None:
+        with self._transaction() as db:
+            dataset = _one(db, s.datasets, Dataset, id=dataset_id, user_team_id=user_team_id, lock=True)
+            if dataset is None:
+                raise ValueError("expected Dataset does not exist")
+            published = _one(db, s.dataset_versions, DatasetVersion, dataset_id=dataset_id,
+                             version=version, status="published", user_team_id=user_team_id, lock=True)
+            if published is None:
+                raise ValueError("expected Dataset publication does not exist")
+            db.execute(s.dataset_versions.delete().where(s.dataset_versions.c.id_key == _digest(published.id)))
+            if _rows(db, s.dataset_versions, dataset_id=dataset_id, user_team_id=user_team_id):
+                _update(db, s.datasets, dataset.model_copy(update={
+                    "deleted_version_high_watermark": max(dataset.deleted_version_high_watermark, version),
+                }))
+            else:
+                db.execute(s.datasets.delete().where(s.datasets.c.id_key == _digest(dataset_id)))
 
     def delete_dataset_record(self, dataset_id: str, *, user_team_id: str) -> None:
         with self._transaction() as db:
@@ -431,6 +488,7 @@ class MySQLRepository:
         with self._transaction() as db:
             stored = _one(db, s.evaluators, Evaluator, id=evaluator.id, lock=True)
             if stored:
+                validate_identity_update(evaluator, stored)
                 if evaluator.created_at != stored.created_at or evaluator.source != stored.source:
                     raise ValueError("Evaluator source and created_at are immutable")
                 if evaluator.updated_at < stored.updated_at:
@@ -451,6 +509,93 @@ class MySQLRepository:
     def get_evaluator(self, evaluator_id: str, *, user_team_id: str) -> Evaluator | None:
         with self._transaction() as db:
             return _one(db, s.evaluators, Evaluator, id=evaluator_id, user_team_id=user_team_id)
+
+    def save_evaluator_group_draft(
+        self,
+        parent: Evaluator,
+        draft: EvaluatorDraft,
+        children: Sequence[tuple[Evaluator, EvaluatorDraft]],
+        *,
+        expected_updated_at: datetime | None,
+        expected_evaluator_updated_at: datetime | None,
+        user_team_id: str,
+    ) -> None:
+        with self._transaction() as db:
+            stored_parent = _one(db, s.evaluators, Evaluator, id=parent.id, lock=True)
+            stored_draft = _one(
+                db, s.evaluator_drafts, EvaluatorDraft, evaluator_id=parent.id, lock=True,
+            )
+            validate_group_draft(
+                parent, draft, children,
+                stored_parent=stored_parent,
+                stored_draft=stored_draft,
+                expected_updated_at=expected_updated_at,
+                expected_evaluator_updated_at=expected_evaluator_updated_at,
+                user_team_id=user_team_id,
+            )
+            identities = {parent.id: stored_parent}
+            drafts = {parent.id: stored_draft}
+            next_versions = {}
+            for child, child_draft in sorted(children, key=lambda pair: pair[0].id):
+                identities[child.id] = _one(db, s.evaluators, Evaluator, id=child.id, lock=True)
+                drafts[child.id] = _one(
+                    db, s.evaluator_drafts, EvaluatorDraft, evaluator_id=child.id, lock=True,
+                )
+                validate_identity_update(child, identities[child.id])
+                validate_draft_update(child_draft, child, drafts[child.id])
+                next_versions[child.id] = _next_evaluator_version(db, child.id)
+            if any(next_versions[ref.evaluator_id] != _version(ref.evaluator_version)
+                   for ref in draft.children):
+                raise ValueError("Evaluator group child version changed; reload before saving")
+            for identity, item in ((parent, draft), *children):
+                (_update if identities[identity.id] else _insert)(db, s.evaluators, identity)
+                (_update if drafts[identity.id] else _insert)(db, s.evaluator_drafts, item)
+            _cleanup_owned_evaluator_drafts(
+                db, parent.id, user_team_id, keep={child.id for child, _ in children},
+            )
+
+    def publish_evaluator_group_draft(
+        self,
+        expected_draft_id: str,
+        publications: Sequence[EvaluatorSpec],
+        *,
+        expected_updated_at: datetime,
+        user_team_id: str,
+    ) -> None:
+        with self._transaction() as db:
+            identities = {}
+            ordered = list(publications[:1]) + sorted(publications[1:], key=lambda item: item.id)
+            for spec in ordered:
+                identity = _one(db, s.evaluators, Evaluator, id=spec.id, lock=True)
+                if identity is not None:
+                    identities[spec.id] = identity
+            validate_group_publications(publications, identities, user_team_id=user_team_id)
+            drafts = {}
+            for index, spec in enumerate(publications):
+                item = _one(
+                    db, s.evaluator_drafts, EvaluatorDraft, evaluator_id=spec.id, lock=True,
+                )
+                if item is None or (index == 0 and item.id != expected_draft_id):
+                    raise ValueError("expected Evaluator draft does not exist")
+                if index == 0 and item.updated_at != expected_updated_at:
+                    raise ValueError("Evaluator group draft changed; reload before publishing")
+                validate_draft_update(item, identities[spec.id], None)
+                version = _next_evaluator_version(db, spec.id)
+                if _version(spec.version) != version:
+                    raise ValueError(f"Evaluator publication requires version {version}")
+                if spec != build_publication(identities[spec.id], item, version):
+                    raise ValueError("published EvaluatorSpec does not match the current draft")
+                drafts[spec.id] = item
+            now = utcnow()
+            for spec in publications:
+                _insert(db, s.evaluator_versions, spec)
+                db.execute(s.evaluator_drafts.delete().where(
+                    s.evaluator_drafts.c.id_key == _digest(drafts[spec.id].id),
+                ))
+                identity = identities[spec.id]
+                _update(db, s.evaluators, identity.model_copy(update={
+                    "enabled": True, "updated_at": max(now, identity.updated_at),
+                }))
 
     def list_evaluators(
         self, include_disabled: bool = False, *, user_team_id: str
@@ -475,6 +620,7 @@ class MySQLRepository:
                 raise ValueError("unknown Evaluator")
             if _rows(db, s.evaluator_versions, evaluator_id=evaluator_id):
                 raise ValueError("published Evaluator cannot be deleted")
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
             db.execute(
                 s.evaluator_drafts.delete().where(
                     s.evaluator_drafts.c.evaluator_key == _digest(evaluator_id)
@@ -482,11 +628,34 @@ class MySQLRepository:
             )
             db.execute(s.evaluators.delete().where(s.evaluators.c.id_key == _digest(evaluator_id)))
 
+    def discard_evaluator_group_draft(
+        self,
+        evaluator_id: str,
+        expected_draft_id: str,
+        expected_draft_updated_at: datetime,
+        *,
+        user_team_id: str,
+    ) -> None:
+        with self._transaction() as db:
+            parent = _one(db, s.evaluators, Evaluator, id=evaluator_id, lock=True)
+            draft = _one(db, s.evaluator_drafts, EvaluatorDraft, evaluator_id=evaluator_id, lock=True)
+            if parent is None or parent.user_team_id != user_team_id or parent.owner_evaluator_id is not None:
+                raise ValueError("unknown Evaluator group")
+            if draft is None or draft.id != expected_draft_id or draft.updated_at != expected_draft_updated_at:
+                raise ValueError("Evaluator group draft changed; reload before discarding")
+            if draft.kind.value != "llm_group" or draft.user_team_id != user_team_id:
+                raise ValueError("unknown Evaluator group")
+            db.execute(s.evaluator_drafts.delete().where(s.evaluator_drafts.c.id_key == _digest(draft.id)))
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
+            if _next_evaluator_version(db, evaluator_id) == 1:
+                db.execute(s.evaluators.delete().where(s.evaluators.c.id_key == _digest(evaluator_id)))
+
     def save_evaluator_draft(self, draft: EvaluatorDraft) -> None:
         with self._transaction() as db:
             evaluator = _one(db, s.evaluators, Evaluator, id=draft.evaluator_id, lock=True)
             if evaluator is None:
                 raise ValueError("unknown Evaluator")
+            validate_draft_update(draft, evaluator, None)
             if draft.created_at < evaluator.created_at:
                 raise ValueError("EvaluatorDraft cannot precede Evaluator creation")
             stored = _one(db, s.evaluator_drafts, EvaluatorDraft, id=draft.id, lock=True)
@@ -529,6 +698,7 @@ class MySQLRepository:
             db.execute(
                 s.evaluator_drafts.delete().where(s.evaluator_drafts.c.id_key == _digest(draft.id))
             )
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
 
     def list_evaluator_versions(
         self, evaluator_id: str, *, user_team_id: str

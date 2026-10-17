@@ -1,0 +1,46 @@
+{
+  "format": "agentgate.dataset",
+  "format_version": 1,
+  "dataset": {
+    "id": "llm-conciseness-example",
+    "name": "简洁性 · 端到端示例",
+    "description": "两条合成文本；本地模拟 Agent 产生真实执行轨迹，由已配置的真实 LLM 评估器评分。",
+    "created_at": "2026-10-15T00:00:00Z",
+    "updated_at": "2026-10-15T00:00:00Z"
+  },
+  "version": {
+    "id": "llm-conciseness-example-v1",
+    "dataset_id": "llm-conciseness-example",
+    "dataset_name": "简洁性 · 端到端示例",
+    "dataset_description": "两条合成文本；本地模拟 Agent 产生真实执行轨迹，由已配置的真实 LLM 评估器评分。",
+    "version": 1,
+    "status": "published",
+    "created_at": "2026-10-15T00:00:00Z",
+    "updated_at": "2026-10-15T00:00:00Z",
+    "published_at": "2026-10-15T00:00:00Z",
+    "content_sha256": "184dc57280d87dcc23575b04721a72a2880126e65609c525a6e54f4662e94502",
+    "notes": "模拟 Agent 会回显输入并附带模拟标识；简洁性分数可能较低。验收要求真实评分成功，不要求样本获得满分。",
+    "cases": [
+      {
+        "id": "conciseness-number",
+        "name": "仅需要一个数字",
+        "turns": [
+          {
+            "id": "conciseness-number-turn",
+            "input": { "txt": "1加1等于多少？请只回复数字。" }
+          }
+        ]
+      },
+      {
+        "id": "conciseness-city",
+        "name": "仅需要一个城市名",
+        "turns": [
+          {
+            "id": "conciseness-city-turn",
+            "input": { "txt": "中国的首都是哪里？请只回复城市名。" }
+          }
+        ]
+      }
+    ]
+  }
+}

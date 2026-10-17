@@ -26,6 +26,7 @@ class Dataset(DomainModel):
     name: str
     description: str = ""
     archived: bool = False
+    deleted_version_high_watermark: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）

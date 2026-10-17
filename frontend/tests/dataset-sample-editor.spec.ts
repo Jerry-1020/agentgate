@@ -173,10 +173,14 @@ async function open(page: Page, kind?: Kind) {
   return datasetId;
 }
 
-async function valueInput(page: Page) {
-  const advanced = page.locator('details.advanced');
-  if (!(await advanced.evaluate(element => (element as HTMLDetailsElement).open))) await advanced.locator('summary').first().click();
-  return advanced.getByPlaceholder('期望值，支持 JSON', { exact: true });
+function valueInput(page: Page, kind: Kind) {
+  return page.getByLabel(kind === 'state' ? '最终状态值' : '工具参数值 1', { exact: true });
+}
+
+function editorText(kind: Kind, expected: unknown) {
+  return JSON.stringify(kind === 'state' ? { status: expected } : [
+    { path: 'status', condition: { kind: 'equals', expected } },
+  ], null, 2);
 }
 
 async function typeRaw(input: Locator, text: string) {
@@ -202,118 +206,96 @@ async function save(page: Page, datasetId: string, method = 'PUT') {
   return (await saved.json()).data.cases[0];
 }
 
-test('background persists without changing expectations, preserves other extensions and clears', async ({ page }) => {
+test('removed extension controls remain absent while each turn retains its stored data', async ({ page }) => {
   const datasetId = await open(page, 'state');
   const original = sample('state');
-  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
-    data: { ...original, turns: original.turns.map(turn => ({
-      ...turn, extensions: [{ key: 'custom', value: 'keep' }],
-    })) },
-  });
-  expect(seeded.ok()).toBeTruthy();
-  await page.reload();
-  const background = page.getByLabel('背景知识', { exact: true });
-  await expect(background).toHaveValue('');
-  await background.fill('客户已完成身份核验\n仅供记录');
-  await expect(page.getByTestId('dirty')).toHaveText('true');
-  const saved = await save(page, datasetId);
-  expect(saved.turns[0].extensions).toEqual([
+  const extensions = [
+    { key: 'background', value: '第一轮背景' },
+    { key: 'custom_variables', value: '{"cust_id":"001"}\n保持原文' },
     { key: 'custom', value: 'keep' },
-    { key: 'background', value: '客户已完成身份核验\n仅供记录' },
-  ]);
-  expect(saved.turns[0].input).toEqual(original.turns[0].input);
-  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  ];
+  const seeded = {
+    ...original,
+    turns: [
+      { ...original.turns[0], extensions },
+      { id: 'second-turn', input: { query: '第二轮输入' }, notes: '', expectations: [],
+        extensions: [{ key: 'background', value: '第二轮背景' },
+          { key: 'custom_variables', value: 'channel=mobile' }] },
+    ],
+  };
+  expect((await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: seeded,
+  })).ok()).toBeTruthy();
   await page.reload();
-  await expect(background).toHaveValue('客户已完成身份核验\n仅供记录');
-  await background.fill('');
-  const cleared = await save(page, datasetId);
-  expect(cleared.turns[0].extensions).toEqual([{ key: 'custom', value: 'keep' }]);
-  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
-  await page.reload();
-  await expect(background).toHaveValue('');
-});
-
-test('background stays with each turn, survives publication and becomes read-only', async ({ page }) => {
-  const datasetId = await open(page);
-  const background = page.getByLabel('背景知识', { exact: true });
-  await page.getByLabel('用户输入', { exact: true }).fill('第一轮输入');
-  await page.getByLabel('期望输出', { exact: true }).fill('第一轮输出');
-  await background.fill('第一轮背景');
-  await page.getByRole('button', { name: '添加新轮次' }).click();
-  await expect(background).toHaveValue('');
-  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
-  await page.getByLabel('期望输出', { exact: true }).fill('第二轮输出');
-  await background.fill('第二轮背景');
-  await page.getByRole('button', { name: /第 1 轮/ }).click();
-  await expect(background).toHaveValue('第一轮背景');
-  const saved = await save(page, datasetId, 'POST');
-  expect(saved.turns.map((turn: { extensions: unknown }) => turn.extensions)).toEqual([
-    [{ key: 'background', value: '第一轮背景' }],
-    [{ key: 'background', value: '第二轮背景' }],
-  ]);
-  await page.reload();
-  await expect(background).toHaveValue('第一轮背景');
+  for (const label of ['背景知识', '自定义变量'])
+    await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '对话预览', exact: true })).toHaveCount(0);
+  await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
+  await page.getByLabel('样本名称', { exact: true }).fill('Renamed sample');
   await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(background).toHaveValue('第二轮背景');
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮修改');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  const saved = await save(page, datasetId);
+  expect(saved.turns.map((turn: any) => turn.extensions)).toEqual(seeded.turns.map(turn => turn.extensions));
+  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  expect(saved.turns[1].input).toEqual({ query: '第二轮修改' });
   const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
   expect((await publication).ok()).toBeTruthy();
-  await expect(background).toBeDisabled();
   await page.reload();
-  await expect(background).toBeDisabled();
-  await expect(background).toHaveValue('第一轮背景');
-  await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(background).toHaveValue('第二轮背景');
-  await test.info().attach('background-description-published', {
-    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
-  });
+  for (const label of ['背景知识', '自定义变量'])
+    await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('用户输入', { exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '保存样本', exact: true })).toHaveCount(0);
+  const published = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+  expect(published.ok()).toBeTruthy();
+  expect((await published.json()).data.cases[0].turns.map((turn: any) => turn.extensions))
+    .toEqual(seeded.turns.map(turn => turn.extensions));
 });
 
-test('custom variables persist per turn as strings, clear independently and become read-only', async ({ page }) => {
+test('editing the primary expected output preserves every hidden secondary condition', async ({ page }) => {
   const datasetId = await open(page, 'state');
   const original = sample('state');
-  const background = page.getByLabel('背景知识', { exact: true });
-  const variables = page.getByLabel('自定义变量', { exact: true });
-  const firstValue = '{"cust_id":"001","amount":100}\n备注=保持原文';
-  await expect(variables).toHaveValue('');
-  await background.fill('保留背景');
-  await variables.fill(firstValue);
-  await expect(page.getByTestId('dirty')).toHaveText('true');
-  await page.getByRole('button', { name: '添加新轮次' }).click();
-  await expect(variables).toHaveValue('');
-  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
-  await variables.fill('channel=mobile');
-  await page.getByRole('button', { name: /第 1 轮/ }).click();
-  await expect(variables).toHaveValue(firstValue);
+  const secondary = [
+    { id: 'regex-output', name: '保留正则', kind: 'output', path: 'answer',
+      condition: { kind: 'matches_pattern', pattern: '^old$' } },
+    { id: 'range-output', name: '保留区间', kind: 'output', path: 'score',
+      condition: { kind: 'within_range', minimum: 0, maximum: 1 } },
+    { id: 'missing-output', name: '保留缺失', kind: 'output', path: 'secret',
+      condition: { kind: 'must_be_missing' } },
+  ];
+  const primary = { id: 'primary-output', name: '完整输出', kind: 'output', path: null,
+    condition: { kind: 'equals', expected: 'old answer' } };
+  const rules = [...original.turns[0].expectations, ...secondary, primary];
+  expect((await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: [{ ...original.turns[0], expectations: rules }] },
+  })).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('old answer');
+  await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
+  await page.getByLabel('期望输出', { exact: true }).fill('new answer');
   const saved = await save(page, datasetId);
-  expect(saved.turns[0].input).toEqual(original.turns[0].input);
-  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
-  expect(saved.turns[0].extensions).toEqual([
-    { key: 'background', value: '保留背景' },
-    { key: 'custom_variables', value: firstValue },
+  expect(saved.turns[0].expectations).toEqual([
+    ...rules.slice(0, -1), { ...primary, condition: { kind: 'equals', expected: 'new answer' } },
   ]);
-  expect(saved.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=mobile' }]);
   await page.reload();
-  await expect(variables).toHaveValue(firstValue);
-  await variables.fill('');
-  const cleared = await save(page, datasetId);
-  expect(cleared.turns[0].extensions).toEqual([{ key: 'background', value: '保留背景' }]);
-  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
-  await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(variables).toHaveValue('channel=mobile');
-  await variables.fill('channel=web');
-  const edited = await save(page, datasetId);
-  expect(edited.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=web' }]);
-  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
-  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
-  expect((await publication).ok()).toBeTruthy();
-  await page.reload();
-  await expect(variables).toHaveValue('');
-  await expect(background).toHaveValue('保留背景');
-  await expect(variables).toBeDisabled();
-  await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(variables).toHaveValue('channel=web');
-  await expect(variables).toBeDisabled();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('new answer');
+});
+
+test('user input is required and expected output stays optional', async ({ page }) => {
+  const datasetId = await open(page);
+  const input = page.getByLabel('用户输入', { exact: true });
+  await expect(input).toHaveAttribute('aria-required', 'true');
+  await expect(page.locator('.message-card.user header')).toContainText('用户输入 *');
+  await expect(page.locator('.message-card.expected header')).toContainText('期望输出');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role="alert"]')).toContainText('用户输入不能为空');
+  expect((await (await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`)).json()).data.cases)
+    .toHaveLength(0);
+  await input.fill('只提供用户输入');
+  const saved = await save(page, datasetId, 'POST');
+  expect(saved.turns[0].input).toEqual({ txt: '只提供用户输入' });
+  expect(saved.turns[0].expectations).toEqual([]);
 });
 
 test('classification saves negative, reopens, changes to boundary and becomes read-only when published', async ({ page }) => {
@@ -344,55 +326,79 @@ test('classification saves negative, reopens, changes to boundary and becomes re
 
 for (const kind of ['state', 'tool_argument'] as const) {
   for (const action of ['Backspace', 'Delete', 'clear'] as const) {
-    test(`${kind} permits ${action} without reinserting JSON quotes`, async ({ page }) => {
+    test(`${kind} permits ${action} without reformatting incomplete JSON`, async ({ page }) => {
       const datasetId = await open(page, kind);
-      const input = await valueInput(page);
-      await expect(input).toHaveValue('"abcd"');
+      const input = valueInput(page, kind);
+      const original = editorText(kind, 'abcd');
+      await expect(input).toHaveValue(original);
       if (action === 'clear') {
         await input.press('ControlOrMeta+A');
         await input.press('Backspace');
         await expect(input).toHaveValue('');
       } else {
-        await input.press(action === 'Backspace' ? 'End' : 'Home');
+        await input.press('ControlOrMeta+A');
+        await input.press(action === 'Backspace' ? 'ArrowRight' : 'ArrowLeft');
         await input.press(action);
-        await expect(input).toHaveValue(action === 'Backspace' ? '"abcd' : 'abcd"');
+        await expect(input).toHaveValue(action === 'Backspace' ? original.slice(0, -1) : original.slice(1));
       }
-      const text = '拒绝 C:\\path "quoted"';
-      await typeRaw(input, text);
+      const expected = '拒绝 C:\\path "quoted"';
+      const raw = editorText(kind, expected);
+      await typeRaw(input, raw);
       const saved = await save(page, datasetId);
-      expect(saved.turns[0].expectations.find((rule: any) => rule.id === 'editable-rule').condition.expected).toBe(text);
+      expect(saved.turns[0].expectations.find((rule: any) => rule.id === 'editable-rule'))
+        .toEqual({ ...sample(kind).turns[0].expectations[0], condition: { kind: 'equals', expected } });
       await page.reload();
-      await expect(await valueInput(page)).toHaveValue(JSON.stringify(text));
+      await expect(valueInput(page, kind)).toHaveValue(raw);
     });
   }
 
-  test(`${kind} incrementally types JSON and persists its actual types across reloads`, async ({ page }) => {
+  test(`${kind} persists typed values while retaining field metadata`, async ({ page }) => {
     test.setTimeout(90000);
     const datasetId = await open(page, kind);
-    const values = [
-      { text: '"quoted string"', expected: 'quoted string' },
-      { text: String.raw`"C:\\temp\\file"`, expected: 'C:\\temp\\file' },
-      { text: '0', expected: 0 },
-      { text: '12.5', expected: 12.5 },
-      { text: 'true', expected: true },
-      { text: 'false', expected: false },
-      { text: 'null', expected: null },
-      { text: '[0,true,null,["x",[false,2]]]', expected: [0, true, null, ['x', [false, 2]]] },
-      { text: '{"unfinished":', expected: '{"unfinished":' },
-    ];
+    const values = ['quoted string', 'C:\\temp\\file', 0, 12.5, true, false, null,
+      [0, true, null, ['x', [false, 2]]]];
     for (const value of values) {
-      await typeRaw(await valueInput(page), value.text);
+      const raw = editorText(kind, value);
+      await typeRaw(valueInput(page, kind), raw);
       await expect(page.getByTestId('dirty')).toHaveText('true');
-      if (value.text === '{"unfinished":') {
-        await page.screenshot({ path: test.info().outputPath(kind + '-incomplete-json.png'), fullPage: true });
-      }
       const saved = await save(page, datasetId);
       const expected = sample(kind);
-      expected.turns[0].expectations[0].condition.expected = value.expected as any;
+      expected.turns[0].expectations[0].condition.expected = value as any;
       expect(saved).toEqual(expected);
       await page.reload();
-      await expect(await valueInput(page)).toHaveValue(JSON.stringify(value.expected));
+      await expect(valueInput(page, kind)).toHaveValue(raw);
     }
+  });
+
+  test(`${kind} blocks invalid JSON from saving or abandoning the current turn`, async ({ page }) => {
+    const datasetId = await open(page, kind);
+    const raw = '{"unfinished":';
+    await typeRaw(valueInput(page, kind), raw);
+    await page.getByLabel('样本名称', { exact: true }).fill('Unsaved name');
+    await expect(valueInput(page, kind)).toHaveValue(raw);
+    await expect(page.getByTestId('dirty')).toHaveText('true');
+    await page.getByRole('button', { name: '保存样本', exact: true }).click();
+    await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('JSON');
+    await page.getByRole('button', { name: '添加新轮次' }).click();
+    await expect(page.locator('.round')).toHaveCount(1);
+    await expect(valueInput(page, kind)).toHaveValue(raw);
+    const persisted = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
+    expect((await persisted.json()).data.cases[0]).toEqual(sample(kind));
+  });
+
+  test(`${kind} is read-only with matching fields after publication`, async ({ page }) => {
+    await open(page, kind);
+    const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+    await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+    expect((await publication).ok()).toBeTruthy();
+    await page.reload();
+    await expect(valueInput(page, kind)).toHaveValue(editorText(kind, 'abcd'));
+    await expect(valueInput(page, kind)).toBeDisabled();
+    await expect(page.getByLabel('最终状态值', { exact: true })).toBeDisabled();
+    await expect(page.getByLabel('工具名 1', { exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '保存样本', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '添加工具', exact: true })).toHaveCount(0);
+    await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
   });
 }
 
@@ -401,32 +407,45 @@ test('saving untouched state and tool rules preserves metadata and all other exp
     const datasetId = await open(page, kind);
     expect(await save(page, datasetId)).toEqual(sample(kind));
     await page.reload();
-    await expect(await valueInput(page)).toHaveValue('"abcd"');
+    await expect(valueInput(page, kind)).toHaveValue(editorText(kind, 'abcd'));
   }
 });
 
-test('cleared expected value remains blank through unrelated edits and persists an empty string', async ({ page }) => {
+test('clearing final state removes only its rules and stays blank across unrelated edits', async ({ page }) => {
   const datasetId = await open(page, 'state');
-  const input = await valueInput(page);
+  const input = valueInput(page, 'state');
   await typeRaw(input, '');
   await page.getByLabel('样本名称', { exact: true }).fill('Renamed sample');
   await expect(input).toHaveValue('');
   const saved = await save(page, datasetId);
   expect(saved.name).toBe('Renamed sample');
-  expect(saved.turns[0].expectations[0].condition.expected).toBe('');
+  expect(saved.turns[0].expectations).toEqual([sample('state').turns[0].expectations[1]]);
   await page.reload();
-  await expect(await valueInput(page)).toHaveValue('""');
+  await expect(valueInput(page, 'state')).toHaveValue('');
+});
+
+test('tool name and parameter value must both be supplied or both cleared', async ({ page }) => {
+  const datasetId = await open(page, 'tool_argument');
+  await valueInput(page, 'tool_argument').fill('');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('请输入工具参数值');
+  await page.getByLabel('工具名 1', { exact: true }).fill('');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([sample('tool_argument').turns[0].expectations[1]]);
+  await page.reload();
+  await expect(page.getByLabel('工具名 1', { exact: true })).toHaveValue('');
+  await expect(valueInput(page, 'tool_argument')).toHaveValue('');
 });
 
 test('server replacement of the same expectation ID refreshes its raw editor value', async ({ page }) => {
   const datasetId = await open(page, 'tool_argument');
-  await typeRaw(await valueInput(page), '{"local":');
+  await typeRaw(valueInput(page, 'tool_argument'), '{"local":');
   const replacement = sample('tool_argument');
   replacement.turns[0].expectations[0].condition.expected = 'server replacement';
   const updated = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/acceptance-case`, { data: replacement });
   expect(updated.ok()).toBeTruthy();
   await page.getByRole('button', { name: 'Reload server sample', exact: true }).click();
-  await expect(await valueInput(page)).toHaveValue('"server replacement"');
+  await expect(valueInput(page, 'tool_argument')).toHaveValue(editorText('tool_argument', 'server replacement'));
   expect(await save(page, datasetId)).toEqual(replacement);
 });
 
@@ -435,15 +454,16 @@ test('nested JSON objects remain raw while editing and reach the API as typed ob
   // request after observing the real editor/API conversion; never simulate a saved object.
   for (const kind of ['state', 'tool_argument'] as const) {
     const datasetId = await open(page, kind);
-    const input = await valueInput(page);
-    const raw = '{"items":[0,true,null,{"name":"x"}]}';
+    const input = valueInput(page, kind);
+    const expected = { items: [0, true, null, { name: 'x' }] };
+    const raw = editorText(kind, expected);
     await typeRaw(input, raw);
     const path = `/api/datasets/${datasetId}/drafts/cases/acceptance-case`;
     await page.route('**' + path, route => route.abort('aborted'));
     const submitted = page.waitForRequest(request => request.method() === 'PUT' && request.url().endsWith(path));
     await page.getByRole('button', { name: '保存样本', exact: true }).click();
     const body = (await submitted).postDataJSON();
-    expect(body.turns[0].expectations[0].condition.expected).toEqual({ items: [0, true, null, { name: 'x' }] });
+    expect(body.turns[0].expectations[0].condition.expected).toEqual(expected);
     await expect(input).toHaveValue(raw);
     const persisted = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
     expect((await persisted.json()).data.cases[0]).toEqual(sample(kind));

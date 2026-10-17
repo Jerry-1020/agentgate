@@ -113,7 +113,7 @@ const historical = ref<Definition | null>(null);
 const definition = computed(
   () =>
     historical.value ??
-    (selected.value?.evaluator.kind === 'rule'
+    ((selected.value?.draft ?? selected.value?.latest)?.kind === 'rule'
       ? selected.value?.latest
       : (selected.value?.draft ?? selected.value?.latest)),
 );
@@ -208,7 +208,7 @@ async function load() {
     loading.value = false;
   }
 }
-async function open(item: EvaluatorSummary) {
+async function open(item: { id: string }) {
   mockSelected.value = false;
   const sequence = ++openSequence;
   selected.value = null;
@@ -337,7 +337,7 @@ async function create() {
     });
     form.value = false;
     kind.value = createKind.value;
-    await open({ ...created.evaluator, kind: createKind.value });
+    await open(created.evaluator);
     ElMessage.success('草稿已保存，发布后可用于测评');
   });
 }

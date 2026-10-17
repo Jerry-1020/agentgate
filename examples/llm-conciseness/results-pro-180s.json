@@ -1,0 +1,16 @@
+{
+  "end_to_end_verified": false,
+  "api": "http://127.0.0.1:15197",
+  "login_mode": "external",
+  "task_id": "14badec3-7dc3-49ce-a8c1-3d8ac7eccead",
+  "run_id": "14badec3-7dc3-49ce-a8c1-3d8ac7eccead",
+  "evaluator_id": "cee497c8-acc0-4ecf-a670-1c175ab34c9c",
+  "evaluator_version": "1",
+  "dataset_id": "llm-conciseness-example",
+  "dataset_version": 1,
+  "case_ids": [
+    "conciseness-number"
+  ],
+  "status": "completed",
+  "error": "样本 conciseness-number 未得到有效评分：error。"
+}

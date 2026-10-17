@@ -4,7 +4,12 @@ import { pretty } from '../../../api/evaluations';
 const props = defineProps<{ manifest: object }>();
 const selected = ref<any>(null);
 const config = computed(() => props.manifest as Record<string, any>);
-const templateLabels1: Record<string, string> = { rule: '规则', llm_judge: 'LLM', hybrid: '复合' };
+const templateLabels1: Record<string, string> = {
+  rule: '规则',
+  llm_judge: 'LLM',
+  llm_group: 'LLM 评估器',
+  hybrid: '复合',
+};
 </script>
 <template>
   <div data-testid="run-configuration">

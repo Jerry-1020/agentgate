@@ -7,11 +7,21 @@ import {
   type EvaluatorDetail,
   type EvaluatorSummary,
 } from '../../../api/evaluations';
-import EvaluatorImport from './EvaluatorImport.vue';
 import RuleEvaluatorCreate from './RuleEvaluatorCreate.vue';
-import { dimensionNames, ruleExamples } from '../utils/evaluator-display';
+import {
+  dimensionNames,
+  evaluatorDate,
+  isLlmEvaluator,
+  ruleExamples,
+} from '../utils/evaluator-display';
 import { evaluatorScenarios, evaluatorTechnicalChecks } from '../utils/evaluator-guidance';
 import EvaluatorModelSelect from './EvaluatorModelSelect.vue';
+import PromptEvaluatorEditor from './PromptEvaluatorEditor.vue';
+import LLMGroupEditor from './LLMGroupEditor.vue';
+import LLMGroupTemplateCard from './LLMGroupTemplateCard.vue';
+import LLMGroupTemplatePreview from './LLMGroupTemplatePreview.vue';
+import { llmGroupTemplates } from '../utils/evaluator-group';
+import { isPromptEvaluator } from '../utils/evaluator-templates';
 import { modelRefLabel } from '../utils/evaluator-model';
 import {
   evaluatorCatalog,
@@ -34,7 +44,6 @@ const props = defineProps<{ initialId?: string }>(),
   emit = defineEmits<{ dirtyChange: [value: boolean]; launch: [id: string] }>();
 const category = ref<'rule' | 'llm_judge'>('llm_judge'),
   query = ref(''),
-  importing = ref(false),
   creatingRule = ref(false),
   rule = ref<EvaluatorSummary | null>(null);
 const design = ref<EvaluatorDesign | null>(null),
@@ -47,6 +56,17 @@ const editing = ref(false),
   error = ref(''),
   notice = ref(''),
   baseline = ref('');
+const promptOpen = ref(false),
+  promptDirty = ref(false),
+  promptInitialDetail = ref<EvaluatorDetail | null>(null);
+const groupOpen = ref(false),
+  groupChoosing = ref(false),
+  groupDirty = ref(false),
+  groupInitialId = ref<string>();
+const previewTemplateId = ref('');
+const previewTemplate = computed(() =>
+  llmGroupTemplates.find((template) => template.id === previewTemplateId.value),
+);
 const historyOpen = ref(false),
   historyLoading = ref(false),
   historyError = ref(''),
@@ -56,13 +76,25 @@ const dirty = computed(() => editing.value && JSON.stringify(design.value) !== b
 const ownDesign = computed(
   () => detail.value?.evaluator.source === 'user' && hasDimensionScoring(definition.value),
 );
+// Preserve this demo dependency for existing hybrid evaluators, without a standalone page entry.
+const hiddenEvaluatorId = 'a99302af-54b0-45ba-b2a1-0f643488c4b1';
 const entries = computed(() =>
   evaluatorCatalog.value.filter(
     (e) =>
-      e.kind === category.value &&
-      (e.latest_version || (e.kind === 'llm_judge' && e.has_draft)) &&
+      (category.value === 'rule' ? e.kind === 'rule' : isLlmEvaluator(e.kind)) &&
+      !(e.source === 'builtin' && isLlmEvaluator(e.kind)) &&
+      !e.owner_evaluator_id &&
+      e.id !== hiddenEvaluatorId &&
+      (e.latest_version || (isLlmEvaluator(e.kind) && e.has_draft)) &&
       e.name.toLowerCase().includes(query.value.toLowerCase()),
   ),
+);
+const visibleGroupTemplates = computed(() =>
+  category.value === 'llm_judge'
+    ? llmGroupTemplates.filter((template) =>
+        (template.name + template.description).includes(query.value.trim()),
+      )
+    : [],
 );
 const models = computed(() =>
   Array.from(
@@ -86,36 +118,15 @@ const canLaunch = computed(
     !viewingDraft.value &&
     design.value?.version === detail.value.latest.version,
 );
-watch([dirty, importing, busy], ([a, b, c]) => emit('dirtyChange', a || b || c));
+watch([dirty, busy, promptDirty, groupDirty], (values) =>
+  emit('dirtyChange', values.some(Boolean)),
+);
 let openSequence = 0;
 function create() {
   openSequence++;
-  detail.value = null;
-  definition.value = null;
-  design.value = {
-    id: '',
-    name: '',
-    description: '',
-    version: null,
-    dimensions: [
-      ['relevance', '相关性', 25],
-      ['correctness', '正确性', 25],
-      ['conciseness', '简洁性', 25],
-      ['safety', '安全性', 5],
-      ['tools', '工具', 20],
-    ].map(([id, name, weight]) => ({
-      id: String(id),
-      name: String(name),
-      description: '',
-      prompt: '',
-      weight: Number(weight),
-    })),
-    modelKey: '',
-    scope: 'final_output',
-    threshold: 80,
-  };
-  viewingDraft.value = true;
-  beginEdit();
+  groupInitialId.value = undefined;
+  groupChoosing.value = true;
+  groupOpen.value = true;
 }
 function beginEdit() {
   editing.value = true;
@@ -143,6 +154,13 @@ async function refreshDetail(id: string) {
 }
 async function open(e: EvaluatorSummary) {
   if (busy.value) return;
+  if (e.kind === 'llm_group') {
+    openSequence++;
+    groupInitialId.value = e.id;
+    groupChoosing.value = false;
+    groupOpen.value = true;
+    return;
+  }
   if (e.kind === 'rule') {
     rule.value = e;
     return;
@@ -156,7 +174,10 @@ async function open(e: EvaluatorSummary) {
     if (sequence !== openSequence) return;
     const source = value.draft ?? value.latest;
     if (!source) throw new Error('此评估器暂无草稿或发布版本。');
-    showDefinition(value, source, !!value.draft);
+    if (isPromptEvaluator(source)) {
+      promptInitialDetail.value = value;
+      promptOpen.value = true;
+    } else showDefinition(value, source, !!value.draft);
   } catch (e) {
     error.value = String(e);
   } finally {
@@ -200,11 +221,7 @@ async function edit() {
         based_on_version: design.value.version,
       },
     );
-    showDefinition(
-      { ...detail.value!, evaluator: { ...detail.value!.evaluator, has_draft: true }, draft },
-      draft,
-      true,
-    );
+    showDefinition({ ...detail.value!, draft }, draft, true);
     beginEdit();
     await loadReviewAssets();
   } catch (e) {
@@ -269,11 +286,6 @@ async function publish() {
     showDefinition(
       {
         ...detail.value,
-        evaluator: {
-          ...detail.value.evaluator,
-          has_draft: false,
-          latest_version: published.version!,
-        },
         latest: published,
         draft: null,
       },
@@ -348,8 +360,8 @@ onMounted(async () => {
   await loadReviewAssets();
   if (props.initialId) {
     const e = evaluatorCatalog.value.find((e) => e.id === decodeURIComponent(props.initialId!));
-    if (e && e.kind !== 'hybrid') {
-      category.value = e.kind;
+    if (e && e.id !== hiddenEvaluatorId && e.kind !== 'hybrid') {
+      category.value = e.kind === 'rule' ? 'rule' : 'llm_judge';
       void open(e);
     }
   }
@@ -366,18 +378,40 @@ const templateLabels1: Record<string, string> = {
 };
 </script>
 <template>
-  <section class="review-assets">
+  <LLMGroupEditor
+    v-if="groupOpen"
+    :initial-id="groupInitialId"
+    :choose-template-first="groupChoosing"
+    :models="models"
+    @started="groupChoosing = false"
+    @close="groupOpen = false"
+    @dirty-change="groupDirty = $event"
+    @launch="
+      groupOpen = false;
+      emit('launch', $event);
+    "
+  />
+  <PromptEvaluatorEditor
+    v-if="promptOpen"
+    :initial-detail="promptInitialDetail"
+    :models="models"
+    @close="promptOpen = false"
+    @dirty-change="promptDirty = $event"
+    @launch="
+      promptOpen = false;
+      emit('launch', $event);
+    "
+  />
+  <section v-if="!promptOpen && (!groupOpen || groupChoosing)" class="review-assets">
     <div class="asset-heading">
       <div><h1>评估器</h1></div>
       <div class="actions">
-        <button class="asset-secondary" @click="loadReviewAssets" :disabled="assetsLoading">
-          刷新</button
-        ><template v-if="category === 'rule'"
-          ><button class="asset-secondary" @click="importing = true">导入评估器</button
-          ><button class="asset-primary" @click="creatingRule = true">
-            ＋ 新建规则评估器
-          </button></template
-        ><button v-else class="asset-primary" :disabled="busy" @click="create">
+        <button
+          v-if="category === 'llm_judge'"
+          class="asset-primary"
+          :disabled="busy"
+          @click="create"
+        >
           ＋ 新建 LLM 评估器
         </button>
       </div>
@@ -388,16 +422,22 @@ const templateLabels1: Record<string, string> = {
         LLM 评估
       </button>
     </div>
-    <p v-if="category === 'llm_judge'" class="asset-note">
-      保存为草稿，发布后可用于测评；运行保留所选发布版本。
-    </p>
     <p v-if="assetsError" role="alert" class="asset-error">{{ assetsError }}</p>
     <p v-if="error && !design" role="alert" class="asset-error">{{ error }}</p>
     <div class="asset-filters">
       <input v-model="query" aria-label="搜索评估器" placeholder="搜索评估器名称" />
     </div>
     <p v-if="assetsLoading">正在读取…</p>
-    <div v-else class="asset-grid">
+    <div v-else class="asset-grid" :class="{ 'llm-catalogue-grid': category === 'llm_judge' }">
+      <LLMGroupTemplateCard
+        v-for="template in visibleGroupTemplates"
+        :key="'template:' + template.id"
+        class="catalogue-template-card"
+        :template="template"
+        action="view"
+        :disabled="busy"
+        @view="previewTemplateId = $event"
+      />
       <article v-for="e in entries" :key="e.id" class="asset-card">
         <span class="asset-chip"
           >{{ e.source === 'builtin' ? '预置' : '自建' }} ·
@@ -406,6 +446,14 @@ const templateLabels1: Record<string, string> = {
         <span v-if="e.has_draft" class="asset-chip preview">草稿</span>
         <h2>{{ e.name }}</h2>
         <p>{{ e.description || e.metric }}</p>
+        <p v-if="e.kind === 'llm_group'" class="asset-small">
+          {{
+            e.child_count ??
+            (evaluatorDetails[e.id]?.draft ?? evaluatorDetails[e.id]?.latest)?.children.length ??
+            0
+          }}
+          个子评估器 · 加权评分
+        </p>
         <p v-if="e.kind === 'llm_judge'" class="asset-small">
           评审模型：{{
             modelRefLabel(
@@ -416,6 +464,9 @@ const templateLabels1: Record<string, string> = {
             )
           }}
         </p>
+        <p v-if="isLlmEvaluator(e.kind)" class="asset-small">
+          创建：{{ evaluatorDate(e.created_at) }}<br />更新：{{ evaluatorDate(e.updated_at) }}
+        </p>
         <div class="asset-card-actions">
           <button class="asset-link" :disabled="busy" @click="open(e)">查看详情</button
           ><span class="asset-small">{{
@@ -425,6 +476,12 @@ const templateLabels1: Record<string, string> = {
       </article>
     </div>
   </section>
+  <LLMGroupTemplatePreview
+    v-if="previewTemplate"
+    :key="previewTemplate.id"
+    :template="previewTemplate"
+    @close="previewTemplateId = ''"
+  />
   <el-dialog
     :model-value="!!design"
     :before-close="close"
@@ -656,14 +713,6 @@ const templateLabels1: Record<string, string> = {
       ><button class="asset-secondary" @click="rule = null">关闭</button></template
     ></el-dialog
   >
-  <EvaluatorImport
-    v-if="importing"
-    @close="importing = false"
-    @imported="
-      importing = false;
-      loadReviewAssets();
-    "
-  />
   <RuleEvaluatorCreate
     v-if="creatingRule"
     @close="creatingRule = false"
@@ -674,6 +723,11 @@ const templateLabels1: Record<string, string> = {
   />
 </template>
 <style scoped>
+.asset-grid.llm-catalogue-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 320px));
+  align-items: start;
+}
+
 .design-fields {
   border: 0;
   padding: 0;

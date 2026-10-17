@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
@@ -26,6 +27,7 @@ class EvaluatorKind(StrEnum):
 
     RULE = "rule"
     LLM_JUDGE = "llm_judge"
+    LLM_GROUP = "llm_group"
     HYBRID = "hybrid"
 
 
@@ -72,6 +74,8 @@ class Evaluator(DomainModel):
     description: str = ""
     source: EvaluatorSource = EvaluatorSource.USER
     enabled: bool = False
+    archived: bool = False
+    owner_evaluator_id: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     user_team_id: str = ""  # 团队 ID（权限隔离，按团队过滤数据可见性）
@@ -89,11 +93,19 @@ class Evaluator(DomainModel):
         return normalize_utc(value, info.field_name)
 
     @model_validator(mode="after")
-    def validate_lifecycle(self) -> "Evaluator":
+    def validate_lifecycle(self) -> Evaluator:
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
         if self.source == EvaluatorSource.BUILTIN and not self.enabled:
             raise ValueError("built-in Evaluator must be enabled")
+        if self.archived and (self.enabled or self.source == EvaluatorSource.BUILTIN):
+            raise ValueError("archived Evaluator must be disabled and user-defined")
+        if self.owner_evaluator_id is not None:
+            require_non_blank(self.owner_evaluator_id, "owner_evaluator_id")
+            if self.owner_evaluator_id == self.id:
+                raise ValueError("Evaluator cannot own itself")
+            if self.source != EvaluatorSource.USER:
+                raise ValueError("only user Evaluators may have an owner")
         return self
 
 
@@ -148,7 +160,7 @@ class EvaluatorDraft(DomainModel):
         return normalize_utc(value, info.field_name)
 
     @model_validator(mode="after")
-    def validate_definition(self) -> "EvaluatorDraft":
+    def validate_definition(self) -> EvaluatorDraft:
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
         _validate_definition(
@@ -204,7 +216,7 @@ class EvaluatorSpec(DomainModel):
         return require_sha256(value, "content_sha256") if value else value
 
     @model_validator(mode="after")
-    def validate_composition_and_hash(self) -> "EvaluatorSpec":
+    def validate_composition_and_hash(self) -> EvaluatorSpec:
         _validate_definition(
             self.kind,
             self.config,
@@ -248,7 +260,7 @@ def _validate_definition(
         for field_name in ("provider_id", "model_id"):
             value = model.get(field_name)
             if not isinstance(value, str):
-                raise ValueError(
+                raise ValueError(  # noqa: TRY004 -- Pydantic wraps ValueError as a validation failure.
                     f"LLM Judge config model.{field_name} must be a string"
                 )
             require_non_blank(value, f"LLM Judge config model.{field_name}")
@@ -268,9 +280,20 @@ def _validate_definition(
     if len(set(child_keys)) != len(child_keys):
         raise ValueError("Hybrid child Evaluator references must be unique")
 
-    if kind != EvaluatorKind.HYBRID:
+    if kind not in (EvaluatorKind.HYBRID, EvaluatorKind.LLM_GROUP):
         if children or combination is not None:
             raise ValueError("non-Hybrid Evaluator cannot define composition")
+        return
+
+    if kind == EvaluatorKind.LLM_GROUP:
+        if not children or combination != CombinationPolicy.WEIGHTED_SCORE:
+            raise ValueError("LLM group requires at least one child and weighted_score")
+        if any(child.weight is None for child in children):
+            raise ValueError("weighted_score requires every child to have a weight")
+        if len({child.evaluator_id for child in children}) != len(children):
+            raise ValueError("LLM group child Evaluator IDs must be unique")
+        if not math.isclose(sum(child.weight for child in children), 1.0, abs_tol=1e-9):
+            raise ValueError("LLM group weights must sum to 1")
         return
 
     if len(children) < 2 or combination is None:

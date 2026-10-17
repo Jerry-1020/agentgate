@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { EvaluatorSummary } from '../../../api/evaluations';
+import { isLlmEvaluator } from '../utils/evaluator-display';
 import {
   recommendEvaluators,
   recommendationReason,
@@ -36,7 +37,15 @@ const active = ref(''),
 const kinds = ['rule', 'llm_judge'] as const;
 const expanded = ref<Record<string, boolean>>({ rule: false, llm_judge: false });
 const groups = computed(() =>
-  Object.fromEntries(kinds.map((kind) => [kind, props.evaluators.filter((e) => e.kind === kind)])),
+  Object.fromEntries(
+    kinds.map((kind) => [
+      kind,
+      props.evaluators.filter(
+        (e) =>
+          !e.owner_evaluator_id && (kind === 'rule' ? e.kind === 'rule' : isLlmEvaluator(e.kind)),
+      ),
+    ]),
+  ),
 );
 function selectedCount(kind: string) {
   return groups.value[kind].filter((e) => props.modelValue.includes(e.id)).length;
@@ -131,7 +140,9 @@ function toggle(id: string, on: boolean) {
               </button>
             </div>
             <small class="tile-version"
-              >v{{ e.latest_version }}{{ recommended.includes(e.id) ? ' · 推荐' : '' }}</small
+              >v{{ e.latest_version
+              }}{{ e.kind === 'llm_group' ? ` · ${e.child_count ?? 0} 个子评估器` : ''
+              }}{{ recommended.includes(e.id) ? ' · 推荐' : '' }}</small
             >
           </article>
           <p v-if="!groups[kind].length" class="empty-group">暂无已发布且启用的评估器</p>

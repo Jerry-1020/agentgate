@@ -210,7 +210,7 @@ export const useReviewStore = defineStore('review', () => {
       template.description = '基于内置 Demo 执行记录的标注练习。';
       annotationTasks.value.unshift({
         id: 'annotation-example-20260919',
-        name: '人工标注样例 · 贷款流程',
+        name: '标注样例 · 贷款流程',
         description: '对话来自已执行 Demo；评分和评语为演示标注，不是人工验收结论。',
         example: true,
         app: { ...run.manifest.target.ref, name: run.manifest.target.display_name },

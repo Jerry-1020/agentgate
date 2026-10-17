@@ -110,7 +110,7 @@ function outputExpectation(
     }
     condition = { kind: 'matches_pattern', pattern };
   } else condition = { kind: 'equals', expected: annotation.expected };
-  return { id, kind: 'output', name: '人工标注输出期望', path: path || null, condition };
+  return { id, kind: 'output', name: '标注输出期望', path: path || null, condition };
 }
 
 // Source input and unrelated checks are preserved. Scores remain audit notes, never model truth.
@@ -200,14 +200,14 @@ export function annotatedCase(
       }
     }
     // Replace the audit entry for this template; repeated writeback stays idempotent.
-    const marker = '\n【人工标注 ' + task.template.id + '】';
+    const marker = '\n【标注 ' + task.template.id + '】';
     const old = turn.notes.indexOf(marker);
     if (old >= 0) {
-      const end = turn.notes.indexOf('\n【人工标注结束】', old);
+      const end = turn.notes.indexOf('\n【标注结束】', old);
       if (end >= 0)
-        turn.notes = turn.notes.slice(0, old) + turn.notes.slice(end + '\n【人工标注结束】'.length);
+        turn.notes = turn.notes.slice(0, old) + turn.notes.slice(end + '\n【标注结束】'.length);
     }
-    turn.notes += marker + '\n' + JSON.stringify(audit) + '\n【人工标注结束】';
+    turn.notes += marker + '\n' + JSON.stringify(audit) + '\n【标注结束】';
   }
   const unassigned: unknown[] = [];
   for (const call of calls.filter((c) => !c.turnId)) {

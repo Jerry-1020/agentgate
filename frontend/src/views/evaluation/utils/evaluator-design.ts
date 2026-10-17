@@ -1,4 +1,4 @@
-import type { Definition, EvaluatorSummary } from '../../../api/evaluations';
+import type { Definition, EvaluatorIdentity } from '../../../api/evaluations';
 import { modelRefError, readModelRef } from './evaluator-model';
 
 export type JudgeScope = 'final_output' | 'output_and_tools' | 'full_trajectory';
@@ -26,7 +26,7 @@ export function hasDimensionScoring(definition: Definition | null) {
 }
 
 export function readEvaluatorDesign(
-  evaluator: EvaluatorSummary,
+  evaluator: EvaluatorIdentity,
   definition: Definition,
 ): EvaluatorDesign {
   const config = definition.config;

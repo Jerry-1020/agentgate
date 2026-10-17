@@ -172,16 +172,22 @@ def test_launch_persists_task_before_dispatch_and_rejects_demo_payload(tmp_path,
 
 
 def test_model_metadata_never_exposes_credentials(tmp_path,monkeypatch):
+    from types import SimpleNamespace
     from agentgate.server.routes import bank_targets
     monkeypatch.setattr(bank_targets,'LocalBankClient',Client)
     app=create_app(tmp_path/'db.sqlite')
     monkeypatch.setenv('AGENTGATE_JUDGE_BASE_URL','https://user:password@example.test/v1?api_key=secret')
     monkeypatch.setenv('AGENTGATE_JUDGE_API_KEY','private-test-key')
     with TestClient(app) as http:
+        app.state.dependencies._judge_client = SimpleNamespace(
+            provider_id="configured-provider", close=lambda: None,
+        )
         response=http.get('/api/model-runtime')
         assert response.status_code==200
         assert all(x not in response.text for x in ('private-test-key','password','secret'))
         assert response.json()['data']['connections'][0]['base_url']=='https://example.test/v1'
+        assert response.json()['data']['connections'][0]['provider_id']=='configured-provider'
+        assert response.json()['data']['connections'][0]['configured'] is True
 
 
 def test_local_bank_target_derives_declared_topology():

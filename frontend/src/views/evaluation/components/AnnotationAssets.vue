@@ -116,9 +116,9 @@ function enterTemplate(t: AnnotationTask) {
   else emit('navigate', 'annotations/' + t.id);
 }
 const v2Groups = [
-  { key: 'dataset', title: '测评集人工标注' },
-  { key: 'evaluator', title: '评估器人工标注' },
-  { key: 'agent', title: '智能体人工标注' },
+  { key: 'dataset', title: '测评集标注' },
+  { key: 'evaluator', title: '评估器标注' },
+  { key: 'agent', title: '智能体标注' },
 ] as const;
 function openCreate(source?: AnnotationTemplate, version: 'v1' | 'v2' = 'v1') {
   error.value = '';
@@ -799,7 +799,7 @@ async function applyFeedback() {
     if (plan.mode === 'new' && !plan.datasetId) {
       const created = await request<{ dataset: { id: string } }>('/datasets', 'POST', {
         name: plan.name.trim(),
-        description: '人工标注导出；请审核草稿规则后发布。',
+        description: '标注导出；请审核草稿规则后发布。',
       });
       plan.datasetId = created.dataset.id;
       task.exports ??= {};
@@ -846,7 +846,7 @@ onMounted(() => {
   <section v-if="!taskDetail" class="review-assets">
     <div class="asset-heading">
       <div>
-        <h1>{{ templates ? '标注模板' : '人工标注' }}</h1>
+        <h1>{{ templates ? '标注模板' : '标注' }}</h1>
         <p>
           {{
             templates
@@ -856,7 +856,7 @@ onMounted(() => {
         </p>
       </div>
       <button v-if="templates" class="asset-secondary" @click="emit('navigate', 'annotations')">
-        返回人工标注
+        返回标注
       </button>
       <button class="asset-primary" @click="openCreate()">＋ 创建标注模版v1.0</button>
       <button class="asset-primary" @click="openCreate(undefined, 'v2')">
@@ -929,7 +929,7 @@ onMounted(() => {
             <button v-if="t.deletedAt" class="asset-link" @click="restoreTemplate(t)">恢复</button>
           </div>
           <span class="asset-chip preview">{{
-            t.deletedAt ? '已删除' : t.example ? '演示样例' : '人工标注模板'
+            t.deletedAt ? '已删除' : t.example ? '演示样例' : '标注模板'
           }}</span>
           <h2>{{ t.name }}<small v-if="t.template.v2"> · v2.0</small></h2>
           <p v-if="t.description">{{ t.description }}</p>
@@ -1203,7 +1203,7 @@ onMounted(() => {
   <AnnotationV2Workspace v-if="taskDetail?.template.v2" :task="taskDetail" @back="closeTask" />
   <section v-else-if="taskDetail" class="annotation-workspace asset-dialog">
     <nav class="annotation-crumbs">
-      <button class="asset-link" @click="closeTask">人工标注</button><span>/</span
+      <button class="asset-link" @click="closeTask">标注</button><span>/</span
       ><button class="asset-link" @click="backToConversations">{{ taskDetail.name }}</button
       ><template v-if="editingConversation"><span>/</span><span>会话标注</span></template>
     </nav>

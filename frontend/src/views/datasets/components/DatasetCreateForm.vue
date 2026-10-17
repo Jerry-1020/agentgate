@@ -32,6 +32,7 @@ type Target = {
   git_branch_url?: string | null;
 };
 const emit = defineEmits<{ close: []; created: [id: string, withImport: boolean] }>();
+const showAgentAssociation = ref(false);
 const saving = ref(false),
   createdId = ref('');
 const modeNames: Record<Mode, string> = {
@@ -48,8 +49,6 @@ function receiveSelection(value: AgentTargetSelection | null) {
 const pinned = ref<Target | null>(null);
 const name = ref(''),
   description = ref(''),
-  tags = ref<string[]>([]),
-  icon = ref('🗂️'),
   error = ref('');
 const tab = ref('graph');
 const runs = ref<EvaluationRun[]>([]),
@@ -62,7 +61,6 @@ const runId = ref(''),
   traceError = ref('');
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const descriptor = computed(() => pinned.value?.descriptor);
-const variables = computed(() => Object.entries(descriptor.value?.input_schema?.properties ?? {}));
 const nodes = computed(
   () =>
     (
@@ -273,23 +271,23 @@ function close() {
     <template v-if="true">
       <h3><span class="step-number">01</span>测评集名称</h3>
       <label
-        >头像 &amp; 测评集名称 <em>*</em>
-        <div class="name-row">
-          <select v-model="icon" aria-label="测评集头像">
-            <option>🗂️</option>
-            <option>💬</option>
-            <option>🤖</option>
-            <option>📋</option></select
-          ><input
-            v-model="name"
-            maxlength="128"
-            aria-label="测评集名称"
-            placeholder="例如：贷款智能体·高风险申请回归集"
-          /></div
-      ></label>
+        >测评集名称 <em>*</em>
+        <input
+          v-model="name"
+          maxlength="128"
+          aria-label="测评集名称"
+          placeholder="例如：贷款智能体·高风险申请回归集"
+        />
+      </label>
       <div class="description-title">
         <label for="v2-dataset-description">测评集描述（选填）</label
-        ><button type="button" class="text-button" :disabled="!descriptor" @click="autoDescription">
+        ><button
+          v-if="showAgentAssociation"
+          type="button"
+          class="text-button"
+          :disabled="!descriptor"
+          @click="autoDescription"
+        >
           ✦ 按智能体信息填写
         </button>
       </div>
@@ -300,156 +298,116 @@ function close() {
         maxlength="512"
         placeholder="请简要说明测评内容与业务场景"
       />
-      <div class="counter">{{ description.length }} / 512 · 自动填写使用元数据，不调用模型</div>
-      <label class="tags-label"
-        >场景标签（选填）
-        <el-select
-          v-model="tags"
-          multiple
-          filterable
-          allow-create
-          default-first-option
-          placeholder="选择标签，或输入后按回车新增"
-          aria-label="测评集场景标签"
-          ><el-option
-            v-for="t in ['贷款申请', '风险审核', '进度查询', '工具调用', '多轮对话', '安全合规']"
-            :key="t"
-            :label="t"
-            :value="t" /></el-select
-      ></label>
-      <h3><span class="step-number">02</span>关联智能体</h3>
-      <AgentTargetPicker
-        ref="platformPicker"
-        class="full"
-        :directory="platformDirectory"
-        :token="platformToken"
-        :team-id="platformTeamId"
-        :disabled="saving"
-        @selection-change="receiveSelection"
-      />
-      <p class="muted">
-        选择智能体后自动加载版本；abcclaw 类型需先选分支地址再选版本。
-      </p>
-      <div class="target-actions">
-        <button
-          type="button"
-          class="primary"
-          :disabled="!selection || saving"
-          @click="confirmTarget"
-        >
-          {{ saving ? '处理中…' : pinned ? '重新读取' : 'Agent定义与会话样例' }}
-        </button>
-      </div>
-      <section v-if="descriptor" class="definition" aria-label="关联智能体只读信息">
-        <div class="definition-title">
-          <b>{{ descriptor.display_name }} · {{ descriptor.ref.external_version_id }}</b
-          ><span>只读版本快照</span>
-        </div>
-        <div class="context-tabs" role="tablist">
+      <div class="counter">{{ description.length }} / 512</div>
+      <!-- 关联能力保留，创建测评集暂不展示关联配置。 -->
+      <template v-if="showAgentAssociation">
+        <h3><span class="step-number">02</span>关联智能体</h3>
+        <AgentTargetPicker
+          ref="platformPicker"
+          class="full"
+          :directory="platformDirectory"
+          :token="platformToken"
+          :team-id="platformTeamId"
+          :disabled="saving"
+          @selection-change="receiveSelection"
+        />
+        <p class="muted">
+          选择智能体后自动加载版本；abcclaw 类型需先选分支地址再选版本。
+        </p>
+        <div class="target-actions">
           <button
-            v-for="t in [
-              { id: 'graph', name: '智能体图谱' },
-              { id: 'sessions', name: '已有会话' },
-            ]"
-            :key="t.id"
             type="button"
-            role="tab"
-            :aria-selected="tab === t.id"
-            @click="tab = t.id"
+            class="primary"
+            :disabled="!selection || saving"
+            @click="confirmTarget"
           >
-            {{ t.name }}
+            {{ saving ? '处理中…' : pinned ? '重新读取' : 'Agent定义与会话样例' }}
           </button>
         </div>
-        <div class="context-body">
-          <template v-if="tab === 'graph'">
-            <TargetStructure :descriptor="descriptor" hide-source />
-          </template>
-          <template v-else>
-            <p class="note">
-              从最近 200 条测评中按来源、应用 ID
-              与版本匹配。这里是已有测评会话，不等同于客户平台全部在线会话；复制到新版的历史记录也不代表新版已重跑。历史运行使用当时的定义快照，同一版本名不代表与当前定义摘要相同。
-            </p>
-            <p v-if="activeRun" class="fingerprint">
-              历史目标摘要：{{ activeRun.manifest.target.descriptor_sha256 }}
-            </p>
-            <p v-if="runsLoading" role="status">正在读取历史测评…</p>
-            <p v-else-if="runsError" role="alert">{{ runsError }}</p>
-            <p v-else-if="!runs.length">暂无匹配的历史测评会话。</p>
-            <template v-else
-              ><div class="session-selects">
-                <label
-                  >来源测评<select v-model="runId" aria-label="来源测评">
-                    <option value="">请选择测评</option>
-                    <option v-for="r in runs" :key="r.id" :value="r.id">
-                      {{ r.id.slice(0, 8) }} · {{ r.status }} · {{ r.created_at }}
-                    </option>
-                  </select></label
-                ><label
-                  >样本会话<select
-                    v-model="caseId"
-                    aria-label="样本会话"
-                    :disabled="!runId"
-                    @change="loadTrace"
-                  >
-                    <option value="">请选择会话</option>
-                    <option v-for="c in cases" :key="c.id" :value="c.id">{{ c.name }}</option>
-                  </select></label
-                >
-              </div>
-              <p v-if="traceLoading" role="status">读取 Trace…</p>
-              <p v-if="traceError" role="alert">{{ traceError }}</p>
-              <template v-if="trace"
-                ><p class="fingerprint">Trace：{{ trace.trace_id }}</p>
-                <article v-for="(turn, id) in trace.turn_outcomes" :key="id">
-                  <b>轮次 {{ id }}</b>
-                  <h4>用户输入</h4>
-                  <pre>{{ JSON.stringify(turn.input, null, 2) }}</pre>
-                  <h4>实际输出（不是期望答案）</h4>
-                  <pre>{{ JSON.stringify(turn.output, null, 2) }}</pre>
-                </article>
-                <p v-if="!Object.keys(trace.turn_outcomes ?? {}).length">
-                  该 Trace 未提供分轮对话，不能推断完整会话。
-                </p></template
-              ></template
+        <section v-if="descriptor" class="definition" aria-label="关联智能体只读信息">
+          <div class="definition-title">
+            <b>{{ descriptor.display_name }} · {{ descriptor.ref.external_version_id }}</b
+            ><span>只读版本快照</span>
+          </div>
+          <div class="context-tabs" role="tablist">
+            <button
+              v-for="t in [
+                { id: 'graph', name: '智能体图谱' },
+                { id: 'sessions', name: '已有会话' },
+              ]"
+              :key="t.id"
+              type="button"
+              role="tab"
+              :aria-selected="tab === t.id"
+              @click="tab = t.id"
             >
-          </template>
-        </div>
-        <p class="fingerprint">定义摘要：{{ descriptor.content_sha256 }}</p>
-      </section>
-      <h3>变量定义 <span class="readonly-chip">自动读取 · 不可编辑</span></h3>
-      <p v-if="!descriptor" class="empty-context">确认智能体版本后自动呈现。</p>
-      <template v-else
-        ><p class="note">当前展示服务端 input_schema 的输入字段，不代表已取得客户所有配置变量。</p>
-        <table v-if="variables.length">
-          <thead>
-            <tr>
-              <th>变量名</th>
-              <th>类型</th>
-              <th>必填</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="[key, field] in variables" :key="key">
-              <td>{{ key }}</td>
-              <td>{{ field.type ?? '未提供' }}</td>
-              <td>{{ descriptor.input_schema?.required?.includes(key) ? '是' : '否' }}</td>
-              <td>{{ field.description || '未提供' }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-else class="empty-context">服务端未提供变量定义。</p></template
-      >
+              {{ t.name }}
+            </button>
+          </div>
+          <div class="context-body">
+            <template v-if="tab === 'graph'">
+              <TargetStructure :descriptor="descriptor" hide-source />
+            </template>
+            <template v-else>
+              <p class="note">
+                从最近 200 条测评中按来源、应用 ID
+                与版本匹配。这里是已有测评会话，不等同于客户平台全部在线会话；复制到新版的历史记录也不代表新版已重跑。历史运行使用当时的定义快照，同一版本名不代表与当前定义摘要相同。
+              </p>
+              <p v-if="activeRun" class="fingerprint">
+                历史目标摘要：{{ activeRun.manifest.target.descriptor_sha256 }}
+              </p>
+              <p v-if="runsLoading" role="status">正在读取历史测评…</p>
+              <p v-else-if="runsError" role="alert">{{ runsError }}</p>
+              <p v-else-if="!runs.length">暂无匹配的历史测评会话。</p>
+              <template v-else
+                ><div class="session-selects">
+                  <label
+                    >来源测评<select v-model="runId" aria-label="来源测评">
+                      <option value="">请选择测评</option>
+                      <option v-for="r in runs" :key="r.id" :value="r.id">
+                        {{ r.id.slice(0, 8) }} · {{ r.status }} · {{ r.created_at }}
+                      </option>
+                    </select></label
+                  ><label
+                    >样本会话<select
+                      v-model="caseId"
+                      aria-label="样本会话"
+                      :disabled="!runId"
+                      @change="loadTrace"
+                    >
+                      <option value="">请选择会话</option>
+                      <option v-for="c in cases" :key="c.id" :value="c.id">{{ c.name }}</option>
+                    </select></label
+                  >
+                </div>
+                <p v-if="traceLoading" role="status">读取 Trace…</p>
+                <p v-if="traceError" role="alert">{{ traceError }}</p>
+                <template v-if="trace"
+                  ><p class="fingerprint">Trace：{{ trace.trace_id }}</p>
+                  <article v-for="(turn, id) in trace.turn_outcomes" :key="id">
+                    <b>轮次 {{ id }}</b>
+                    <h4>用户输入</h4>
+                    <pre>{{ JSON.stringify(turn.input, null, 2) }}</pre>
+                    <h4>实际输出（不是期望答案）</h4>
+                    <pre>{{ JSON.stringify(turn.output, null, 2) }}</pre>
+                  </article>
+                  <p v-if="!Object.keys(trace.turn_outcomes ?? {}).length">
+                    该 Trace 未提供分轮对话，不能推断完整会话。
+                  </p></template
+                ></template
+              >
+            </template>
+          </div>
+          <p class="fingerprint">定义摘要：{{ descriptor.content_sha256 }}</p>
+        </section>
+      </template>
     </template>
     <template #footer
       ><p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <div class="footer-actions">
-        <span>关联信息不随测评集保存</span
-        ><button type="button" class="secondary" :disabled="saving" @click="close">取消</button
-        ><button type="button" class="secondary" :disabled="saving" @click="create(false)">
-          创建空测评集</button
+        <button type="button" class="secondary" :disabled="saving" @click="close">取消</button
         ><button type="button" class="primary" :disabled="saving" @click="create(true)">
-          {{ saving ? '正在保存…' : '创建并导入' }}
+          {{ saving ? '正在保存…' : '确定' }}
         </button>
       </div></template
     >
@@ -486,7 +444,6 @@ label {
 }
 label > input,
 label > select,
-label > .name-row,
 label > :deep(.el-select) {
   margin-top: 9px;
 }
@@ -595,8 +552,7 @@ textarea {
   padding: 14px 18px;
   background: #f7f9fe;
 }
-.definition-title span,
-.readonly-chip {
+.definition-title span {
   font-size: 12px;
   color: #71819a;
 }
@@ -655,13 +611,6 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-.name-row {
-  display: flex;
-  gap: 10px;
-}
-.name-row select {
-  width: 65px;
-}
 .description-title {
   display: flex;
   align-items: center;
@@ -683,15 +632,6 @@ textarea {
   font-size: 11px;
   color: #8591a4;
   margin-top: 6px;
-}
-.tags-label {
-  margin-top: 20px;
-}
-.tags-label :deep(.el-select) {
-  width: 100%;
-}
-.tags-label :deep(.el-select__wrapper) {
-  min-height: 42px;
 }
 table {
   width: 100%;

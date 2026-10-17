@@ -28,13 +28,19 @@ from agentgate.domain import (
     content_sha256,
     normalize_utc,
     transition_run,
+    utcnow,
 )
 from agentgate.domain.credential import ApiKeyMetadata
 from agentgate.domain.evaluation_task import EvaluationTask, task_with_rerun
 from agentgate.evaluator.versioning import (
     publish_evaluator_draft as build_evaluator_publication,
 )
-
+from agentgate.storage.evaluator_groups import (
+    validate_draft_update,
+    validate_group_draft,
+    validate_group_publications,
+    validate_identity_update,
+)
 
 TABLE_PREFIX = "agentgate_"
 
@@ -757,6 +763,7 @@ class SQLiteRepository:
             ).fetchone()
             if existing is not None:
                 stored = Evaluator.model_validate_json(existing[0])
+                validate_identity_update(evaluator, stored)
                 if evaluator.source != stored.source:
                     raise ValueError("Evaluator source is immutable")
                 if evaluator.created_at != stored.created_at:
@@ -851,6 +858,81 @@ class SQLiteRepository:
             ).fetchone()
         return Evaluator.model_validate_json(row[0]) if row else None
 
+    def save_evaluator_group_draft(
+        self,
+        parent: Evaluator,
+        draft: EvaluatorDraft,
+        children: Sequence[tuple[Evaluator, EvaluatorDraft]],
+        *,
+        expected_updated_at: datetime | None,
+        expected_evaluator_updated_at: datetime | None,
+        user_team_id: str,
+    ) -> None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            stored_parent = _read_evaluator(db, parent.id)
+            stored_draft = _read_evaluator_draft(db, parent.id)
+            validate_group_draft(
+                parent, draft, children,
+                stored_parent=stored_parent,
+                stored_draft=stored_draft,
+                expected_updated_at=expected_updated_at,
+                expected_evaluator_updated_at=expected_evaluator_updated_at,
+                user_team_id=user_team_id,
+            )
+            next_versions = {}
+            for child, child_draft in children:
+                validate_identity_update(child, _read_evaluator(db, child.id))
+                validate_draft_update(child_draft, child, _read_evaluator_draft(db, child.id))
+                next_versions[child.id] = _next_evaluator_version(db, child.id)
+            if any(next_versions[ref.evaluator_id] != _parse_evaluator_version(ref.evaluator_version)
+                   for ref in draft.children):
+                raise ValueError("Evaluator group child version changed; reload before saving")
+            for identity, item in ((parent, draft), *children):
+                _write_evaluator(db, identity)
+                _write_evaluator_draft(db, item)
+            _cleanup_owned_evaluator_drafts(
+                db, parent.id, user_team_id, keep={child.id for child, _ in children},
+            )
+
+    def publish_evaluator_group_draft(
+        self,
+        expected_draft_id: str,
+        publications: Sequence[EvaluatorSpec],
+        *,
+        expected_updated_at: datetime,
+        user_team_id: str,
+    ) -> None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            identities = {
+                spec.id: identity for spec in publications
+                if (identity := _read_evaluator(db, spec.id)) is not None
+            }
+            validate_group_publications(publications, identities, user_team_id=user_team_id)
+            drafts = {}
+            for index, spec in enumerate(publications):
+                item = _read_evaluator_draft(db, spec.id)
+                if item is None or (index == 0 and item.id != expected_draft_id):
+                    raise ValueError("expected Evaluator draft does not exist")
+                if index == 0 and item.updated_at != expected_updated_at:
+                    raise ValueError("Evaluator group draft changed; reload before publishing")
+                validate_draft_update(item, identities[spec.id], None)
+                version = _next_evaluator_version(db, spec.id)
+                if _parse_evaluator_version(spec.version) != version:
+                    raise ValueError(f"Evaluator publication requires version {version}")
+                if spec != build_evaluator_publication(identities[spec.id], item, version):
+                    raise ValueError("published EvaluatorSpec does not match the current draft")
+                drafts[spec.id] = item
+            now = utcnow()
+            for spec in publications:
+                _insert_evaluator_version(db, spec)
+                db.execute(f"DELETE FROM {_T_EVALUATOR_DRAFTS} WHERE id=?", (drafts[spec.id].id,))
+                identity = identities[spec.id]
+                _write_evaluator(db, identity.model_copy(update={
+                    "enabled": True, "updated_at": max(now, identity.updated_at),
+                }))
+
     def list_evaluators(
         self,
         include_disabled: bool = False,
@@ -866,10 +948,34 @@ class SQLiteRepository:
             rows = db.execute(query, parameters).fetchall()
         return [Evaluator.model_validate_json(row[0]) for row in rows]
 
+    def discard_evaluator_group_draft(
+        self,
+        evaluator_id: str,
+        expected_draft_id: str,
+        expected_draft_updated_at: datetime,
+        *,
+        user_team_id: str,
+    ) -> None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            parent = _read_evaluator(db, evaluator_id)
+            draft = _read_evaluator_draft(db, evaluator_id)
+            if parent is None or parent.user_team_id != user_team_id or parent.owner_evaluator_id is not None:
+                raise ValueError("unknown Evaluator group")
+            if draft is None or draft.id != expected_draft_id or draft.updated_at != expected_draft_updated_at:
+                raise ValueError("Evaluator group draft changed; reload before discarding")
+            if draft.kind.value != "llm_group" or draft.user_team_id != user_team_id:
+                raise ValueError("unknown Evaluator group")
+            db.execute(f"DELETE FROM {_T_EVALUATOR_DRAFTS} WHERE id=?", (draft.id,))
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
+            if _next_evaluator_version(db, evaluator_id) == 1:
+                db.execute(f"DELETE FROM {_T_EVALUATORS} WHERE id=?", (evaluator_id,))
+
     def delete_unpublished_evaluator(
         self, evaluator_id: str, *, user_team_id: str
     ) -> None:
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             evaluator = db.execute(
                 f"SELECT 1 FROM {_T_EVALUATORS} WHERE id=? AND user_team_id=?",
                 (evaluator_id, user_team_id),
@@ -882,6 +988,7 @@ class SQLiteRepository:
             ).fetchone()
             if publication is not None:
                 raise ValueError("published Evaluator cannot be deleted")
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
             db.execute(f"DELETE FROM {_T_EVALUATORS} WHERE id=?", (evaluator_id,))
 
     def save_evaluator_draft(self, draft: EvaluatorDraft) -> None:
@@ -893,6 +1000,7 @@ class SQLiteRepository:
             if evaluator_row is None:
                 raise ValueError(f"unknown Evaluator: {draft.evaluator_id}")
             evaluator = Evaluator.model_validate_json(evaluator_row[0])
+            validate_draft_update(draft, evaluator, None)
             if draft.created_at < evaluator.created_at:
                 raise ValueError("EvaluatorDraft cannot precede Evaluator creation")
 
@@ -974,6 +1082,7 @@ class SQLiteRepository:
         user_team_id: str,
     ) -> None:
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
                 f"""
                 DELETE FROM {_T_EVALUATOR_DRAFTS}
@@ -983,6 +1092,7 @@ class SQLiteRepository:
             )
             if cursor.rowcount != 1:
                 raise ValueError("expected Evaluator draft does not exist")
+            _cleanup_owned_evaluator_drafts(db, evaluator_id, user_team_id)
 
     def list_evaluator_versions(
         self,
@@ -1119,6 +1229,8 @@ class SQLiteRepository:
                 stored = Dataset.model_validate_json(existing[0])
                 if dataset.created_at != stored.created_at:
                     raise ValueError("Dataset created_at is immutable")
+                if dataset.deleted_version_high_watermark < stored.deleted_version_high_watermark:
+                    raise ValueError("Dataset deleted version watermark cannot decrease")
                 if dataset.updated_at < stored.updated_at:
                     raise ValueError("cannot save a stale Dataset")
                 if dataset == stored:
@@ -1348,6 +1460,45 @@ class SQLiteRepository:
             )
             if cursor.rowcount != 1:
                 raise ValueError("expected Dataset draft does not exist")
+            db.execute(
+                f"""
+                DELETE FROM {_T_DATASETS}
+                WHERE id=? AND user_team_id=? AND NOT EXISTS (
+                    SELECT 1 FROM {_T_DATASET_VERSIONS}
+                    WHERE dataset_id=? AND user_team_id=?
+                )
+                """,
+                (dataset_id, user_team_id, dataset_id, user_team_id),
+            )
+
+    def delete_dataset_version(self, dataset_id: str, version: int, *, user_team_id: str) -> None:
+        with self._connect() as db:
+            cursor = db.execute(
+                f"DELETE FROM {_T_DATASET_VERSIONS} "
+                "WHERE dataset_id=? AND version=? AND status='published' AND user_team_id=?",
+                (dataset_id, version, user_team_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("expected Dataset publication does not exist")
+            row = db.execute(
+                f"SELECT payload FROM {_T_DATASETS} WHERE id=? AND user_team_id=?",
+                (dataset_id, user_team_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("expected Dataset does not exist")
+            dataset = Dataset.model_validate_json(row[0])
+            dataset = dataset.model_copy(update={
+                "deleted_version_high_watermark": max(dataset.deleted_version_high_watermark, version),
+            })
+            db.execute(
+                f"UPDATE {_T_DATASETS} SET payload=? WHERE id=? AND user_team_id=?",
+                (canonical_json(dataset), dataset_id, user_team_id),
+            )
+            db.execute(
+                f"DELETE FROM {_T_DATASETS} WHERE id=? AND user_team_id=? AND NOT EXISTS "
+                f"(SELECT 1 FROM {_T_DATASET_VERSIONS} WHERE dataset_id=? AND user_team_id=?)",
+                (dataset_id, user_team_id, dataset_id, user_team_id),
+            )
 
     def delete_dataset_record(self, dataset_id: str, *, user_team_id: str) -> None:
         with self._connect() as db:
@@ -1982,6 +2133,81 @@ class SQLiteRepository:
                 (run_id,),
             ).fetchall()
         return [EvaluationResult.model_validate_json(row[0]) for row in rows]
+
+
+def _read_evaluator(db: sqlite3.Connection, evaluator_id: str) -> Evaluator | None:
+    row = db.execute(
+        f"SELECT payload FROM {_T_EVALUATORS} WHERE id=?", (evaluator_id,),
+    ).fetchone()
+    return Evaluator.model_validate_json(row[0]) if row else None
+
+
+def _read_evaluator_draft(db: sqlite3.Connection, evaluator_id: str) -> EvaluatorDraft | None:
+    row = db.execute(
+        f"SELECT payload FROM {_T_EVALUATOR_DRAFTS} WHERE evaluator_id=?", (evaluator_id,),
+    ).fetchone()
+    return EvaluatorDraft.model_validate_json(row[0]) if row else None
+
+
+def _next_evaluator_version(db: sqlite3.Connection, evaluator_id: str) -> int:
+    row = db.execute(
+        f"SELECT MAX(version) FROM {_T_EVALUATOR_VERSIONS} WHERE evaluator_id=?", (evaluator_id,),
+    ).fetchone()
+    return (row[0] or 0) + 1
+
+
+def _write_evaluator(db: sqlite3.Connection, value: Evaluator) -> None:
+    db.execute(
+        f"""INSERT INTO {_T_EVALUATORS}(
+            id,source,enabled,created_at,updated_at,user_team_id,user_id,user_name,payload
+        ) VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,updated_at=excluded.updated_at,
+            user_id=excluded.user_id,user_name=excluded.user_name,payload=excluded.payload""",
+        (value.id, value.source.value, int(value.enabled), value.created_at.isoformat(),
+         value.updated_at.isoformat(), value.user_team_id, value.user_id, value.user_name,
+         canonical_json(value)),
+    )
+
+
+def _write_evaluator_draft(db: sqlite3.Connection, value: EvaluatorDraft) -> None:
+    db.execute(
+        f"""INSERT INTO {_T_EVALUATOR_DRAFTS}(
+            id,evaluator_id,created_at,updated_at,user_team_id,user_id,user_name,payload
+        ) VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(evaluator_id) DO UPDATE SET updated_at=excluded.updated_at,
+            user_id=excluded.user_id,user_name=excluded.user_name,payload=excluded.payload""",
+        (value.id, value.evaluator_id, value.created_at.isoformat(), value.updated_at.isoformat(),
+         value.user_team_id, value.user_id, value.user_name, canonical_json(value)),
+    )
+
+
+def _insert_evaluator_version(db: sqlite3.Connection, value: EvaluatorSpec) -> None:
+    db.execute(
+        f"""INSERT INTO {_T_EVALUATOR_VERSIONS}(
+            evaluator_id,version,content_sha256,user_team_id,user_id,user_name,payload
+        ) VALUES(?,?,?,?,?,?,?)""",
+        (value.id, _parse_evaluator_version(value.version), value.content_sha256,
+         value.user_team_id, value.user_id, value.user_name, canonical_json(value)),
+    )
+
+
+def _cleanup_owned_evaluator_drafts(
+    db: sqlite3.Connection,
+    evaluator_id: str,
+    user_team_id: str,
+    *,
+    keep: set[str] | None = None,
+) -> None:
+    rows = db.execute(
+        f"SELECT payload FROM {_T_EVALUATORS} WHERE user_team_id=?", (user_team_id,),
+    ).fetchall()
+    for row in rows:
+        child = Evaluator.model_validate_json(row[0])
+        if child.owner_evaluator_id != evaluator_id or child.id in (keep or set()):
+            continue
+        db.execute(f"DELETE FROM {_T_EVALUATOR_DRAFTS} WHERE evaluator_id=?", (child.id,))
+        if _next_evaluator_version(db, child.id) == 1:
+            db.execute(f"DELETE FROM {_T_EVALUATORS} WHERE id=?", (child.id,))
 
 
 def _require_user_evaluator(evaluator: Evaluator) -> None:

@@ -303,6 +303,7 @@ watch(
         :sample="sample"
         :results="report.results.filter((r) => r.case_id === reportCase)"
         :primary-ids="report.run.manifest.primary_evaluator_ids"
+        :evaluator-specs="report.run.manifest.evaluator_specs"
         :trace="trace"
         :trace-error="traceError"
         :trace-loading="traceLoading"

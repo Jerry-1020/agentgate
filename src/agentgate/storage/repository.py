@@ -77,6 +77,32 @@ class AgentGateRepository(Protocol):
     def save_evaluator_with_draft(
         self, evaluator: Evaluator, draft: EvaluatorDraft
     ) -> None: ...
+    def save_evaluator_group_draft(
+        self,
+        parent: Evaluator,
+        draft: EvaluatorDraft,
+        children: Sequence[tuple[Evaluator, EvaluatorDraft]],
+        *,
+        expected_updated_at: datetime | None,
+        expected_evaluator_updated_at: datetime | None,
+        user_team_id: str,
+    ) -> None: ...
+    def publish_evaluator_group_draft(
+        self,
+        expected_draft_id: str,
+        publications: Sequence[EvaluatorSpec],
+        *,
+        expected_updated_at: datetime,
+        user_team_id: str,
+    ) -> None: ...
+    def discard_evaluator_group_draft(
+        self,
+        evaluator_id: str,
+        expected_draft_id: str,
+        expected_draft_updated_at: datetime,
+        *,
+        user_team_id: str,
+    ) -> None: ...
     def get_evaluator(self, evaluator_id: str, *, user_team_id: str) -> Evaluator | None: ...
     def list_evaluators(
         self, include_disabled: bool = False, *, user_team_id: str
@@ -126,6 +152,9 @@ class AgentGateRepository(Protocol):
     ) -> None: ...
     def delete_dataset_record(
         self, dataset_id: str, *, user_team_id: str
+    ) -> None: ...
+    def delete_dataset_version(
+        self, dataset_id: str, version: int, *, user_team_id: str
     ) -> None: ...
     def replace_dataset_draft(
         self, expected_draft_id: str, published: DatasetVersion

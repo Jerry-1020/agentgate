@@ -63,7 +63,7 @@ async function preview(mode: 'new' | 'writeback') {
       mode === 'writeback' &&
       !hasV2Expected(task.value, prefix.value, source.value?.turns.map((t) => t.id) ?? [])
     )
-      throw Error('请在测评集人工标注中填写并保存人工期望回答，再回写。');
+      throw Error('请在测评集标注中填写并保存人工期望回答，再回写。');
     const frozen = copy(task.value);
     const stamp = snapshot();
     const historical = await request<{
@@ -97,7 +97,7 @@ async function preview(mode: 'new' | 'writeback') {
     const item = annotatedV2Case(original, props.trace, frozen, prefix.value);
     if (mode === 'new') {
       item.id = props.run.id + '-' + props.caseId;
-      item.name += ' · 人工标注';
+      item.name += ' · 标注';
     }
     plan.value = {
       mode,
@@ -127,7 +127,7 @@ async function apply() {
       if (!current.name.trim()) throw Error('请输入测评集名称。');
       const created = await request<{ dataset: { id: string } }>('/datasets', 'POST', {
         name: current.name.trim(),
-        description: 'V2人工标注导出，请审核草稿后发布。',
+        description: 'V2标注导出，请审核草稿后发布。',
       });
       current.datasetId = created.dataset.id;
     }
@@ -185,7 +185,7 @@ async function apply() {
     </p>
     <el-dialog
       :model-value="!!plan"
-      title="确认人工标注回写内容"
+      title="确认标注回写内容"
       width="760px"
       :close-on-click-modal="!busy"
       :close-on-press-escape="!busy"

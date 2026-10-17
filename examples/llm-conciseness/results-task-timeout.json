@@ -1,0 +1,16 @@
+{
+  "end_to_end_verified": false,
+  "api": "http://127.0.0.1:15197",
+  "login_mode": "external",
+  "task_id": "26a30d39-6441-47de-a2c5-f448923b0222",
+  "run_id": "26a30d39-6441-47de-a2c5-f448923b0222",
+  "evaluator_id": "cee497c8-acc0-4ecf-a670-1c175ab34c9c",
+  "evaluator_version": "2",
+  "dataset_id": "llm-conciseness-example",
+  "dataset_version": 1,
+  "case_ids": [
+    "conciseness-number"
+  ],
+  "status": "failed",
+  "error": "运行未完成：failed。"
+}
