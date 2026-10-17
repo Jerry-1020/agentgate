@@ -666,6 +666,41 @@ async function submit() {
           `所选${label}有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 ${initialFields.join('、')}，以及每轮文本或非空业务 JSON，不支持附件上传。`,
         );
       }
+    } else if (
+      platform &&
+      !localTarget &&
+      auth.loginMode === 'bank' &&
+      platform.target.typeGroup === 'abcclaw'
+    ) {
+      const object = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === 'object' && !Array.isArray(value);
+      const allowed = ['txt', 'appHistory', 'custID', 'sessionId', 'config_variables', 'files'];
+      const incompatible = exact.cases.filter((c) => {
+        if (Object.keys(c.initial_state ?? {}).length) return true;
+        const sessions = new Set<string>();
+        for (const turn of c.turns) {
+          const input = turn.input;
+          if (
+            !object(input) ||
+            Object.keys(input).some((key) => !allowed.includes(key)) ||
+            typeof input.txt !== 'string' ||
+            !input.txt.trim() ||
+            ['custID', 'sessionId'].some(
+              (key) => input[key] != null && typeof input[key] !== 'string',
+            ) ||
+            (input.config_variables != null && !Array.isArray(input.config_variables)) ||
+            ('files' in input && (!Array.isArray(input.files) || input.files.length > 0))
+          )
+            return true;
+          if (typeof input.sessionId === 'string' && input.sessionId.trim())
+            sessions.add(input.sessionId.trim());
+        }
+        return sessions.size > 1;
+      });
+      if (incompatible.length)
+        invalid(
+          `所选云虾有 ${incompatible.length} 条用例的输入格式不正确；每轮 input 仅 txt 必填，appHistory、custID、sessionId、config_variables 选填，同一 Case 的 sessionId 须一致；不使用初始变量，不支持附件上传。`,
+        );
     } else if (platform && !localTarget) {
       const incompatible = exact.cases.filter(
         (c) =>

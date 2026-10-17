@@ -2,10 +2,44 @@
 
 本次补齐行内 Trace 查询和 BJS 失败处理。Skill 静态分析按用户要求暂缓：真实行内版本定义接口尚未提供，不使用本地 `/web/agent/capabilities` 扩展冒充。
 
+## Yunxia per-turn request fields — 2026-10-17
+
+云虾没有 `init_session`。请求字段统一填写在每轮 `input`，不使用 Case 的
+`initial_state`，也不新增云虾初始化表单。普通文本可直接填写；勾选
+**结构化 JSON 输入** 后，最小输入同样只需：
+
+```json
+{"txt":"查询年休假政策"}
+```
+
+完整输入示例（除 `txt` 外均为选填）：
+
+```json
+{
+  "txt": "查询年休假政策",
+  "appHistory": [{"role": "user", "content": "之前的问题"}],
+  "custID": "hk_yat",
+  "config_variables": []
+}
+```
+
+- `txt` 必须是非空字符串；作为普通文本填写的 JSON 原文不会再次解析或编码。
+- `appHistory` 未填或为 null 时使用 `[]`；其他 JSON 值沿用客户脚本的历史归一化逻辑。
+- `custID` 未填、为 null 或空白时自动生成。同一 Case 的默认客户标识稳定，
+  不同 Run 使用不同随机后缀；显式客户标识也追加运行级后缀，但不要求测试前缀。
+- `config_variables` 未填或为 null 时使用 `[]`，填写时保留数组内容，不额外限制条目结构。
+- `sessionId` 选填；同一 Case 有显式值时各轮共用该值，否则使用 Case ID。
+  同一 Case 不得填写多个不同的会话标识。
+
+各轮分别读取 `custID`、`appHistory` 和 `config_variables`；如需多轮使用同一自定义值，
+请在对应轮次填写。以上字段分别组装到 `/api/v1/message` 的请求顶层，不会把整个
+输入对象塞入 `txt`。`executionMode=execute`、`stream=true`、`debugTrace=true`
+保持客户脚本的固定值。附件上传不在本次范围内，行外模式保持原协议。
+
 ## ChatABC business inputs — 2026-10-17
 
-This input feature applies to in-bank workflows and base orchestration. Yunxia,
-external mock execution, Trace collection and scoring retain their existing behavior.
+This section applies to in-bank workflows and base orchestration. External mock
+execution, Trace collection and scoring retain their existing behavior.
 No database migration or attachment upload is included.
 
 In the sample editor:

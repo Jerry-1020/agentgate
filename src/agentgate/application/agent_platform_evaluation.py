@@ -68,7 +68,14 @@ def _build_inbank_descriptor(
             else {
                 "type": "object",
                 "required": ["txt"],
-                "properties": {"txt": {"type": "string"}},
+                "properties": {
+                    "txt": {"type": "string"},
+                    "appHistory": {},
+                    "custID": {"type": ["string", "null"]},
+                    "sessionId": {"type": ["string", "null"]},
+                    "config_variables": {"type": ["array", "null"]},
+                    "files": {"type": "array", "maxItems": 0},
+                },
                 "additionalProperties": False,
             }
         ),

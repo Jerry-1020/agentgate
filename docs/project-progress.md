@@ -2,6 +2,26 @@
 
 Last updated: 2026-10-17
 
+## Yunxia native request fields in turn input — 2026-10-17
+
+- User-approved contract: Yunxia request configuration belongs entirely in each turn
+  input, not Case initialization. Only nonblank `txt` is required. Optional native
+  fields are `appHistory`, `custID`, `sessionId` and `config_variables`; missing history
+  and variables use empty arrays, and missing identifiers retain automatic defaults.
+- Reuse the customer payload builder, history normalization, execution flags and
+  Run-scoped customer suffix. Explicit customer IDs do not require the test prefix.
+  One Case retains one session, with an optional consistent explicit `sessionId`.
+- Change only three business files: task submission checks, in-bank descriptor schema
+  and the Yunxia adapter. The sample editor, domain/storage models, HTTP endpoints,
+  Trace collection, scoring, attachments and external protocols are not changed.
+- Focused tests cover text-only and JSON-text defaults, independent optional fields,
+  full native JSON, multiple turns and Cases, exact customer payloads, stored input,
+  scoring and rerun snapshots. Full backend regression: **2436 passed / 56 skipped**;
+  frontend unit tests: **91 passed**; task-form/directory browser regression:
+  **60 passed / 2 previously reproduced failures** (A/B static-analysis availability
+  and uncovered-case confirmation). Type checking, affected-component ESLint,
+  production build and diff checks passed. No real in-bank service was contacted.
+
 ## Base orchestration business JSON inputs — 2026-10-17
 
 - User-approved extension: in-bank base orchestration now accepts the same per-turn

@@ -173,19 +173,26 @@ def test_inbank_submission_pins_real_adapter(
     assert run.manifest.target.invocation_config.to_dict() == expected_config
     assert run.manifest.target.credential_ref
     descriptor = deps.repository.get_target_descriptor(run.manifest.target.descriptor_sha256)
-    assert descriptor.input_schema.to_dict() == (
-        {"type": "object", "required": ["txt"], "properties": {"txt": {"type": "string"}},
-         "additionalProperties": False}
-        if mode == "claw" else {"type": "object", "minProperties": 1}
-    )
+    from jsonschema import ValidationError, validate
+
+    schema = descriptor.input_schema.to_dict()
+    validate({"txt": "only text"}, schema)
+    if mode == "claw":
+        validate({"txt": "hello", "appHistory": [], "custID": "hk_yat",
+                  "sessionId": "session", "config_variables": []}, schema)
+        with pytest.raises(ValidationError):
+            validate({"user_input_text": "missing txt"}, schema)
+    else:
+        assert schema == {"type": "object", "minProperties": 1}
 
 
-@pytest.mark.parametrize("mode", ["base", "workflow"])
-def test_chatabc_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path, mode):
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+def test_inbank_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path, mode):
     from jsonschema import validate
     from test_inbank_trace_server_adapters import _adapter, _TraceServer, _Transport
 
     from agentgate.integrations.targets.inbank.chatabc import resolve_chatabc_trace
+    from agentgate.integrations.targets.inbank.yunxia import resolve_yunxia_trace
 
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
     dispatcher = RecordingDispatcher()
@@ -194,9 +201,13 @@ def test_chatabc_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path
     variables = [{"name": "centreId", "value": "810000"},
                  {"name": "userId", "value": "test-user"}]
     initial = ({"config_variables": variables} if mode == "workflow" else
-               {"prompt_variables": variables, "tool_variables": []})
+               {"prompt_variables": variables, "tool_variables": []} if mode == "base" else {})
     values = [{"user_input_text": "第一轮", "menuId": "TRANSLATE", "form": {"items": [0, False, None]}},
               {"user_input_text": "第二轮", "lang_tar": "fr_FR"}]
+    if mode == "claw":
+        values = [{"txt": "第一轮", "appHistory": [{"role": "user", "content": "历史"}],
+                   "custID": "hk_yat", "config_variables": variables},
+                  {"txt": "第二轮"}]
     with TestClient(app) as client:
         response = client.post("/api/datasets", json={"name": "ChatABC input acceptance"})
         assert response.status_code == 201, response.text
@@ -213,6 +224,8 @@ def test_chatabc_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path
         published = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
         assert published.status_code == 200, published.text
         body = {**submission(dataset_id, mode), "max_parallel_cases": 1}
+        if mode == "claw":
+            body["target"]["branch_id"] = "customer-branch"
         submitted = client.post("/api/agent-platform/evaluations", json=body,
                                 headers={"X-Agent-Platform-Token": "workflow-test-token"})
         assert submitted.status_code == 202, submitted.text
@@ -225,9 +238,11 @@ def test_chatabc_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path
         assert [turn.input.to_dict() for turn in snapshot.dataset.cases[0].turns] == values
 
         def execute(run_id):
-            adapter = _adapter(mode, _Transport(mode), _TraceServer())
+            adapter_mode = "yunxia" if mode == "claw" else mode
+            adapter = _adapter(adapter_mode, _Transport(adapter_mode), _TraceServer())
             try:
-                completed = deps.runs.execute_run(run_id, adapter, resolve_chatabc_trace)
+                completed = deps.runs.execute_run(run_id, adapter,
+                    resolve_yunxia_trace if mode == "claw" else resolve_chatabc_trace)
             finally:
                 adapter.close()
             assert completed.status.value == "completed"

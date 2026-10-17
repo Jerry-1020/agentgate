@@ -8,6 +8,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from time import time
 from typing import Any
+from unittest.mock import Mock
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -401,6 +402,111 @@ def test_business_json_does_not_enable_other_agent_protocols(arrange_type):
     request = _request(arrange_type)
     case = Case(name="Unsupported JSON", turns=[CaseTurn(input={"menuId": "QUERY"})])
     adapter = _adapter(arrange_type, _Transport(arrange_type), _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError, match="input"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("custom_session", [None, "customer-session"])
+def test_yunxia_native_inputs_keep_txt_optional_defaults_and_per_turn_fields(monkeypatch, custom_session):
+    transport = _Transport("yunxia")
+    messages, calls = [], []
+    original_json, original_bytes = transport.request_json, transport.request_bytes
+
+    def capture_json(method, url, **kwargs):
+        calls.append(url)
+        return original_json(method, url, **kwargs)
+
+    def capture_message(method, url, **kwargs):
+        messages.append(deepcopy(kwargs["payload"]))
+        return original_bytes(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_json", capture_json)
+    monkeypatch.setattr(transport, "request_bytes", capture_message)
+    encoded = '{"user_input_text":"查询年休假政策"}'
+    inputs = [
+        {"txt": "只填文本"},
+        {"txt": encoded},
+        {"txt": "历史", "appHistory": [{"role": "user", "content": "之前的问题"}]},
+        {"txt": "客户", "custID": "hk_yat"},
+        {"txt": "变量", "config_variables": [{"name": "centreId", "value": "810000"}]},
+        {"txt": "完整", "appHistory": {"role": "user", "content": "history"},
+         "custID": "another-customer", "config_variables": [{"open": [0, False, None]}]},
+        {"txt": "选填留空", "sessionId": None, "custID": None,
+         "appHistory": None, "config_variables": None},
+    ]
+    if custom_session:
+        inputs[0]["sessionId"] = custom_session
+    case = Case(id="native-case", name="Native Yunxia input", turns=[
+        CaseTurn(id=f"turn-{index}", input=value) for index, value in enumerate(inputs)
+    ])
+    adapter = _adapter("yunxia", transport, _TraceServer())
+    try:
+        first = adapter.wait(adapter.start(replace(_request("yunxia"), case=case)), 30)
+        second = adapter.wait(adapter.start(replace(_request("yunxia"),
+            execution_id="execution-2", case=Case(id="other-case", name="Only txt",
+                turns=[CaseTurn(input={"txt": "另一条用例"})])
+        )), 30)
+    finally:
+        adapter.close()
+    assert not any(url.endswith("/init_session") for url in calls)
+    assert [message["txt"] for message in messages] == [value["txt"] for value in inputs] + ["另一条用例"]
+    session_id = custom_session or case.id
+    assert [message["sessionId"] for message in messages] == [session_id] * len(inputs) + ["other-case"]
+    prefix = f"test-{session_id}-"
+    assert messages[0]["custID"].startswith(prefix)
+    suffix = messages[0]["custID"][len(prefix):]
+    assert UUID(suffix).hex == suffix
+    assert messages[3]["custID"] == f"hk_yat-{suffix}"
+    assert messages[5]["custID"] == f"another-customer-{suffix}"
+    assert messages[-1]["custID"] == f"test-other-case-{suffix}"
+    assert messages[2]["appHistory"] == inputs[2]["appHistory"]
+    assert messages[5]["appHistory"] == [inputs[5]["appHistory"]]
+    assert messages[4]["config_variables"] == inputs[4]["config_variables"]
+    assert messages[5]["config_variables"] == inputs[5]["config_variables"]
+    for index in (0, 1, 6, len(inputs)):
+        assert messages[index]["appHistory"] == messages[index]["config_variables"] == []
+    for message in messages:
+        assert set(message) == {"sessionId", "custID", "txt", "appHistory", "config_variables",
+                                "executionMode", "stream", "debugTrace"}
+        assert message["executionMode"] == "execute"
+        assert message["stream"] is message["debugTrace"] is True
+    assert [first.inline_trace.turn_outcomes[turn.id]["input"].to_dict()
+            for turn in case.turns] == inputs
+    assert second.inline_trace.final_output["output"] == "customer answer"
+
+
+@pytest.mark.parametrize("inputs", [
+    [{"txt": " "}], [{"appHistory": []}], [{"txt": 1}],
+    [{"txt": "hello", "custID": 123}], [{"txt": "hello", "sessionId": []}],
+    [{"txt": "hello", "config_variables": {}}],
+    [{"txt": "hello", "files": ["unsupported"]}],
+    [{"txt": "hello", "app_history": []}],
+    [{"txt": "one", "sessionId": "one"}, {"txt": "two", "sessionId": "two"}],
+])
+def test_yunxia_rejects_invalid_native_inputs_before_remote_calls(monkeypatch, inputs):
+    transport = _Transport("yunxia")
+    remote = Mock(wraps=transport.request_json)
+    monkeypatch.setattr(transport, "request_json", remote)
+    adapter = _adapter("yunxia", transport, _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError):
+            adapter.start(replace(_request("yunxia"), case=Case(name="Invalid input", turns=[
+                CaseTurn(input=value) for value in inputs
+            ])))
+        remote.assert_not_called()
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("initial", [{"customer_id": "test-user"}, {"config_variables": []}])
+def test_yunxia_does_not_read_request_fields_from_case_initialization(initial):
+    request = _request("yunxia")
+    case = Case(name="Fields belong in input", initial_state=initial,
+                turns=[CaseTurn(input={"txt": "hello"})])
+    adapter = _adapter("yunxia", _Transport("yunxia"), _TraceServer())
     try:
         with pytest.raises(TargetExecutionError, match="input"):
             adapter.start(replace(request, case=case))
