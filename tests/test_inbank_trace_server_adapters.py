@@ -271,8 +271,9 @@ def _adapter(
     )
 
 
-def test_workflow_preserves_complete_business_inputs_and_case_sessions(monkeypatch):
-    transport = _Transport("workflow")
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+def test_chatabc_preserves_complete_business_inputs_and_case_sessions(monkeypatch, arrange_type):
+    transport = _Transport(arrange_type)
     initializations, chats, payloads = [], [], []
     request_json, request_bytes = transport.request_json, transport.request_bytes
 
@@ -304,13 +305,22 @@ def test_workflow_preserves_complete_business_inputs_and_case_sessions(monkeypat
          "form": {"items": [0, False, None, {"amount": 12.5}]},
          "session_id": "business-value-not-transport-session"},
         {"user_input_text": "换一个例子", "intent": "follow-up", "collected_data": {}},
+        {"user_input": "查询年休假政策"},
+        {"txt": "business text", "menuId": "KNOWLEDGE_QUERY"},
     ]
-    request = _request("workflow")
-    case = Case(name="Structured workflow", initial_state={"config_variables": variables},
+    initial = (
+        {"config_variables": variables}
+        if arrange_type == "workflow"
+        else {"prompt_variables": variables, "tool_variables": [
+            {"name": "catalog", "value": "test", "type": "str"}
+        ]}
+    )
+    request = _request(arrange_type)
+    case = Case(name="Structured ChatABC input", initial_state=initial,
                 turns=[CaseTurn(id=f"turn-{i}", input=value, extensions=[
                     {"key": "custom_variables", "value": "annotation-not-sent"}
                 ]) for i, value in enumerate(inputs)])
-    adapter = _adapter("workflow", transport, _TraceServer())
+    adapter = _adapter(arrange_type, transport, _TraceServer())
     before_ms = int(time() * 1000)
     try:
         first = adapter.wait(adapter.start(replace(request, case=case)), 30)
@@ -320,7 +330,7 @@ def test_workflow_preserves_complete_business_inputs_and_case_sessions(monkeypat
     finally:
         adapter.close()
     after_ms = int(time() * 1000)
-    assert initializations == [{"config_variables": variables}] * 2
+    assert initializations == [initial] * 2
     assert [chat["session_id"] for chat in chats] == (
         ["session-1"] * len(inputs) + ["session-2"] * len(inputs)
     )
@@ -346,8 +356,9 @@ def test_workflow_preserves_complete_business_inputs_and_case_sessions(monkeypat
                 if span.operation_type == "turn"} == {turn.id for turn in case.turns}
 
 
-def test_workflow_mixes_text_json_strings_and_business_objects_without_double_encoding(monkeypatch):
-    transport = _Transport("workflow")
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+def test_chatabc_mixes_text_json_strings_and_business_objects_without_double_encoding(monkeypatch, arrange_type):
+    transport = _Transport(arrange_type)
     actual, original = [], transport.request_bytes
 
     def capture(method, url, **kwargs):
@@ -356,15 +367,16 @@ def test_workflow_mixes_text_json_strings_and_business_objects_without_double_en
 
     monkeypatch.setattr(transport, "request_bytes", capture)
     encoded = '{"user_input_text":"帮我查一下收文"}'
-    values = [{"txt": "普通文本"}, {"txt": encoded}, {"form": {"enabled": True}}]
+    values = [{"txt": "普通文本"}, {"txt": encoded}, {"txt": "兼容空附件", "files": []},
+              {"form": {"enabled": True}}]
     case = Case(name="Mixed inputs", turns=[CaseTurn(input=value) for value in values])
-    adapter = _adapter("workflow", transport, _TraceServer())
+    adapter = _adapter(arrange_type, transport, _TraceServer())
     try:
-        adapter.wait(adapter.start(replace(_request("workflow"), case=case)), 30)
+        adapter.wait(adapter.start(replace(_request(arrange_type), case=case)), 30)
     finally:
         adapter.close()
-    assert actual[:2] == ["普通文本", encoded]
-    assert json.loads(actual[2]) == values[2]
+    assert actual[:3] == ["普通文本", encoded, "兼容空附件"]
+    assert json.loads(actual[3]) == values[3]
 
 
 @pytest.mark.parametrize("variables", [
@@ -384,7 +396,7 @@ def test_workflow_rejects_malformed_initial_variables_before_remote_calls(variab
         adapter.close()
 
 
-@pytest.mark.parametrize("arrange_type", ["base", "yunxia"])
+@pytest.mark.parametrize("arrange_type", ["yunxia"])
 def test_business_json_does_not_enable_other_agent_protocols(arrange_type):
     request = _request(arrange_type)
     case = Case(name="Unsupported JSON", turns=[CaseTurn(input={"menuId": "QUERY"})])
@@ -396,12 +408,16 @@ def test_business_json_does_not_enable_other_agent_protocols(arrange_type):
         adapter.close()
 
 
-@pytest.mark.parametrize("value", [{"txt": " "}, {"txt": "hello", "files": ["file"]}])
-def test_workflow_rejects_empty_text_and_attachment_envelopes(value):
-    adapter = _adapter("workflow", _Transport("workflow"), _TraceServer())
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+@pytest.mark.parametrize("value", [
+    {}, {"txt": " "}, {"txt": 7}, {"txt": "hello", "files": ["file"]},
+    {"txt": "hello", "files": {}}, {"files": []},
+])
+def test_chatabc_rejects_empty_text_and_attachment_envelopes(value, arrange_type):
+    adapter = _adapter(arrange_type, _Transport(arrange_type), _TraceServer())
     try:
-        with pytest.raises(TargetExecutionError):
-            adapter.start(replace(_request("workflow"), case=Case(
+        with pytest.raises(ValueError if not value else TargetExecutionError):
+            adapter.start(replace(_request(arrange_type), case=Case(
                 name="Invalid envelope", turns=[CaseTurn(input=value)]
             )))
     finally:

@@ -2,6 +2,26 @@
 
 Last updated: 2026-10-17
 
+## Base orchestration business JSON inputs — 2026-10-17
+
+- User-approved extension: in-bank base orchestration now accepts the same per-turn
+  business JSON objects as workflows. Both reuse one ChatABC input conversion;
+  plain text and pre-encoded JSON text remain unchanged, and objects are encoded once
+  into customer `chat.data.txt` without dropping fields or changing the wire protocol.
+- Only three existing business files change: task-form validation, the in-bank target
+  input schema, and the ChatABC adapter. Case initialization, attachment upload support,
+  Yunxia/external protocols, Trace collection and scoring are not changed.
+- Focused regression covers both modes, separate Case sessions, mixed text/JSON turns,
+  nested values, exact customer payloads, stored inputs, pass/fail scoring and reruns.
+- Validation: full backend **2422 passed / 56 skipped**, including **404 related tests**;
+  frontend unit tests **91 passed**, focused browser rerun **14 passed**, type checking,
+  affected-component ESLint and production build passed. The full browser run had
+  **64 passed / 3 failed**: one version-selection timeout passed on rerun after source
+  editing stopped; the remaining two are the previously reproduced A/B static-analysis
+  and uncovered-case confirmation failures. Test environment setup restored the
+  expected local virtual-environment path without changing deployment scripts.
+  No real in-bank service was contacted.
+
 ## Workflow Case initialization and structured turn inputs — 2026-10-17
 
 - Scope approved: in-bank workflows only, Case-scoped initialization and per-turn text
@@ -44,7 +64,7 @@ Last updated: 2026-10-17
   Type checking, affected-file ESLint, Python Ruff checks and production build passed.
   Initial BJS subprocess failures were resolved by supplying the expected local test
   virtual environment, without application changes. Real in-bank deployment is not
-  claimed; see [workflow input instructions](inbank-evidence-acceptance.md#workflow-business-inputs--2026-10-17).
+  claimed; see [ChatABC input instructions](inbank-evidence-acceptance.md#chatabc-business-inputs--2026-10-17).
 
 ## LLM 评估器保存、发布与按版本运行 — 2026-10-08
 

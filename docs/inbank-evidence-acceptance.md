@@ -2,30 +2,32 @@
 
 本次补齐行内 Trace 查询和 BJS 失败处理。Skill 静态分析按用户要求暂缓：真实行内版本定义接口尚未提供，不使用本地 `/web/agent/capabilities` 扩展冒充。
 
-## Workflow business inputs — 2026-10-17
+## ChatABC business inputs — 2026-10-17
 
-This input feature applies only to in-bank workflows. Base orchestration, Yunxia,
+This input feature applies to in-bank workflows and base orchestration. Yunxia,
 external mock execution, Trace collection and scoring retain their existing behavior.
 No database migration or attachment upload is included.
 
 In the sample editor:
 
-1. Expand **初始变量**, click **添加变量** and fill each variable's name and
+1. Expand **初始变量**, select **工作流** or **基础编排**, click **添加变量** and fill each variable's name and
    value. This optional section starts collapsed; collapsing it does not clear values.
    New values are saved as text, so identifiers such as `810000` keep their string
    type. There is no value-type selector. Existing non-string JSON values remain
    editable as JSON and keep their types on save. Use the names and required fields
-   specified by the selected workflow; no customer-specific defaults are inferred.
+   specified by the selected Agent; no customer-specific defaults are inferred.
    Rows can be removed, and
-   no rows are needed for workflows without initialization variables. Completely
+   no rows are needed for Agents without initialization variables. Completely
    blank added rows are ignored on save; named variables with empty string values
    are preserved. Published versions and conversation previews are read-only. The stored representation
-   remains the `initial_state.config_variables` name/value array shown below.
+   uses `initial_state.config_variables` for workflows, or `initial_state.prompt_variables`
+   and `initial_state.tool_variables` for base orchestration. Saving retains only the
+   selected initialization type's fields. The workflow example is shown below.
    The **背景知识** and **自定义变量** annotation fields are no longer shown in this
    editor; existing saved extensions are preserved and are not sent to the Agent.
 2. For each turn, use ordinary text or enable **结构化 JSON 输入** and enter the
    complete business object, not an HTTP envelope or a JSON-escaped string.
-3. Save, publish the dataset, select the in-bank workflow/version and submit the task.
+3. Save, publish the dataset, select the matching in-bank Agent/version and submit the task.
    Different cases initialize independent sessions; turns in one case reuse its session.
 4. Check the actual initialization request and each chat request, then inspect the
    per-turn Trace and evaluation results. Reruns retain the published input snapshot.
@@ -58,12 +60,16 @@ The canonical sample fields are:
 ```
 
 `initial_state.config_variables` is sent once in `init_session.data.config_variables`.
-A complete business `input` object is JSON-encoded once into `chat.data.txt`.
+Base orchestration sends `initial_state.prompt_variables` and `initial_state.tool_variables`
+once in the corresponding `init_session.data` fields. Both types use the same input
+conversion: a complete business `input` object is JSON-encoded once into `chat.data.txt`.
 Nested objects, arrays, numbers, booleans and nulls are preserved; no question-only
 field is extracted. Existing text envelopes (`{"txt":"hello"}`, optionally with
 empty `files`) remain plain text. Inputs containing only `txt` / `files` are treated
 as text envelopes; enter a pre-encoded JSON string as text if those are the business
 object's only keys. Nonempty transport attachments are rejected.
+With **结构化 JSON 输入** unchecked, ordinary text and JSON source text are both sent
+unchanged in `chat.data.txt`; the source text is not parsed or encoded a second time.
 
 The runtime owns the HTTP envelope, authentication, session ID and request ID.
 Business fields never overwrite those transport fields. The existing **背景知识**

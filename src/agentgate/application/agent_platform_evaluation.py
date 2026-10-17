@@ -64,7 +64,7 @@ def _build_inbank_descriptor(
         metadata=metadata,
         input_schema=(
             {"type": "object", "minProperties": 1}
-            if type_group == "base/workflow" and arrange_type == "workflow"
+            if type_group == "base/workflow" and arrange_type in {"base", "workflow"}
             else {
                 "type": "object",
                 "required": ["txt"],

@@ -712,10 +712,7 @@ class InbankChatABCTargetAdapter:
         project_id = request.target.ref.external_target_id
         for sequence, turn in enumerate(request.case.turns):
             turn_input = turn.input.to_dict()
-            question = (
-                _workflow_question(turn_input, input_field)
-                if arrange_type == "workflow" else turn_input[input_field]
-            )
+            question = _chatabc_question(turn_input, input_field)
             started_at = utcnow()
             answer, full_answer, error, _duration, _chat_events, request_id = client.chat_stream(
                 session_id,
@@ -968,31 +965,13 @@ class InbankChatABCTargetAdapter:
                 names.add(variable["name"])
         input_field = _input_field(request)
         for turn in request.case.turns:
-            value = turn.input.to_dict()
-            if arrange_type == "workflow":
-                _workflow_question(value, input_field)
-                continue
-            if set(value) - {input_field, "files"} or input_field not in value:
-                raise TargetExecutionError(
-                    "invalid_request",
-                    f"CaseTurn input supports only {input_field} and files",
-                )
-            if not isinstance(value[input_field], str) or not value[input_field].strip():
-                raise TargetExecutionError(
-                    "invalid_request",
-                    f"CaseTurn {input_field} must be nonblank text",
-                )
-            files = value.get("files", [])
-            if not isinstance(files, list):
-                raise TargetExecutionError("invalid_request", "CaseTurn files must be an array")
-            if files:
-                raise TargetExecutionError("invalid_request", "non-empty files are not supported")
+            _chatabc_question(turn.input.to_dict(), input_field)
 
 
-def _workflow_question(value: dict[str, Any], input_field: str) -> str:
+def _chatabc_question(value: dict[str, Any], input_field: str) -> str:
     """Keep text envelopes unchanged; encode complete business objects only at transport."""
     if not value:
-        raise TargetExecutionError("invalid_request", "workflow input must not be empty")
+        raise TargetExecutionError("invalid_request", "ChatABC input must not be empty")
     if set(value) <= {input_field, "files"}:
         question = value.get(input_field)
         if not isinstance(question, str) or not question.strip():
@@ -1002,7 +981,7 @@ def _workflow_question(value: dict[str, Any], input_field: str) -> str:
         files = value.get("files", [])
         if not isinstance(files, list) or files:
             raise TargetExecutionError(
-                "invalid_request", "workflow attachments are not supported"
+                "invalid_request", "ChatABC attachments are not supported"
             )
         return question
     return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))

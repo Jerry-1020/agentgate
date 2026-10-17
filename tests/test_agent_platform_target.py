@@ -172,9 +172,16 @@ def test_inbank_submission_pins_real_adapter(
     assert run.manifest.target.adapter_type == expected_adapter
     assert run.manifest.target.invocation_config.to_dict() == expected_config
     assert run.manifest.target.credential_ref
+    descriptor = deps.repository.get_target_descriptor(run.manifest.target.descriptor_sha256)
+    assert descriptor.input_schema.to_dict() == (
+        {"type": "object", "required": ["txt"], "properties": {"txt": {"type": "string"}},
+         "additionalProperties": False}
+        if mode == "claw" else {"type": "object", "minProperties": 1}
+    )
 
 
-def test_workflow_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+def test_chatabc_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path, mode):
     from jsonschema import validate
     from test_inbank_trace_server_adapters import _adapter, _TraceServer, _Transport
 
@@ -182,14 +189,16 @@ def test_workflow_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_pat
 
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
     dispatcher = RecordingDispatcher()
-    app = create_app(tmp_path / "workflow-inputs.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    app = create_app(tmp_path / f"{mode}-inputs.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
     deps = app.state.dependencies
-    initial = {"config_variables": [{"name": "centreId", "value": "810000"},
-                                    {"name": "userId", "value": "test-user"}]}
+    variables = [{"name": "centreId", "value": "810000"},
+                 {"name": "userId", "value": "test-user"}]
+    initial = ({"config_variables": variables} if mode == "workflow" else
+               {"prompt_variables": variables, "tool_variables": []})
     values = [{"user_input_text": "第一轮", "menuId": "TRANSLATE", "form": {"items": [0, False, None]}},
               {"user_input_text": "第二轮", "lang_tar": "fr_FR"}]
     with TestClient(app) as client:
-        response = client.post("/api/datasets", json={"name": "Workflow input acceptance"})
+        response = client.post("/api/datasets", json={"name": "ChatABC input acceptance"})
         assert response.status_code == 201, response.text
         dataset_id = response.json()["data"]["dataset"]["id"]
         case_ids = []
@@ -203,7 +212,7 @@ def test_workflow_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_pat
             assert saved.status_code == 201, saved.text
         published = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
         assert published.status_code == 200, published.text
-        body = {**submission(dataset_id, "workflow"), "max_parallel_cases": 1}
+        body = {**submission(dataset_id, mode), "max_parallel_cases": 1}
         submitted = client.post("/api/agent-platform/evaluations", json=body,
                                 headers={"X-Agent-Platform-Token": "workflow-test-token"})
         assert submitted.status_code == 202, submitted.text
@@ -216,7 +225,7 @@ def test_workflow_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_pat
         assert [turn.input.to_dict() for turn in snapshot.dataset.cases[0].turns] == values
 
         def execute(run_id):
-            adapter = _adapter("workflow", _Transport("workflow"), _TraceServer())
+            adapter = _adapter(mode, _Transport(mode), _TraceServer())
             try:
                 completed = deps.runs.execute_run(run_id, adapter, resolve_chatabc_trace)
             finally:
@@ -245,6 +254,27 @@ def test_workflow_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_pat
         assert deps.repository.get_run(rerun_id).manifest == snapshot
         execute(rerun_id)
         assert client.get(f"/api/runs/{source_id}").json()["data"] == first_report
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+def test_mock_platform_still_rejects_business_json(mock_peer, monkeypatch, tmp_path, mode):
+    origin, _ = mock_peer
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    app = create_app(tmp_path / "unsupported-input.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    dataset = deps.datasets.create_dataset("Unsupported business input")
+    deps.datasets.create_draft(dataset.id)
+    deps.datasets.save_case(dataset.id, Case(
+        name="Business JSON", turns=[CaseTurn(input={"user_input_text": "查询年休假政策"})]
+    ))
+    deps.datasets.publish_draft(dataset.id)
+    with TestClient(app) as client:
+        response = client.post("/api/agent-platform/evaluations", json=submission(dataset.id, mode),
+                               headers={"X-Agent-Platform-Token": "test-token"})
+        assert response.status_code == 422, response.text
+        assert not deps.repository.list_evaluation_tasks()
+        assert not deps.api_keys.list_api_keys()
 
 
 def test_invalid_selection_and_dispatch_failure_preserve_truth(mock_peer, monkeypatch, tmp_path):

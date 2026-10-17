@@ -617,26 +617,36 @@ async function submit() {
       platform.target.typeGroup === 'base/workflow'
         ? (platform.target.platformArrangeType ?? platform.target.platformAgentType)
         : null;
-    if (bankArrangeType === 'workflow') {
+    if (bankArrangeType === 'workflow' || bankArrangeType === 'base') {
       const object = (value: unknown): value is Record<string, unknown> =>
         !!value && typeof value === 'object' && !Array.isArray(value);
+      const initialFields =
+        bankArrangeType === 'workflow'
+          ? ['config_variables']
+          : ['prompt_variables', 'tool_variables'];
       const incompatible = exact.cases.filter((c) => {
         const initial = c.initial_state ?? {};
-        if (!object(initial) || Object.keys(initial).some((key) => key !== 'config_variables'))
+        if (
+          !object(initial) ||
+          Object.keys(initial).some((key) => !initialFields.includes(key)) ||
+          initialFields.some((key) => key in initial && !Array.isArray(initial[key]))
+        )
           return true;
-        const variables = 'config_variables' in initial ? initial.config_variables : [];
-        if (!Array.isArray(variables)) return true;
-        const names = new Set<string>();
-        for (const variable of variables) {
-          if (
-            !object(variable) ||
-            typeof variable.name !== 'string' ||
-            !variable.name.trim() ||
-            !('value' in variable) ||
-            names.has(variable.name)
-          )
-            return true;
-          names.add(variable.name);
+        if (bankArrangeType === 'workflow') {
+          const variables = initial.config_variables ?? [];
+          if (!Array.isArray(variables)) return true;
+          const names = new Set<string>();
+          for (const variable of variables) {
+            if (
+              !object(variable) ||
+              typeof variable.name !== 'string' ||
+              !variable.name.trim() ||
+              !('value' in variable) ||
+              names.has(variable.name)
+            )
+              return true;
+            names.add(variable.name);
+          }
         }
         return c.turns.some((turn: { input?: unknown }) => {
           const input = turn.input;
@@ -650,36 +660,12 @@ async function submit() {
           return false;
         });
       });
-      if (incompatible.length)
+      if (incompatible.length) {
+        const label = bankArrangeType === 'workflow' ? '工作流' : '基础编排';
         invalid(
-          `所选工作流有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 config_variables，以及每轮文本或非空业务 JSON，不支持附件上传。`,
+          `所选${label}有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 ${initialFields.join('、')}，以及每轮文本或非空业务 JSON，不支持附件上传。`,
         );
-    } else if (bankArrangeType === 'base') {
-      const incompatible = exact.cases.filter((c) => {
-        const initial = c.initial_state ?? {};
-        return (
-          !initial ||
-          typeof initial !== 'object' ||
-          Array.isArray(initial) ||
-          Object.keys(initial).some(
-            (key) => !['prompt_variables', 'tool_variables'].includes(key),
-          ) ||
-          ['prompt_variables', 'tool_variables'].some(
-            (key) => key in initial && !Array.isArray(initial[key]),
-          ) ||
-          c.turns.some(
-            (turn: { input?: Record<string, unknown> }) =>
-              !turn.input ||
-              Object.keys(turn.input).length !== 1 ||
-              typeof turn.input.txt !== 'string' ||
-              !turn.input.txt.trim(),
-          )
-        );
-      });
-      if (incompatible.length)
-        invalid(
-          `所选基础编排有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 prompt_variables、tool_variables，以及每轮文本输入。`,
-        );
+      }
     } else if (platform && !localTarget) {
       const incompatible = exact.cases.filter(
         (c) =>
