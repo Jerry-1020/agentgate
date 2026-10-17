@@ -1,8 +1,8 @@
 # AgentGate Project Progress
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 
-## Workflow Case initialization and structured turn inputs — 2026-10-16
+## Workflow Case initialization and structured turn inputs — 2026-10-17
 
 - Scope approved: in-bank workflows only, Case-scoped initialization and per-turn text
   or complete business JSON; no attachments, database migration or changes to other
@@ -44,7 +44,7 @@ Last updated: 2026-10-16
   Type checking, affected-file ESLint, Python Ruff checks and production build passed.
   Initial BJS subprocess failures were resolved by supplying the expected local test
   virtual environment, without application changes. Real in-bank deployment is not
-  claimed; see [workflow input instructions](inbank-evidence-acceptance.md#workflow-business-inputs--2026-10-16).
+  claimed; see [workflow input instructions](inbank-evidence-acceptance.md#workflow-business-inputs--2026-10-17).
 
 ## LLM 评估器保存、发布与按版本运行 — 2026-10-08
 

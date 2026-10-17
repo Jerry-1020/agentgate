@@ -2,7 +2,7 @@
 
 本次补齐行内 Trace 查询和 BJS 失败处理。Skill 静态分析按用户要求暂缓：真实行内版本定义接口尚未提供，不使用本地 `/web/agent/capabilities` 扩展冒充。
 
-## Workflow business inputs — 2026-10-16
+## Workflow business inputs — 2026-10-17
 
 This input feature applies only to in-bank workflows. Base orchestration, Yunxia,
 external mock execution, Trace collection and scoring retain their existing behavior.
