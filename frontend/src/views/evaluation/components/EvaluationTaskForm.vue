@@ -38,6 +38,12 @@ const localBankSelected = computed(
   () => platformSelection.value?.localTarget?.adapter_type === 'local_bank',
 );
 const auth = useAuthStore();
+const inbankPlatformSelected = computed(() =>
+  auth.loginMode === 'bank' && !!platformSelection.value && !platformSelection.value.localTarget,
+);
+watch(inbankPlatformSelected, (selected) => {
+  if (taskKind.value === 'ab' && !selected) concurrency.value = 1;
+});
 const platformDirectory = computed(() =>
   auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
 );
@@ -244,7 +250,7 @@ watch(selectedAgent, (agent) => {
       : (bankTarget.value?.descriptor.ref.external_version_id ?? '');
   if (agent === 'demo') timeout.value = 300;
   if (agent !== 'demo') {
-    concurrency.value = 1;
+    if (!inbankPlatformSelected.value) concurrency.value = 1;
     timeout.value = 180;
     retries.value = 0;
     includeStatic.value = false;
@@ -548,6 +554,7 @@ async function submit() {
       .filter((e) => selectedEvaluators.value.includes(e.id))
       .map((e) => ({ evaluator_id: e.id, evaluator_version: e.latest_version! })),
     concurrency: concurrency.value,
+    inbankPlatform: inbankPlatformSelected.value,
     timeout: timeout.value,
     retries: retries.value,
     repetitions: repetitions.value,
@@ -575,7 +582,98 @@ async function submit() {
       exact.cases = exact.cases.filter((c) => caseIds.includes(c.id));
       if (exact.cases.length !== caseIds.length) invalid('所选用例不在当前发布版本中。');
     }
-    if (platform && !localTarget) {
+    const bankArrangeType =
+      platform &&
+      !localTarget &&
+      auth.loginMode === 'bank' &&
+      platform.target.typeGroup === 'base/workflow'
+        ? (platform.target.platformArrangeType ?? platform.target.platformAgentType)
+        : null;
+    if (bankArrangeType === 'workflow' || bankArrangeType === 'base') {
+      const object = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === 'object' && !Array.isArray(value);
+      const initialFields =
+        bankArrangeType === 'workflow'
+          ? ['config_variables']
+          : ['prompt_variables', 'tool_variables'];
+      const incompatible = exact.cases.filter((c) => {
+        const initial = c.initial_state ?? {};
+        if (
+          !object(initial) ||
+          Object.keys(initial).some((key) => !initialFields.includes(key)) ||
+          initialFields.some((key) => key in initial && !Array.isArray(initial[key]))
+        )
+          return true;
+        if (bankArrangeType === 'workflow') {
+          const variables = initial.config_variables ?? [];
+          if (!Array.isArray(variables)) return true;
+          const names = new Set<string>();
+          for (const variable of variables) {
+            if (
+              !object(variable) ||
+              typeof variable.name !== 'string' ||
+              !variable.name.trim() ||
+              !('value' in variable) ||
+              names.has(variable.name)
+            )
+              return true;
+            names.add(variable.name);
+          }
+        }
+        return c.turns.some((turn: { input?: unknown }) => {
+          const input = turn.input;
+          if (!object(input) || !Object.keys(input).length) return true;
+          if (Object.keys(input).every((key) => key === 'txt' || key === 'files'))
+            return (
+              typeof input.txt !== 'string' ||
+              !input.txt.trim() ||
+              ('files' in input && (!Array.isArray(input.files) || input.files.length > 0))
+            );
+          return false;
+        });
+      });
+      if (incompatible.length) {
+        const label = bankArrangeType === 'workflow' ? '工作流' : '基础编排';
+        invalid(
+          `所选${label}有 ${incompatible.length} 条用例的初始化变量或输入格式不正确；支持 Case 级 ${initialFields.join('、')}，以及每轮文本或非空业务 JSON，不支持附件上传。`,
+        );
+      }
+    } else if (
+      platform &&
+      !localTarget &&
+      auth.loginMode === 'bank' &&
+      platform.target.typeGroup === 'abcclaw'
+    ) {
+      const object = (value: unknown): value is Record<string, unknown> =>
+        !!value && typeof value === 'object' && !Array.isArray(value);
+      const allowed = ['txt', 'appHistory', 'custID', 'sessionId', 'config_variables', 'files'];
+      const incompatible = exact.cases.filter((c) => {
+        if (Object.keys(c.initial_state ?? {}).length) return true;
+        const sessions = new Set<string>();
+        for (const turn of c.turns) {
+          const input = turn.input;
+          if (
+            !object(input) ||
+            Object.keys(input).some((key) => !allowed.includes(key)) ||
+            typeof input.txt !== 'string' ||
+            !input.txt.trim() ||
+            ['custID', 'sessionId'].some(
+              (key) => input[key] != null && typeof input[key] !== 'string',
+            ) ||
+            (input.config_variables != null && !Array.isArray(input.config_variables)) ||
+            ('files' in input && (!Array.isArray(input.files) || input.files.length > 0))
+          )
+            return true;
+          if (typeof input.sessionId === 'string' && input.sessionId.trim())
+            sessions.add(input.sessionId.trim());
+        }
+        return sessions.size > 1;
+      });
+      if (incompatible.length)
+        invalid(
+          `所选云虾有 ${incompatible.length} 条用例的输入格式不正确；每轮 input 仅 txt 必填，appHistory、custID、sessionId、config_variables 选填，同一 Case 的 sessionId 须一致；不使用初始变量，不支持附件上传。`,
+        );
+    } else if (platform && !localTarget) {
       const incompatible = exact.cases.filter(
         (c) =>
           Object.keys(c.initial_state ?? {}).length > 0 ||
@@ -685,6 +783,7 @@ async function submit() {
           dataset_version: snapshot.datasetVersion,
           ...(caseIds ? { case_ids: caseIds } : {}),
           evaluator_refs: snapshot.evaluatorRefs,
+          ...(snapshot.inbankPlatform ? { max_parallel_cases: snapshot.concurrency } : {}),
           timeout_seconds: snapshot.timeout,
         },
       });
@@ -836,7 +935,7 @@ watch(taskKind, (kind) => {
     repetitions.value = 1;
     scope.value = 'all';
     launchMode.value = 'now';
-    concurrency.value = 1;
+    if (!inbankPlatformSelected.value) concurrency.value = 1;
     timeout.value = 300;
     retries.value = 0;
   }
@@ -1127,7 +1226,7 @@ onMounted(() => void openCreate(props.source));
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
-            :disabled="taskKind === 'ab' || localBankSelected"
+            :disabled="(taskKind === 'ab' && !inbankPlatformSelected) || localBankSelected"
             title="最多 30 个样本并发"
             aria-label="并发样本数"
             type="number"
@@ -1175,7 +1274,9 @@ onMounted(() => void openCreate(props.source));
       </div>
 
       <p v-if="taskKind === 'ab'" class="muted full">
-        A/B 两侧沿用固定执行参数：并发 1，失败重试 0。
+        {{ inbankPlatformSelected
+          ? 'A/B 两侧使用相同并发数，失败重试 0。'
+          : 'A/B 两侧沿用固定执行参数：并发 1，失败重试 0。' }}
       </p>
     </fieldset>
     <p class="task-summary">

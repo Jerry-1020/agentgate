@@ -12,7 +12,6 @@ from pydantic import Field, ValidationInfo, field_serializer, field_validator, m
 from .base import DomainModel, freeze_json, require_non_blank, require_sha256
 from .evaluator import EvaluatorKind, EvaluatorSeverity
 
-
 _TRACE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _SPAN_ID_PATTERN = re.compile(r"^[0-9a-f]{16}$")
 
@@ -85,9 +84,9 @@ class JudgeRecord(DomainModel):
 
 
 class EvaluatorErrorDetail(DomainModel):
-    """Sanitized information about an Evaluator execution failure."""
+    """Sanitized information about a failure that prevented evaluation."""
 
-    category: Literal["crash", "timeout", "invalid_output"]
+    category: Literal["crash", "timeout", "invalid_output", "target_execution"]
     exception_type: str
     message: str
     retryable: bool = False
@@ -163,7 +162,7 @@ class CheckResult(DomainModel):
         return value
 
     @model_validator(mode="after")
-    def validate_outcome_fields(self) -> "CheckResult":
+    def validate_outcome_fields(self) -> CheckResult:
         failure_fields = (
             self.failure_stage,
             self.failure_sequence,
@@ -236,7 +235,7 @@ class EvaluationResult(DomainModel):
         return require_sha256(value, "evaluator_content_sha256")
 
     @model_validator(mode="after")
-    def validate_result(self) -> "EvaluationResult":
+    def validate_result(self) -> EvaluationResult:
         check_ids = tuple(item.id for item in self.checks)
         if len(set(check_ids)) != len(check_ids):
             raise ValueError("CheckResult ids must be unique within an EvaluationResult")

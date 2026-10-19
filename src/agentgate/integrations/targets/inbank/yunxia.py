@@ -8,14 +8,17 @@ import math
 import os
 import time
 from collections.abc import Mapping
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
+from threading import Event
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
 
 import requests
 
-from agentgate.domain import TargetType, Trace, TraceSpan, utcnow
+from agentgate.domain import CaseTurn, TargetType, Trace, TraceSpan, utcnow
 from agentgate.integrations.observability.trace_server import (
     InbankTraceSettings,
     TraceServerClient,
@@ -33,6 +36,7 @@ from agentgate.integrations.targets.inbank.evidence import (
     output_only_turn_span,
 )
 from agentgate.run.target_protocol import (
+    CaseExecutionPending,
     CaseExecutionRequest,
     CaseExecutionResult,
     CaseExecutionStatus,
@@ -142,13 +146,14 @@ def wait_for_pod_ready(
     http=None,
     sleep=time.sleep,
     monotonic=time.monotonic,
+    request_timeout: float = 10,
 ) -> bool:
     http = http or requests
     url = _url(cfg["HEALTH_CHECK_BASE_URL"], f"/agent-api/{quote(agent_name, safe='')}/health")
     start = monotonic()
     while monotonic() - start < max_wait:
         try:
-            with http.get(url, timeout=10) as resp:
+            with http.get(url, timeout=request_timeout) as resp:
                 resp.raise_for_status()
                 data = resp.json()
             if isinstance(data, dict) and data.get("status") == "ok":
@@ -351,11 +356,14 @@ class YunxiaSettings:
     pod_api_base_url: str
     delete_base_url: str
     agent_namespace: str
-    test_customer_prefix: str
     request_timeout_seconds: float = 180.0
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
+    create_timeout_seconds: float = 60.0
+    delete_timeout_seconds: float = 60.0
+    health_request_timeout_seconds: float = 10.0
     debug_sse_failures: bool = False
+    total_timeout_seconds: float = 0.0
     trace_settings: InbankTraceSettings = field(default_factory=InbankTraceSettings)
 
     def __post_init__(self) -> None:
@@ -370,14 +378,13 @@ class YunxiaSettings:
                 field_name,
                 _validated_base_url(getattr(self, field_name), field_name),
             )
-        for field_name in ("agent_namespace", "test_customer_prefix"):
-            value = getattr(self, field_name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{field_name} must be nonblank")
+        if not isinstance(self.agent_namespace, str) or not self.agent_namespace.strip():
+            raise ValueError("agent_namespace must be nonblank")
         for field_name in (
             "request_timeout_seconds",
             "health_wait_seconds",
             "health_poll_interval_seconds",
+            "create_timeout_seconds", "delete_timeout_seconds", "health_request_timeout_seconds",
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
@@ -418,8 +425,12 @@ class InbankYunxiaTargetAdapter:
         self._run_customer_suffix: str | None = None
         self._agent_name: str | None = None
         self._pod_name: str | None = None
-        self._statuses: dict[str, CaseExecutionStatus] = {}
-        self._results: dict[str, CaseExecutionResult] = {}
+        self._pool: ThreadPoolExecutor | None = None
+        self._deadline: float | None = None
+        self._futures: dict[str, Future[CaseExecutionResult]] = {}
+        self._cancelled: dict[str, Event] = {}
+        self._session_tails: dict[str, Future[CaseExecutionResult]] = {}
+        self._preparation_failures: set[str] = set()
         self._pod_lifecycle = {
             "create": "not_attempted",
             "health": "not_attempted",
@@ -440,84 +451,108 @@ class InbankYunxiaTargetAdapter:
 
     def start(self, request: CaseExecutionRequest) -> str:
         self._validate_request(request)
-        handle = request.execution_id
-        if handle in self._statuses:
-            raise TargetExecutionError("invalid_request", "duplicate execution ID")
         if self._closed:
             raise TargetExecutionError("invalid_request", "adapter is closed")
-        self._statuses[handle] = CaseExecutionStatus.RUNNING
-        started = time.monotonic()
-        LOGGER.info(
-            "inbank_case_start adapter=yunxia run_id=%r case_id=%r "
-            "execution_id=%r turn_count=%d timeout_seconds=%.3f",
-            request.run_id,
-            request.case.id,
-            handle,
-            len(request.case.turns),
-            request.timeout_seconds,
-        )
+        if request.execution_id in self._preparation_failures:
+            raise TargetExecutionError("invalid_request", "duplicate execution ID")
         try:
             self._ensure_pod(request)
-            result = self._execute_case(request)
-        except TargetExecutionError as exc:
-            self._statuses[handle] = CaseExecutionStatus.FAILED
-            LOGGER.error(
-                "inbank_case_failed adapter=yunxia run_id=%r case_id=%r "
-                "execution_id=%r elapsed_ms=%.1f error_code=%s",
-                request.run_id,
-                request.case.id,
-                handle,
-                (time.monotonic() - started) * 1000,
-                exc.code,
-            )
+        except TargetExecutionError:
+            self._preparation_failures.add(request.execution_id)
             raise
-        except Exception as exc:
-            self._statuses[handle] = CaseExecutionStatus.FAILED
-            LOGGER.exception(
-                "inbank_case_failed adapter=yunxia run_id=%r case_id=%r "
-                "execution_id=%r elapsed_ms=%.1f error_type=%s",
-                request.run_id,
-                request.case.id,
-                handle,
-                (time.monotonic() - started) * 1000,
-                type(exc).__name__,
-            )
-            raise TargetExecutionError(
-                "protocol_error",
-                f"Yunxia execution failed ({type(exc).__name__})",
-            ) from None
-        self._results[handle] = result
-        self._statuses[handle] = CaseExecutionStatus.COMPLETED
-        LOGGER.info(
-            "inbank_case_complete adapter=yunxia run_id=%r case_id=%r "
-            "execution_id=%r elapsed_ms=%.1f",
-            request.run_id,
-            request.case.id,
-            handle,
-            (time.monotonic() - started) * 1000,
-        )
+        if not self._futures:
+            self._pool = (ThreadPoolExecutor(max_workers=request.max_parallel_cases)
+                          if request.max_parallel_cases > 1 else None)
+            if self.settings.total_timeout_seconds > 0:
+                self._deadline = self._monotonic() + self.settings.total_timeout_seconds
+        handle = request.execution_id
+        if handle in self._futures:
+            raise TargetExecutionError("invalid_request", "duplicate execution ID")
+        self._cancelled[handle] = Event()
+        session_id = _case_session_id(request)
+        previous = self._session_tails.get(session_id)
+
+        def run() -> CaseExecutionResult:
+            if previous is not None:
+                try:
+                    previous.result()
+                except (TargetExecutionError, CancelledError):
+                    LOGGER.debug("Continuing session %r after a prior failure", session_id)
+            self._check_cancelled(handle)
+            LOGGER.info("inbank_case_start adapter=%s run_id=%r case_id=%r execution_id=%r",
+                        self.adapter_type, request.run_id, request.case.id, handle)
+            try:
+                result = self._execute_case(request)
+                self._check_cancelled(handle)
+                LOGGER.info("inbank_case_complete adapter=%s run_id=%r case_id=%r failed=%s",
+                            self.adapter_type, request.run_id, request.case.id,
+                            result.error is not None)
+                return result
+            except TargetExecutionError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - sanitize at the adapter boundary.
+                raise TargetExecutionError(
+                    "protocol_error", f"Case execution failed ({type(exc).__name__})"
+                ) from None
+
+        if self._pool is None:
+            future: Future[CaseExecutionResult] = Future()
+            self._futures[handle] = future
+            try:
+                future.set_result(run())
+            except Exception as exc:
+                future.set_exception(exc)
+                raise
+        else:
+            future = self._pool.submit(run)
+            self._futures[handle] = future
+        self._session_tails[session_id] = future
         return handle
 
-    def get_status(self, handle: str) -> CaseExecutionStatus:
+    def _future(self, handle: str) -> Future[CaseExecutionResult]:
         try:
-            return self._statuses[handle]
+            return self._futures[handle]
         except KeyError:
             raise TargetExecutionError("invalid_request", "unknown execution") from None
+
+    def get_status(self, handle: str) -> CaseExecutionStatus:
+        if handle in self._preparation_failures:
+            return CaseExecutionStatus.FAILED
+        future = self._future(handle)
+        if self._cancelled[handle].is_set() or future.cancelled():
+            return CaseExecutionStatus.CANCELLED
+        if not future.done():
+            return CaseExecutionStatus.RUNNING
+        if future.exception() is not None or future.result().error is not None:
+            return CaseExecutionStatus.FAILED
+        return CaseExecutionStatus.COMPLETED
 
     def wait(self, handle: str, timeout_seconds: float) -> CaseExecutionResult:
         if timeout_seconds <= 0:
             raise TargetExecutionError("invalid_request", "timeout must be positive")
-        if self.get_status(handle) is not CaseExecutionStatus.COMPLETED:
-            raise TargetExecutionError("protocol_error", "execution is not complete")
-        return self._results[handle]
+        future = self._future(handle)
+        self._check_cancelled(handle)
+        try:
+            return future.result(timeout=min(timeout_seconds, 0.1))
+        except TimeoutError:
+            raise CaseExecutionPending() from None
+        except CancelledError:
+            raise TargetExecutionError("cancelled", "Case execution was cancelled") from None
+
+    def _check_cancelled(self, handle: str) -> None:
+        if self._cancelled[handle].is_set():
+            raise TargetExecutionError("cancelled", "Case execution was cancelled")
+
+    def _before_turn(self, request: CaseExecutionRequest) -> None:
+        self._check_cancelled(request.execution_id)
+        if self._deadline is not None and self._monotonic() > self._deadline:
+            raise TargetExecutionError("timeout", "Overall evaluation timeout exceeded")
 
     def cancel(self, handle: str) -> None:
-        status = self.get_status(handle)
-        if status in {
-            CaseExecutionStatus.PENDING,
-            CaseExecutionStatus.RUNNING,
-        }:
-            self._statuses[handle] = CaseExecutionStatus.CANCELLED
+        future = self._future(handle)
+        if not future.done():
+            self._cancelled[handle].set()
+            future.cancel()
 
     def close(self) -> None:
         """Best-effort, idempotent cleanup using the Yunxia manager API."""
@@ -525,13 +560,19 @@ class InbankYunxiaTargetAdapter:
         if self._closed:
             return
         self._closed = True
+        for handle in self._futures:
+            self.cancel(handle)
+        if self._pool is not None:
+            self._pool.shutdown(wait=True, cancel_futures=True)
         agent_name = self._agent_name
         self._agent_name = None
         if agent_name is None:
             return
         self._pod_lifecycle["delete"] = "started"
         try:
-            result = delete_agent_pod(agent_name, self._cfg, http=self._http)
+            result = delete_agent_pod(
+                agent_name, self._cfg, timeout=self.settings.delete_timeout_seconds, http=self._http,
+            )
             if not result["success"]:
                 raise TargetExecutionError(result["error_code"], result["error"])
             self._pod_lifecycle["delete"] = "succeeded"
@@ -570,6 +611,7 @@ class InbankYunxiaTargetAdapter:
             branch_id=branch_id,
             http=self._http,
             sleep=self._sleep,
+            timeout=self.settings.create_timeout_seconds,
         )
         if not result["success"]:
             self._pod_lifecycle["create"] = "failed"
@@ -581,7 +623,7 @@ class InbankYunxiaTargetAdapter:
         self._log_pod_lifecycle("create", "succeeded")
         self._pod_lifecycle["health"] = "started"
         try:
-            self._wait_until_healthy(request.timeout_seconds)
+            self._wait_until_healthy()
         except Exception:
             self._pod_lifecycle["health"] = "failed"
             self._log_pod_lifecycle("health", "failed")
@@ -589,149 +631,152 @@ class InbankYunxiaTargetAdapter:
         self._pod_lifecycle["health"] = "succeeded"
         self._log_pod_lifecycle("health", "succeeded")
 
-    def _wait_until_healthy(self, case_timeout_seconds: float) -> None:
+    def _wait_until_healthy(self) -> None:
         assert self._agent_name is not None
         if not wait_for_pod_ready(
             self._agent_name,
             self._cfg,
             self.settings.health_poll_interval_seconds,
-            min(case_timeout_seconds, self.settings.health_wait_seconds),
+            self.settings.health_wait_seconds,
             http=self._http,
             sleep=self._sleep,
             monotonic=self._monotonic,
+            request_timeout=self.settings.health_request_timeout_seconds,
         ):
             raise TargetExecutionError("timeout", "Yunxia Pod health check timed out")
 
     def _execute_case(self, request: CaseExecutionRequest) -> CaseExecutionResult:
         assert self._agent_name is not None
         assert self._run_customer_suffix is not None
-        initial = request.case.initial_state.to_dict()
-        session_id = request.case.id
-        customer_id = initial.get(
-            "customer_id", f"{self.settings.test_customer_prefix}-{request.case.id}"
-        )
-        cfg = {**self._cfg, "_RUN_CUST_UUID": "-" + self._run_customer_suffix}
+        session_id = _case_session_id(request)
+        cfg = {**self._cfg, "_RUN_CUST_UUID": self._run_customer_suffix}
         input_field = _input_field(request)
         spans: list[TraceSpan] = []
         outcomes: dict[str, dict[str, Any]] = {}
         project_id = request.target.ref.external_target_id
 
         for sequence, turn in enumerate(request.case.turns):
-            turn_input = turn.input.to_dict()
-            request_id = str(uuid4())
-            row = {
-                "questionId": session_id,
-                "custId": customer_id,
-                "user_input": turn_input[input_field],
-                "currentDisplay_1": turn_input.get("app_history", []),
-                "config_variables": initial.get("config_variables", []),
-            }
             started_at = utcnow()
-            LOGGER.info(
-                "inbank_turn_start adapter=yunxia run_id=%r case_id=%r "
-                "turn_id=%r sequence=%d request_id=%r session_id=%r input_chars=%d",
-                request.run_id,
-                request.case.id,
-                turn.id,
-                sequence,
-                request_id,
-                session_id,
-                len(turn_input[input_field]),
-            )
-            chat = process_single_row(
-                row,
-                self._agent_name,
-                cfg,
-                timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds),
-                http=self._http,
-                headers=self._pod_headers(
-                    request.traceparent, accept="text/event-stream", request_id=request_id
-                ),
-            )
-            if chat["error"]:
-                if self.settings.debug_sse_failures:
-                    LOGGER.error(
-                        "inbank_sse_failure adapter=yunxia run_id=%r case_id=%r "
-                        "turn_id=%r request_id=%r session_id=%r response_body=%r",
-                        request.run_id,
-                        request.case.id,
-                        turn.id,
-                        request_id,
-                        session_id,
-                        json.dumps(chat["events"], ensure_ascii=False)[:8192],
-                    )
-                code, _, detail = chat["error"].partition(": ")
-                raise TargetExecutionError(code, detail)
-            ended_at = utcnow()
-            final_output = {
-                "output": chat["output"],
-                "intent_code": chat["message"].get("intent_code"),
-                "slots": chat["message"].get("slots", {}),
-                "workflow_calls": chat["message"].get("workflow_calls", []),
-            }
-            outcomes[turn.id] = {
-                "input": turn_input,
-                "output": final_output,
-                "state": {},
-            }
-            LOGGER.info(
-                "inbank_trace_query adapter=yunxia run_id=%r case_id=%r turn_id=%r "
-                "project_id=%r request_id=%r output_chars=%d",
-                request.run_id, request.case.id, turn.id, project_id, request_id,
-                len(chat["output"]),
-            )
-            events: list[dict] = []
             try:
-                events = self._fetch_trace_events(
-                    project_id,
+                self._before_turn(request)
+                turn_input = turn.input.to_dict()
+                customer_id = (turn_input.get("custID") or "").strip() or session_id
+                request_id = str(uuid4())
+                row = {
+                    "questionId": session_id,
+                    "custId": customer_id,
+                    "user_input": turn_input[input_field],
+                    "currentDisplay_1": turn_input.get("appHistory", []),
+                    "config_variables": turn_input.get("config_variables") or [],
+                }
+                started_at = utcnow()
+                LOGGER.info(
+                    "inbank_turn_start adapter=yunxia run_id=%r case_id=%r "
+                    "turn_id=%r sequence=%d request_id=%r session_id=%r input_chars=%d",
+                    request.run_id,
+                    request.case.id,
+                    turn.id,
+                    sequence,
                     request_id,
-                    customer_task_id=_task_id_from_run_id(request.run_id),
-                    final_output=final_output,
-                    timeout=min(
-                        request.timeout_seconds,
-                        self.settings.request_timeout_seconds,
-                        self.settings.trace_settings.wait_seconds,
+                    session_id,
+                    len(turn_input[input_field]),
+                )
+                chat = process_single_row(
+                    row,
+                    self._agent_name,
+                    cfg,
+                    timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds),
+                    http=self._http,
+                    headers=self._pod_headers(
+                        request.traceparent, accept="text/event-stream", request_id=request_id
                     ),
                 )
-                turn_spans = normalize_turn_evidence(
-                    request, turn, project_id=project_id, request_id=request_id, events=events,
+                if chat["error"]:
+                    if self.settings.debug_sse_failures:
+                        LOGGER.error(
+                            "inbank_sse_failure adapter=yunxia run_id=%r case_id=%r "
+                            "turn_id=%r request_id=%r session_id=%r response_body=%r",
+                            request.run_id,
+                            request.case.id,
+                            turn.id,
+                            request_id,
+                            session_id,
+                            json.dumps(chat["events"], ensure_ascii=False)[:8192],
+                        )
+                    code, _, detail = chat["error"].partition(": ")
+                    raise TargetExecutionError(code, detail)
+                self._check_cancelled(request.execution_id)
+                ended_at = utcnow()
+                parsed, message_data = try_parse_json(chat["message_data"])
+                final_output = message_data if parsed and isinstance(message_data, dict) else {
+                    "output": message_data if parsed else chat["message_data"],
+                }
+                outcomes[turn.id] = {
+                    "input": turn_input,
+                    "output": final_output,
+                    "state": {},
+                }
+                LOGGER.info(
+                    "inbank_trace_query adapter=yunxia run_id=%r case_id=%r turn_id=%r "
+                    "project_id=%r request_id=%r output_chars=%d",
+                    request.run_id, request.case.id, turn.id, project_id, request_id,
+                    len(chat["output"]),
                 )
-                outcomes[turn.id]["state"] = json.loads(
-                    turn_spans[0].attributes["agentgate.turn.state"]
+                events: list[dict] = []
+                try:
+                    events = self._fetch_trace_events(
+                        project_id,
+                        request_id,
+                        customer_task_id=_task_id_from_run_id(request.run_id),
+                        final_output=final_output,
+                        timeout=min(
+                            request.timeout_seconds,
+                            self.settings.request_timeout_seconds,
+                            self.settings.trace_settings.wait_seconds,
+                        ),
+                    )
+                    turn_spans = normalize_turn_evidence(
+                        request, turn, project_id=project_id, request_id=request_id, events=events,
+                    )
+                    outcomes[turn.id]["state"] = json.loads(
+                        turn_spans[0].attributes["agentgate.turn.state"]
+                    )
+                except TargetExecutionError as exc:
+                    turn_spans = (output_only_turn_span(
+                        request, turn, adapter="yunxia", project_id=project_id,
+                        request_id=request_id, started_at=started_at, ended_at=ended_at, error=exc,
+                    ),)
+                for span in turn_spans:
+                    spans.append(span.model_copy(update={"sequence": len(spans)}))
+                LOGGER.info(
+                    "inbank_turn_complete adapter=yunxia run_id=%r case_id=%r "
+                    "turn_id=%r sequence=%d request_id=%r response_bytes=%d "
+                    "output_chars=%d trace_project_id=%r "
+                    "source_trace_id=%r trace_event_count=%d evidence_mode=%s elapsed_ms=%.1f",
+                    request.run_id,
+                    request.case.id,
+                    turn.id,
+                    sequence,
+                    request_id,
+                    len(json.dumps(chat["events"]).encode("utf-8")),
+                    len(chat["output"]),
+                    project_id,
+                    request_id,
+                    len(events),
+                    turn_spans[0].attributes["inbank.evidence_mode"],
+                    (ended_at - started_at).total_seconds() * 1000,
                 )
-            except TargetExecutionError as exc:
-                turn_spans = (output_only_turn_span(
-                    request, turn, adapter="yunxia", project_id=project_id,
-                    request_id=request_id, started_at=started_at, ended_at=ended_at, error=exc,
-                ),)
-            for span in turn_spans:
+            except Exception as exc:  # noqa: BLE001 - retain the customer's per-row failure boundary.
+                error = exc if isinstance(exc, TargetExecutionError) else TargetExecutionError(
+                    "protocol_error", f"Customer turn failed ({type(exc).__name__})"
+                )
+                if error.code in {"cancelled", "invalid_request"}:
+                    raise error
+                span, outcomes[turn.id] = _failed_turn_evidence(
+                    request, turn, error, started_at=started_at,
+                )
                 spans.append(span.model_copy(update={"sequence": len(spans)}))
-            LOGGER.info(
-                "inbank_turn_complete adapter=yunxia run_id=%r case_id=%r "
-                "turn_id=%r sequence=%d request_id=%r response_bytes=%d "
-                "output_chars=%d workflow_call_count=%d trace_project_id=%r "
-                "source_trace_id=%r trace_event_count=%d evidence_mode=%s elapsed_ms=%.1f",
-                request.run_id,
-                request.case.id,
-                turn.id,
-                sequence,
-                request_id,
-                len(json.dumps(chat["events"]).encode("utf-8")),
-                len(chat["output"]),
-                len(final_output["workflow_calls"]),
-                project_id,
-                request_id,
-                len(events),
-                turn_spans[0].attributes["inbank.evidence_mode"],
-                (ended_at - started_at).total_seconds() * 1000,
-            )
-        final = outcomes[request.case.turns[-1].id]
-        trace = Trace(
-            trace_id=request.traceparent.split("-")[1], run_id=request.run_id,
-            case_id=request.case.id, spans=tuple(spans), turn_outcomes=outcomes,
-            final_output=final["output"], final_state=final["state"],
-        )
-        return CaseExecutionResult(request.execution_id, trace.trace_id, trace)
+        return _case_execution_result(request, spans, outcomes)
 
     def _fetch_trace_events(
         self, project_id: str, trace_id: str, *, customer_task_id: str,
@@ -859,42 +904,48 @@ class InbankYunxiaTargetAdapter:
         if target.adapter_version != self.adapter_version:
             raise TargetExecutionError("invalid_request", "adapter_version does not match")
         _branch_id(request)
-        initial = request.case.initial_state.to_dict()
-        if set(initial) - {"customer_id", "config_variables"}:
+        if request.case.initial_state:
             raise TargetExecutionError(
-                "invalid_request", "Case initial_state has unsupported fields"
-            )
-        customer_id = initial.get("customer_id", self.settings.test_customer_prefix)
-        if not isinstance(customer_id, str) or not customer_id.strip():
-            raise TargetExecutionError(
-                "invalid_request", "initial_state customer_id must be nonblank text"
-            )
-        if not customer_id.startswith(self.settings.test_customer_prefix):
-            raise TargetExecutionError(
-                "invalid_request", "customer_id must use the approved test prefix"
-            )
-        if not isinstance(initial.get("config_variables", []), list):
-            raise TargetExecutionError(
-                "invalid_request", "initial_state config_variables must be an array"
+                "invalid_request", "Yunxia request fields belong in each turn input, not initial_state"
             )
         input_field = _input_field(request)
+        allowed = {input_field, "appHistory", "custID", "sessionId", "config_variables", "files"}
         for turn in request.case.turns:
             value = turn.input.to_dict()
-            if set(value) - {input_field, "app_history", "files"} or input_field not in value:
+            if set(value) - allowed or input_field not in value:
                 raise TargetExecutionError(
                     "invalid_request",
-                    f"Yunxia CaseTurn input supports only {input_field}, app_history and files",
+                    f"Yunxia input requires {input_field}; optional fields are "
+                    "appHistory, custID, sessionId, config_variables and empty files",
                 )
             if not isinstance(value[input_field], str) or not value[input_field].strip():
                 raise TargetExecutionError(
                     "invalid_request",
                     f"CaseTurn {input_field} must be nonblank text",
                 )
+            for key in ("custID", "sessionId"):
+                if value.get(key) is not None and not isinstance(value[key], str):
+                    raise TargetExecutionError("invalid_request", f"Yunxia {key} must be text")
+            variables = value.get("config_variables")
+            if variables is not None and not isinstance(variables, list):
+                raise TargetExecutionError("invalid_request", "Yunxia config_variables must be an array")
             files = value.get("files", [])
             if not isinstance(files, list):
                 raise TargetExecutionError("invalid_request", "CaseTurn files must be an array")
             if files:
                 raise TargetExecutionError("invalid_request", "non-empty files are not supported")
+        _case_session_id(request)
+
+
+def _case_session_id(request: CaseExecutionRequest) -> str:
+    session_ids = {
+        value.strip()
+        for turn in request.case.turns
+        if isinstance(value := turn.input.to_dict().get("sessionId"), str) and value.strip()
+    }
+    if len(session_ids) > 1:
+        raise TargetExecutionError("invalid_request", "Yunxia sessionId must be consistent within a Case")
+    return next(iter(session_ids), request.case.id)
 
 
 def _input_field(request: CaseExecutionRequest) -> str:
@@ -927,6 +978,49 @@ def resolve_yunxia_trace(request: CaseExecutionRequest, result: CaseExecutionRes
     return result.inline_trace
 
 
+def _failed_turn_evidence(
+    request: CaseExecutionRequest, turn: CaseTurn, error: TargetExecutionError,
+    *, started_at: datetime,
+) -> tuple[TraceSpan, dict]:
+    if error.code == "cancelled":
+        raise error
+    detail = {"code": error.code, "message": error.message}
+    span = TraceSpan(
+        trace_id=request.traceparent.split("-")[1], span_id=uuid4().hex[:16],
+        name="inbank.yunxia.turn", operation_type="turn", sequence=0,
+        started_at=started_at, ended_at=utcnow(), status="error",
+        attributes={"agentgate.turn.id": turn.id,
+                    "agentgate.execution.id": request.execution_id,
+                    "agentgate.execution.error": detail},
+    )
+    LOGGER.warning("inbank_turn_failed run_id=%r case_id=%r turn_id=%r code=%s",
+                   request.run_id, request.case.id, turn.id, error.code)
+    return span, {"input": turn.input.to_dict(), "output": {},
+                  "state": {"execution_status": "error"}, "error": detail}
+
+
+def _case_execution_result(
+    request: CaseExecutionRequest, spans: list[TraceSpan], outcomes: dict,
+) -> CaseExecutionResult:
+    final = outcomes[request.case.turns[-1].id]
+    trace = Trace(
+        trace_id=request.traceparent.split("-")[1], run_id=request.run_id,
+        case_id=request.case.id, spans=tuple(spans), turn_outcomes=outcomes,
+        final_output=final["output"], final_state=final["state"],
+    )
+    failure = next((item["error"] for item in outcomes.values() if "error" in item), None)
+    error = TargetExecutionError(failure["code"], failure["message"]) if failure else None
+    return CaseExecutionResult(request.execution_id, trace.trace_id, trace, error)
+
+
+def _load_total_timeout(values: Mapping[str, str]) -> float:
+    name = "AGENTGATE_INBANK_TOTAL_TIMEOUT_SECONDS"
+    value = float(values.get(name, "0"))
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return value
+
+
 def load_yunxia_settings(
     environ: Mapping[str, str] | None = None,
 ) -> YunxiaSettings:
@@ -939,7 +1033,6 @@ def load_yunxia_settings(
         "pod_api_base_url": "AGENTGATE_INBANK_YUNXIA_POD_API_BASE_URL",
         "delete_base_url": "AGENTGATE_INBANK_YUNXIA_DELETE_BASE_URL",
         "agent_namespace": "AGENTGATE_INBANK_YUNXIA_AGENT_NAMESPACE",
-        "test_customer_prefix": "AGENTGATE_INBANK_YUNXIA_TEST_CUSTOMER_PREFIX",
     }
     missing = [env_name for env_name in required.values() if not values.get(env_name)]
     if missing:
@@ -949,7 +1042,13 @@ def load_yunxia_settings(
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 180.0
         ),
+        total_timeout_seconds=_load_total_timeout(values),
         trace_settings=load_inbank_trace_settings(values),
+        create_timeout_seconds=_positive_float(values, "AGENTGATE_INBANK_CREATE_TIMEOUT_SECONDS", 60),
+        delete_timeout_seconds=_positive_float(values, "AGENTGATE_INBANK_DELETE_TIMEOUT_SECONDS", 60),
+        health_request_timeout_seconds=_positive_float(
+            values, "AGENTGATE_INBANK_HEALTH_REQUEST_TIMEOUT_SECONDS", 10
+        ),
         health_wait_seconds=_positive_float(values, "AGENTGATE_INBANK_HEALTH_WAIT_SECONDS", 300.0),
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0

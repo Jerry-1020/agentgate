@@ -598,7 +598,7 @@ const sampleCases = [
     turns: [{ input: { txt: '问题一' }, expectations: [{ kind: 'output' }] }],
   },
 ];
-async function openForm(page: Page, selected = false, mode: 'bank' | 'external' = 'bank') {
+async function openForm(page: Page, selected = false, cases = sampleCases, mode: 'bank' | 'external' = 'bank') {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
     [];
   await page.route('**/api/**', async (route) => {
@@ -632,11 +632,11 @@ async function openForm(page: Page, selected = false, mode: 'bank' | 'external' 
     if (path.match(/\/datasets\/[^/]+$/))
       return reply(route, {
         versions: [
-          { version: 1, cases: sampleCases },
-          { version: 2, cases: sampleCases },
+          { version: 1, cases },
+          { version: 2, cases },
         ],
       });
-    if (path.includes('/datasets/')) return reply(route, { cases: sampleCases });
+    if (path.includes('/datasets/')) return reply(route, { cases });
     if (path === '/api/versions')
       return reply(route, [
         { id: 'old-1', label: '旧版一' },
@@ -674,12 +674,16 @@ async function openForm(page: Page, selected = false, mode: 'bank' | 'external' 
         : path.endsWith('/agents')
           ? batch([
               { id: 'workflow', name: '工作流', agentType: 'workflow' },
+              { id: 'base', name: '基础编排', agentType: 'base' },
               { id: 'claw', name: '云虾', agentType: 'abcclaw2' },
             ])
           : path.endsWith('branchTree')
             ? wrap([{ branchId: 'branch/raw', branchName: '分支' }])
             : path.endsWith('listVersions')
-              ? wrap([{ agentVersion: 'v2', branchId: 'branch/raw' }])
+              ? wrap([
+                  { agentVersion: 'v2', branchId: 'branch/raw' },
+                  { agentVersion: 'v3', branchId: 'branch/raw' },
+                ])
               : wrap([
                   { agentVersion: 'v1', updatedAt: bankVersionOne },
                   { agentVersion: 'v2', updatedAt: bankVersionTwo },
@@ -706,7 +710,183 @@ async function selectFormTarget(page: Page, claw = false) {
   if (claw) await choose(page, '分支地址', '分支 · branch/raw');
   await choose(page, '智能体版本', claw ? 'v2' : bankVersionOne);
 }
+async function useExternalMode(page: Page) {
+  await page.route('**/api/local-targets', (route) => reply(route, { targets: [], unavailable: [] }));
+  await page.evaluate(() =>
+    (window as any).setAuth({ loginMode: 'external', token: '', teamId: '', teamName: '' }),
+  );
+}
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
+
+test('bank workflow accepts business JSON while cloudshrimp retains its native input contract', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId', value: '810000' }] },
+    turns: [{ input: { user_input_text: '翻译', menuId: 'TRANSLATE', form: { enabled: false } }, expectations: [{ kind: 'output' }] },
+      { input: { user_input_text: '第二轮', lang_tar: 'fr_FR' }, expectations: [{ kind: 'output' }] }] }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('workflow');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+test('invalid workflow config is rejected before task submission', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId' }] } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base accepts both initialization arrays and retains initialization type isolation', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: {
+    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
+    tool_variables: [{ name: 'bankNo', value: '810000', type: 'str' }],
+  } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('base');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/所选工作流.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+for (const initial of [
+  { config_variables: [{ name: 'centreId', value: '810000' }] },
+  { config_variables: [], prompt_variables: [{ name: 'userId', value: 'hk_yat' }] },
+  { prompt_variables: 'not-an-array' },
+]) test('bank base rejects incompatible initialization ' + JSON.stringify(initial), async ({ page }) => {
+  const requests = await openForm(page, false, [{ ...sampleCases[0], initial_state: initial }] as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base accepts business JSON while cloudshrimp retains its native input contract', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { prompt_variables: [] },
+    turns: [
+      { input: { user_input_text: '业务 JSON', menuId: 'KNOWLEDGE_QUERY', form: { items: [0, false, null] } }, expectations: [{ kind: 'output' }] },
+      { input: { txt: '普通文本' }, expectations: [{ kind: 'output' }] },
+      { input: { user_input: '查询年休假政策' }, expectations: [{ kind: 'output' }] },
+    ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('base');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+test('external base still rejects business JSON before task submission', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input: { user_input_text: '业务 JSON' }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await page.route('**/api/local-targets', (route) => reply(route, { targets: [], unavailable: [] }));
+  await page.evaluate(() =>
+    (window as any).setAuth({ loginMode: 'external', token: '', teamId: '', teamName: '' }),
+  );
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', 'v1');
+  await start(page).click();
+  await expect(page.getByText(/平台目标仅支持纯文本/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+for (const input of [
+  { txt: '只填文本' },
+  { txt: '{"user_input_text":"JSON 原文"}' },
+  { txt: '历史', appHistory: [{ role: 'user', content: '之前的问题' }] },
+  { txt: '客户', custID: 'hk_yat' },
+  { txt: '变量', config_variables: [{ name: 'centreId', value: '810000' }] },
+  { txt: '完整', appHistory: { role: 'user', content: '历史' }, custID: 'hk_yat',
+    sessionId: 'session-one', config_variables: [{ open: [0, false, null] }] },
+  { txt: '选填留空', appHistory: null, custID: null, sessionId: null, config_variables: null },
+]) test('bank cloudshrimp accepts optional native input ' + JSON.stringify(input), async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input, expectations: [{ kind: 'output' }] },
+    { input: { txt: '第二轮仅文本' }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.type_group).toBe('abcclaw');
+  expect(sent.body.target.branch_id).toBe('branch/raw');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+});
+
+for (const inputs of [
+  [{ appHistory: [] }], [{ txt: ' ' }], [{ txt: 1 }], [{ txt: 'hello', app_history: [] }],
+  [{ txt: 'hello', custID: 123 }], [{ txt: 'hello', sessionId: [] }],
+  [{ txt: 'hello', config_variables: {} }], [{ txt: 'hello', files: ['unsupported'] }],
+  [{ txt: 'one', sessionId: 'one' }, { txt: 'two', sessionId: 'two' }],
+]) test('bank cloudshrimp rejects invalid native inputs ' + JSON.stringify(inputs), async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: inputs.map(input => ({ input, expectations: [{ kind: 'output' }] })) }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank cloudshrimp keeps request fields in input rather than Case initialization', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [] } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('external cloudshrimp does not adopt inbank native request fields', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input: { txt: 'hello', appHistory: [] }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await page.route('**/api/local-targets', (route) => reply(route, { targets: [], unavailable: [] }));
+  await page.evaluate(() =>
+    (window as any).setAuth({ loginMode: 'external', token: '', teamId: '', teamName: '' }),
+  );
+  await choose(page, '选择智能体', '云虾 · claw');
+  await choose(page, '分支地址', '分支 · branch/raw');
+  await choose(page, '智能体版本', 'v2');
+  await start(page).click();
+  await expect(page.getByText(/平台目标仅支持纯文本/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+for (const input of [{}, { txt: ' ' }, { txt: 'hello', files: ['unsupported'] }])
+  test('bank base rejects invalid text and attachments ' + JSON.stringify(input), async ({ page }) => {
+    const cases = [{ ...sampleCases[0], turns: [{ input, expectations: [{ kind: 'output' }] }] }];
+    const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+    await choose(page, '选择智能体', '基础编排 · base');
+    await choose(page, '智能体版本', bankVersionOne);
+    await start(page).click();
+    await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
+    expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+  });
 
 test('form preserves dataset/execution choices through target changes and logout, without legacy catalogs', async ({
   page,
@@ -720,6 +900,8 @@ test('form preserves dataset/execution choices through target changes and logout
   await expect(page.getByLabel('任务测评集', { exact: true })).toHaveValue('other');
   await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('7');
   await expect(page.getByLabel('执行超时（秒）', { exact: true })).toHaveValue('999');
+  await useExternalMode(page);
+  await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('7');
   await expect(page.getByRole('button', { name: 'Skill 静态分析', exact: true })).toBeDisabled();
   await page.evaluate(() => (window as any).setAuth('logout'));
   await expect(start(page)).toBeDisabled();
@@ -754,7 +936,7 @@ test('in-bank single and A/B require a platform target without loading or showin
 test('switching external A/B to in-bank discards late demo catalogs and requires a platform target', async ({
   page,
 }) => {
-  const requests = await openForm(page, false, 'external');
+  const requests = await openForm(page, false, sampleCases, 'external');
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let pending = 0;
@@ -887,6 +1069,7 @@ test('platform A/B submits both versions to the comparison endpoint', async ({
     dataset_id: 'dataset',
     dataset_version: 2,
     evaluator_refs: [{ evaluator_id: 'judge', evaluator_version: '1' }],
+    max_parallel_cases: 1,
     timeout_seconds: 300,
   });
   expect(submission.headers['x-agent-platform-token']).toBe('form-secret');
@@ -908,6 +1091,126 @@ test('platform A/B requires a different candidate version before creating', asyn
   await candidate.selectOption(bankVersionTwo);
   await expect(create).toBeEnabled();
 });
+
+for (const target of ['workflow', 'base', 'claw'] as const)
+  for (const kind of ['single', 'stability', 'ab'] as const)
+    test(`bank ${target} ${kind} submits the editable Case concurrency`, async ({ page }) => {
+      const requests = await openForm(page);
+      await page.getByLabel('并发样本数', { exact: true }).fill('4');
+      const directoryRequests: { origin: string; authorization?: string }[] = [];
+      page.on('request', (request) => {
+        const location = new URL(request.url());
+        if (location.pathname.startsWith('/web/'))
+          directoryRequests.push({
+            origin: location.origin,
+            authorization: request.headers().authorization,
+          });
+      });
+      await choose(page, '选择智能体', {
+        workflow: '工作流 · workflow', base: '基础编排 · base', claw: '云虾 · claw',
+      }[target]);
+      if (target === 'claw') await choose(page, '分支地址', '分支 · branch/raw');
+      await choose(page, '智能体版本', target === 'claw' ? 'v2' : bankVersionOne);
+      const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
+      await expect(concurrencyInput).toBeEnabled();
+      await expect(concurrencyInput).toHaveValue('4');
+      if (kind === 'stability')
+        await page.getByLabel('稳定性测试', { exact: true }).fill('3');
+      if (kind === 'ab') {
+        await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+        await page.getByLabel('平台候选版本', { exact: true })
+          .selectOption(target === 'claw' ? 'v3' : bankVersionTwo);
+        await expect(page.getByText('A/B 两侧使用相同并发数，失败重试 0。')).toBeVisible();
+        await expect(concurrencyInput).toBeEnabled();
+        await expect(concurrencyInput).toHaveValue('4');
+        await concurrencyInput.fill('5');
+      }
+      await page.getByRole('button', {
+        name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
+      }).click();
+      await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+      const endpoint = kind === 'ab'
+        ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
+      const submission = requests.find((request) => request.path === endpoint)!;
+      expect(submission.body.max_parallel_cases).toBe(kind === 'ab' ? 5 : 4);
+      expect(submission.headers['x-agent-platform-token']).toBe('form-secret');
+      expect(directoryRequests.length).toBeGreaterThan(0);
+      expect(directoryRequests.every((request) =>
+        request.origin === new URL(url).origin && request.authorization === 'Bearer form-secret',
+      )).toBe(true);
+      if (kind !== 'ab') expect(submission.body.repetitions).toBe(kind === 'stability' ? 3 : 1);
+    });
+
+for (const invalid of ['0', '31', '1.5'])
+  test(`bank A/B retains the existing Case concurrency bounds (${invalid})`, async ({ page }) => {
+    const requests = await openForm(page);
+    await selectFormTarget(page);
+    await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+    await page.getByLabel('平台候选版本', { exact: true }).selectOption(bankVersionTwo);
+    await page.getByLabel('并发样本数', { exact: true }).fill(invalid);
+    await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: '并发样本数必须为 1—30 的整数' }))
+      .toBeVisible();
+    expect(requests.some((request) => request.path === '/api/agent-platform/comparisons')).toBe(false);
+  });
+
+test('switching from bank A/B to external restores its fixed concurrency', async ({ page }) => {
+  const requests = await openForm(page);
+  await selectFormTarget(page);
+  await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+  const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
+  await concurrencyInput.fill('5');
+  await useExternalMode(page);
+  await choose(page, '选择智能体', '工作流 · workflow');
+  await choose(page, '实验 A · 基线版本', 'v1');
+  await page.getByLabel('平台候选版本', { exact: true }).selectOption('v2');
+  await expect(concurrencyInput).toHaveValue('1');
+  await expect(concurrencyInput).toBeDisabled();
+  await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+  const submission = requests.find((request) => request.path === '/api/agent-platform/comparisons')!;
+  expect(submission.body).not.toHaveProperty('max_parallel_cases');
+  expect(submission.headers['x-agent-platform-token']).toBe('local');
+});
+
+for (const kind of ['single', 'stability', 'ab'] as const)
+  test(`external platform ${kind} retains its existing concurrency and token routing`, async ({ page }) => {
+    const requests = await openForm(page);
+    await useExternalMode(page);
+    const directoryRequests: { origin: string; authorization?: string }[] = [];
+    page.on('request', (request) => {
+      const location = new URL(request.url());
+      if (location.pathname.startsWith('/web/'))
+        directoryRequests.push({ origin: location.origin, authorization: request.headers().authorization });
+    });
+    await choose(page, '选择智能体', '工作流 · workflow');
+    await choose(page, '智能体版本', 'v1');
+    const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
+    await expect(concurrencyInput).toBeVisible();
+    await concurrencyInput.fill('4');
+    if (kind === 'stability') await page.getByLabel('稳定性测试', { exact: true }).fill('3');
+    if (kind === 'ab') {
+      await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+      await page.getByLabel('平台候选版本', { exact: true }).selectOption('v2');
+      await expect(concurrencyInput).toHaveValue('1');
+      await expect(concurrencyInput).toBeDisabled();
+      await expect(page.getByText('A/B 两侧沿用固定执行参数：并发 1，失败重试 0。')).toBeVisible();
+    }
+    await page.getByRole('button', {
+      name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
+    }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+    const endpoint = kind === 'ab'
+      ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
+    const submission = requests.find((request) => request.path === endpoint)!;
+    if (kind === 'ab') expect(submission.body).not.toHaveProperty('max_parallel_cases');
+    else expect(submission.body.max_parallel_cases).toBe(4);
+    expect(submission.headers['x-agent-platform-token']).toBe('local');
+    expect(directoryRequests.length).toBeGreaterThan(0);
+    expect(directoryRequests.every((request) =>
+      request.origin === 'http://127.0.0.1:8119' && request.authorization === 'Bearer local',
+    )).toBe(true);
+  });
 
 test('personal space submits without a team_id field', async ({ page }) => {
   const requests = await openForm(page);
@@ -976,6 +1279,7 @@ test('submission locks all inputs before asynchronous validation and prevents du
   await expect(page.getByRole('button', { name: 'A/B试验', exact: true })).toBeDisabled();
   await expect(page.getByRole('combobox', { name: '选择智能体', exact: true })).toBeDisabled();
   await expect(page.getByLabel('并发样本数', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('执行超时（秒）', { exact: true })).toBeDisabled();
   await page.locator('.dataset-selection .el-select').click({ force: true });
   await expect(page.getByRole('listbox', { name: '指定用例', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: '取消', exact: true })).toBeDisabled();
@@ -1031,7 +1335,7 @@ for (const failure of ['reject', 'server', 'malformed', 'refresh'] as const)
 test('external A/B keeps legacy endpoint and association, returning to single requires fresh target selection', async ({
   page,
 }) => {
-  const requests = await openForm(page, false, 'external');
+  const requests = await openForm(page, false, sampleCases, 'external');
   // 不预选平台目标：内置 Demo 的 A/B 走 legacy 端点；预选平台目标会切换到平台 A/B 分支。
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
   await expect(page.getByRole('button', { name: '创建 A/B试验', exact: true })).toBeEnabled();
@@ -1058,7 +1362,7 @@ test('external A/B keeps legacy endpoint and association, returning to single re
 test('late external A/B catalogs cannot change the single task dataset or execution settings', async ({
   page,
 }) => {
-  await openForm(page, false, 'external');
+  await openForm(page, false, sampleCases, 'external');
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
   let requested = false;
@@ -1076,14 +1380,18 @@ test('late external A/B catalogs cannot change the single task dataset or execut
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '智能体版本', 'v1');
   await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('9');
+  await useExternalMode(page);
+  await expect(page.getByLabel('并发样本数', { exact: true })).toHaveValue('9');
   await expect(page.getByLabel('任务测评集', { exact: true })).toHaveValue('dataset');
 });
 
-test('scheduled execution sends UTC and rejects invalid numeric limits before creating', async ({
+test('external scheduled execution sends UTC and rejects invalid numeric limits before creating', async ({
   page,
 }) => {
   const requests = await openForm(page);
-  await selectFormTarget(page);
+  await useExternalMode(page);
+  await choose(page, '选择智能体', '工作流 · workflow');
+  await choose(page, '智能体版本', 'v1');
   await page.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
   const date = new Date(Date.now() + 86400000);
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
@@ -1142,7 +1450,7 @@ test('cancelling uncovered-case confirmation releases the lock without a creatio
 test('external A/B still permits explicit demo selection when the registered bank catalog fails', async ({
   page,
 }) => {
-  const requests = await openForm(page, false, 'external');
+  const requests = await openForm(page, false, sampleCases, 'external');
   await page.route('**/api/bank-targets', (route) => reply(route, { detail: 'unavailable' }, 503));
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: '真实智能体目录暂不可用' })).toBeVisible();

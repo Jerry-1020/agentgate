@@ -62,12 +62,23 @@ def _build_inbank_descriptor(
         ),
         display_name=agent_id,
         metadata=metadata,
-        input_schema={
-            "type": "object",
-            "required": ["txt"],
-            "properties": {"txt": {"type": "string"}},
-            "additionalProperties": False,
-        },
+        input_schema=(
+            {"type": "object", "minProperties": 1}
+            if type_group == "base/workflow" and arrange_type in {"base", "workflow"}
+            else {
+                "type": "object",
+                "required": ["txt"],
+                "properties": {
+                    "txt": {"type": "string"},
+                    "appHistory": {},
+                    "custID": {"type": ["string", "null"]},
+                    "sessionId": {"type": ["string", "null"]},
+                    "config_variables": {"type": ["array", "null"]},
+                    "files": {"type": "array", "maxItems": 0},
+                },
+                "additionalProperties": False,
+            }
+        ),
     )
 
 
@@ -82,7 +93,6 @@ def _platform_target_snapshot(
     agent_version: str,
     arrange_type: Literal["base", "workflow"] | None,
     branch_id: str | None,
-    max_parallel_cases: int,
     max_retries: int,
 ) -> tuple[TargetDescriptor, str, dict]:
     if platform_mode == "mock":
@@ -97,8 +107,8 @@ def _platform_target_snapshot(
         )
         return descriptor, "agent_platform_mock", dict(descriptor.metadata)
     if platform_mode == "inbank":
-        if max_parallel_cases != 1 or max_retries != 0:
-            raise ValueError("inbank execution requires concurrency 1 and retries 0")
+        if max_retries != 0:
+            raise ValueError("inbank execution requires retries 0")
         if type_group == "abcclaw":
             if branch_id is None or arrange_type is not None:
                 raise ValueError("invalid inbank abcclaw target")
@@ -177,7 +187,6 @@ def submit_platform_evaluation(
         agent_version=agent_version,
         arrange_type=arrange_type,
         branch_id=branch_id,
-        max_parallel_cases=max_parallel_cases,
         max_retries=max_retries,
     )
     repository.save_target_descriptor(descriptor)
@@ -289,6 +298,7 @@ def submit_platform_comparison(
     user_name: str,
     name: str | None = None,
     evaluator_refs: tuple[EvaluatorRef, ...] | None = None,
+    max_parallel_cases: int = 1,
 ) -> tuple[EvaluationRun, EvaluationRun]:
     """Create and dispatch one controlled A/B pair of platform Runs."""
     if evaluator_ids is not None and evaluator_refs is not None:
@@ -302,6 +312,8 @@ def submit_platform_comparison(
     platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
     if platform_mode not in {"mock", "inbank"}:
         raise ConnectionError("agent platform mode must be mock or inbank")
+    if platform_mode == "mock":
+        max_parallel_cases = 1
     client = PlatformClient.from_environment() if platform_mode == "mock" else None
 
     task_id = str(uuid4())
@@ -341,7 +353,6 @@ def submit_platform_comparison(
                 agent_version=version,
                 arrange_type=arrange_type,
                 branch_id=branch_id,
-                max_parallel_cases=1,
                 max_retries=0,
             )
             repository.save_target_descriptor(descriptor)
@@ -360,7 +371,7 @@ def submit_platform_comparison(
                 dataset_version=dataset_version,
                 case_ids=case_ids,
                 evaluator_refs=selected_refs,
-                max_parallel_cases=1,
+                max_parallel_cases=max_parallel_cases,
                 timeout_seconds=timeout_seconds,
                 max_retries=0,
                 scheduled_for=None,

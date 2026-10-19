@@ -8,6 +8,7 @@ from copy import deepcopy
 from functools import partial
 from types import SimpleNamespace
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,7 @@ from agentgate.domain import (
     CaseTurn,
     EvaluationRun,
     EvaluatorSpec,
+    Outcome,
     RunStatus,
     TargetSnapshot,
     transition_run,
@@ -58,6 +60,7 @@ class RecordingTransport(_Transport):
         self.chat_error_event = False
         self.yunxia_auxiliary_events = False
         self.yunxia_error_event = False
+        self.yunxia_message = {"status": "completed", "output": "answer"}
         self.arrange_type = "base"
         self.missing_trace = False
 
@@ -112,7 +115,7 @@ class RecordingTransport(_Transport):
                     ("chat_started", {"chat_id": "chat-1"}),
                     ("node_started", {"node_id": "intentClassification"}),
                     ("chunk", {"content": "partial"}),
-                    ("message", {"status": "completed", "output": "answer"}),
+                    ("message", self.yunxia_message),
                 ]
             else:
                 events = [
@@ -123,7 +126,7 @@ class RecordingTransport(_Transport):
                             "session_id": payload["sessionId"],
                         },
                     ),
-                    ("message", {"status": "completed", "output": "answer"}),
+                    ("message", self.yunxia_message),
                 ]
         if not self.missing_trace:
             events.append(("trace", {
@@ -260,7 +263,11 @@ def test_persisted_run_produces_traces_results_and_cleans_pod(persisted_target, 
         assert messages[0]["custID"] == messages[1]["custID"]
         assert messages[2]["custID"] == messages[3]["custID"]
         assert messages[0]["custID"] != messages[2]["custID"]
-        assert all(message["custID"].startswith("test-customer-") for message in messages)
+        suffixes = {message["custID"][len(message["sessionId"]):] for message in messages}
+        assert len(suffixes) == 1
+        suffix = suffixes.pop()
+        assert UUID(suffix).hex == suffix
+        assert all(message["custID"] == message["sessionId"] + suffix for message in messages)
     assert entry(context.run.id) == "completed"
     assert context.transport.created == context.transport.deleted == 1
     assert context.repository.list_traces(context.run.id) == traces
@@ -317,12 +324,14 @@ def test_real_tool_evidence_drives_evaluator_results(persisted_target):
     assert context.transport.created == context.transport.deleted == 1
 
 
-def test_execution_failure_cleans_pod_and_records_failed_run(persisted_target):
+def test_execution_failure_cleans_pod_and_records_error_results(persisted_target):
     context = persisted_target
     context.transport.fail_chat = True
-    with pytest.raises(TargetExecutionError, match="test chat failed"):
-        execution.execute_persisted_run(context.run.id)
-    assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
+    assert execution.execute_persisted_run(context.run.id) == "completed"
+    results = context.repository.list_results(context.run.id)
+    assert len(results) == 2
+    assert all(result.outcome is Outcome.ERROR and result.score is None for result in results)
+    assert all(result.error_detail.category == "target_execution" for result in results)
     assert context.transport.created == context.transport.deleted == 1
 
 
@@ -550,10 +559,9 @@ def test_yunxia_still_rejects_failure_events(persisted_target):
         pytest.skip("Yunxia-only SSE compatibility")
     context.transport.yunxia_error_event = True
 
-    with pytest.raises(TargetExecutionError, match="customer Yunxia failed"):
-        execution.execute_persisted_run(context.run.id)
-
-    assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
+    assert execution.execute_persisted_run(context.run.id) == "completed"
+    assert all(result.outcome is Outcome.ERROR and result.score is None
+               for result in context.repository.list_results(context.run.id))
     assert context.transport.created == context.transport.deleted == 1
 
 
@@ -570,10 +578,8 @@ def test_chatabc_sse_error_diagnostics_are_opt_in(
     else:
         monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
 
-    with caplog.at_level(logging.ERROR), pytest.raises(
-        TargetExecutionError, match="customer base failed"
-    ):
-        execution.execute_persisted_run(context.run.id)
+    with caplog.at_level(logging.ERROR):
+        assert execution.execute_persisted_run(context.run.id) == "completed"
 
     assert ("inbank_sse_failure" in caplog.text) is debug_enabled
     assert ("BASE-001" in caplog.text) is debug_enabled
@@ -594,10 +600,8 @@ def test_yunxia_sse_error_diagnostics_are_opt_in(
     else:
         monkeypatch.delenv("AGENTGATE_INBANK_DEBUG_SSE_FAILURES", raising=False)
 
-    with caplog.at_level(logging.ERROR), pytest.raises(
-        TargetExecutionError, match="customer Yunxia failed"
-    ):
-        execution.execute_persisted_run(context.run.id)
+    with caplog.at_level(logging.ERROR):
+        assert execution.execute_persisted_run(context.run.id) == "completed"
 
     assert ("inbank_sse_failure" in caplog.text) is debug_enabled
     assert ("response_body=" in caplog.text) is debug_enabled
@@ -638,15 +642,70 @@ def test_yunxia_requires_branch_before_creation(persisted_target):
     assert context.transport.created == 0
 
 
-@pytest.mark.parametrize("override", [{"max_retries": 1}, {"max_parallel_cases": 2}])
+@pytest.mark.parametrize("override", [{"max_retries": 1}])
 def test_invalid_execution_limits_are_rejected_before_creation(persisted_target, override):
     context = persisted_target
     run = pending_run(target=context.run.manifest.target, **override)
     run = EvaluationRun(manifest=run.manifest)
     context.repository.save_run(run)
-    with pytest.raises(ValueError, match="no retries and serial cases"):
+    with pytest.raises(ValueError, match="no retries"):
         execution.execute_persisted_run(run.id)
     assert context.transport.created == 0
+
+
+def test_worker_accepts_manifest_case_concurrency_without_extra_pods(persisted_target):
+    context = persisted_target
+    manifest = pending_run(
+        target=context.run.manifest.target,
+        cases=context.run.manifest.execution_cases, max_parallel_cases=2,
+    ).manifest
+    run = EvaluationRun(manifest=manifest)
+    context.repository.save_run(run)
+    assert execution.execute_persisted_run(run.id) == "completed"
+    assert len(context.repository.list_traces(run.id)) == 2
+    assert len(context.repository.list_results(run.id)) == 2
+    assert context.transport.created == context.transport.deleted == 1
+
+
+def test_yunxia_worker_persists_and_scores_complete_customer_message(persisted_target):
+    context = persisted_target
+    if context.run.manifest.target.adapter_type != "inbank_yunxia":
+        pytest.skip("Yunxia-only final message contract")
+    response = {
+        "message": "customer answer", "output": "separate business output",
+        "business": {"amount": 0, "approved": False, "reason": None, "details": {"days": 10}},
+    }
+    context.transport.yunxia_message = response
+    expected_fields = [
+        ("message", "customer answer"), ("output", "separate business output"),
+        ("business.amount", 0), ("business.approved", False), ("business.reason", None),
+        ("business.details.days", 10),
+    ]
+    cases = tuple(Case(
+        id=f"complete-message-{index}", name=f"Complete message {index}",
+        turns=tuple(CaseTurn(
+            id=f"turn-{turn}", input={"txt": f"question-{turn}"},
+            expectations=tuple({
+                "kind": "output", "path": path, "condition": {"kind": "equals", "expected": expected},
+            } for path, expected in expected_fields),
+        ) for turn in range(2)),
+    ) for index in range(2))
+    manifest = pending_run(
+        target=context.run.manifest.target, cases=cases, max_parallel_cases=2,
+    ).manifest
+    run = EvaluationRun(manifest=manifest)
+    context.repository.save_run(run)
+    assert execution.execute_persisted_run(run.id) == "completed"
+    traces = context.repository.list_traces(run.id)
+    results = context.repository.list_results(run.id)
+    assert len(traces) == len(results) == 2
+    for trace in traces:
+        assert trace.final_output == response
+        assert all(outcome["output"] == response for outcome in trace.turn_outcomes.values())
+        assert all("inbank.response.message_data" not in span.attributes for span in trace.spans)
+    assert all(result.outcome is Outcome.PASS and result.score == 1 for result in results)
+    assert all(len(result.checks) == len(expected_fields) * 2 for result in results)
+    assert context.transport.created == context.transport.deleted == 1
 
 
 def test_judge_initialization_failure_closes_target(persisted_target, monkeypatch):
@@ -795,9 +854,9 @@ def test_init_session_retries_without_recreating_pod_or_replaying_turns(
     )
 
     if failure_count == 10:
-        with pytest.raises(TargetExecutionError) as caught:
-            context.adapter.start(context.request)
-        assert caught.value.code == error_code
+        result = context.adapter.wait(context.adapter.start(context.request), 600)
+        assert result.error.code == error_code
+        assert len(result.inline_trace.turn_outcomes) == 2
         assert context.adapter.get_status(context.request.execution_id) is CaseExecutionStatus.FAILED
         assert context.transport.sessions == context.transport.messages == []
         assert context.trace_server.calls == []
@@ -857,7 +916,7 @@ def test_worker_persists_outcome_after_lifecycle_retries(
         * failure_count,
     )
 
-    if exhausted:
+    if exhausted and endpoint == "/createAgent":
         with pytest.raises(TargetExecutionError, match="customer endpoint temporarily unavailable"):
             execution.execute_persisted_run(context.run.id)
         assert context.repository.get_run(context.run.id).status is RunStatus.FAILED
@@ -870,12 +929,16 @@ def test_worker_persists_outcome_after_lifecycle_retries(
         assert report.run.status is RunStatus.COMPLETED
         assert len(report.results) == 2
         assert len(context.repository.list_traces(context.run.id)) == 2
-        assert len(context.transport.messages) == 4
+        assert len(context.transport.messages) == (2 if exhausted else 4)
+        if exhausted:
+            assert report.results[0].outcome is Outcome.ERROR
+            assert report.results[0].error_detail.category == "target_execution"
 
     attempts = [call for call in calls.call_args_list if endpoint in call.args[1]]
-    expected_calls = max_attempts + (endpoint == "/init_session" and not exhausted)
+    expected_calls = max_attempts + (endpoint == "/init_session")
     assert len(attempts) == expected_calls
     assert [call.args[0] for call in sleep.call_args_list] == (
-        [delay] * (max_attempts - 1) + ([] if exhausted else [2] * 8)
+        [delay] * (max_attempts - 1)
+        + ([2] * 4 if exhausted and endpoint == "/init_session" else [] if exhausted else [2] * 8)
     )
     assert context.transport.deleted == (0 if exhausted and endpoint == "/createAgent" else 1)

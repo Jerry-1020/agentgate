@@ -7,6 +7,7 @@ import pytest
 import test_agent_platform_mock as peer_fixtures
 from fastapi.testclient import TestClient
 
+from agentgate.application.agent_platform_evaluation import submit_platform_comparison
 from agentgate.application.run_scheduling import RunScheduling
 from agentgate.domain import Case, CaseTurn
 from agentgate.integrations.credentials.encryption import ApiKeyEncryptor
@@ -78,6 +79,37 @@ def submission(dataset, mode, repetitions=1):
     }
 
 
+def comparison_submission(dataset, mode):
+    body = submission(dataset, mode)
+    body["target"].pop("agent_version")
+    body["target"].update(baseline_version="1.0", candidate_version="2.0")
+    for key in ("max_parallel_cases", "max_retries", "repetitions"):
+        body.pop(key)
+    return body
+
+
+def comparison_arguments(dependencies, dataset, mode):
+    body = comparison_submission(dataset, mode)
+    return {
+        "repository": dependencies.repository,
+        "evaluators": dependencies.evaluators,
+        "credentials": dependencies.api_keys,
+        "dispatcher": dependencies.dispatcher,
+        **body["target"],
+        "arrange_type": body["target"].get("arrange_type"),
+        "branch_id": body["target"].get("branch_id"),
+        "dataset_id": dataset,
+        "dataset_version": body["dataset_version"],
+        "case_ids": None,
+        "evaluator_ids": tuple(body["evaluator_ids"]),
+        "timeout_seconds": body["timeout_seconds"],
+        "token": "inbank-private-token",
+        "user_team_id": "",
+        "user_id": "anonymous",
+        "user_name": "anonymous",
+    }
+
+
 @pytest.mark.parametrize("mode,repetitions", [("base", 1), ("workflow", 1), ("claw", 3)])
 def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch, tmp_path):
     import base64
@@ -85,6 +117,7 @@ def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch,
     origin, peer = mock_peer
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-inbank-config")
     monkeypatch.setenv(
         "AGENTGATE_API_KEY_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"k" * 32).decode()
     )
@@ -106,6 +139,7 @@ def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch,
         assert deps.repository.get_evaluation_task(task["id"]).name == "平台命名验收"
         for run_id in dispatcher.ids:
             before = deps.repository.get_run(run_id)
+            assert before.manifest.max_parallel_cases == 2
             assert before.api_key is None and before.manifest.target.credential_ref
             assert "test-private-token" not in before.model_dump_json()
             assert _execute(deps.repository, run_id) == "completed"
@@ -152,15 +186,19 @@ def test_persisted_platform_execution(mode, repetitions, mock_peer, monkeypatch,
         ),
     ],
 )
+@pytest.mark.parametrize("requested_parallelism", [1, 2, 30])
+@pytest.mark.parametrize("repetitions", [1, 3])
 def test_inbank_submission_pins_real_adapter(
-    mode, expected_adapter, expected_config, monkeypatch, tmp_path
+    mode, expected_adapter, expected_config, monkeypatch, tmp_path,
+    requested_parallelism, repetitions,
 ):
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-obsolete-config")
     dispatcher = RecordingDispatcher()
     app = create_app(tmp_path / "inbank.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
     deps = app.state.dependencies
-    body = submission(seed(deps), mode)
-    body["max_parallel_cases"] = 1
+    body = submission(seed(deps), mode, repetitions)
+    body["max_parallel_cases"] = requested_parallelism
     with TestClient(app) as client:
         response = client.post(
             "/api/agent-platform/evaluations",
@@ -168,10 +206,253 @@ def test_inbank_submission_pins_real_adapter(
             headers={"X-Agent-Platform-Token": "inbank-private-token"},
         )
     assert response.status_code == 202, response.text
-    run = deps.repository.get_run(response.json()["data"]["run_ids"][0])
+    run_ids = response.json()["data"]["run_ids"]
+    assert dispatcher.ids == run_ids
+    assert len(run_ids) == repetitions
+    assert all(
+        deps.repository.get_run(run_id).manifest.max_parallel_cases == requested_parallelism
+        for run_id in run_ids
+    )
+    run = deps.repository.get_run(run_ids[0])
     assert run.manifest.target.adapter_type == expected_adapter
+    assert run.manifest.max_parallel_cases == requested_parallelism
     assert run.manifest.target.invocation_config.to_dict() == expected_config
     assert run.manifest.target.credential_ref
+    descriptor = deps.repository.get_target_descriptor(run.manifest.target.descriptor_sha256)
+    from jsonschema import ValidationError, validate
+
+    schema = descriptor.input_schema.to_dict()
+    validate({"txt": "only text"}, schema)
+    if mode == "claw":
+        validate({"txt": "hello", "appHistory": [], "custID": "hk_yat",
+                  "sessionId": "session", "config_variables": []}, schema)
+        with pytest.raises(ValidationError):
+            validate({"user_input_text": "missing txt"}, schema)
+    else:
+        assert schema == {"type": "object", "minProperties": 1}
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+@pytest.mark.parametrize("requested_parallelism", [None, 2])
+def test_inbank_ab_pins_call_parallelism_for_both_versions(
+    mode, requested_parallelism, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-obsolete-config")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / "inbank-ab.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    try:
+        arguments = comparison_arguments(deps, seed(deps), mode)
+        if requested_parallelism is not None:
+            arguments["max_parallel_cases"] = requested_parallelism
+        created = submit_platform_comparison(**arguments)
+        assert dispatcher.ids == [run.id for run in created]
+        runs = [deps.repository.get_run(run.id) for run in created]
+        expected_parallelism = requested_parallelism if requested_parallelism is not None else 1
+        assert [run.manifest.max_parallel_cases for run in runs] == [expected_parallelism] * 2
+        assert [run.manifest.target.ref.external_version_id for run in runs] == ["1.0", "2.0"]
+        assert runs[0].manifest.dataset == runs[1].manifest.dataset
+        assert runs[0].manifest.evaluator_specs == runs[1].manifest.evaluator_specs
+    finally:
+        deps.close()
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+@pytest.mark.parametrize("requested_parallelism", [None, 2, 30])
+def test_inbank_ab_http_pins_parallelism_on_both_manifests(
+    mode, requested_parallelism, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-obsolete-config")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / "inbank-ab-http.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    body = comparison_submission(seed(deps), mode)
+    if requested_parallelism is not None:
+        body["max_parallel_cases"] = requested_parallelism
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-platform/comparisons", json=body,
+            headers={"X-Agent-Platform-Token": "inbank-private-token"},
+        )
+        assert response.status_code == 202, response.text
+        data = response.json()["data"]
+        run_ids = [data[side]["run_id"] for side in ("baseline", "candidate")]
+        assert dispatcher.ids == run_ids
+        runs = [deps.repository.get_run(run_id) for run_id in run_ids]
+        expected_parallelism = requested_parallelism if requested_parallelism is not None else 1
+        assert [run.manifest.max_parallel_cases for run in runs] == [expected_parallelism] * 2
+        assert [run.manifest.target.ref.external_version_id for run in runs] == ["1.0", "2.0"]
+
+
+@pytest.mark.parametrize("comparison", [False, True])
+def test_inbank_parallelism_changes_only_new_task_manifests(comparison, monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    app = create_app(tmp_path / "pinned-config.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    dataset = seed(deps)
+    with TestClient(app) as client:
+        old_runs = []
+        for requested in (2, 30):
+            monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", str(31 - requested))
+            if comparison:
+                created = submit_platform_comparison(
+                    **comparison_arguments(deps, dataset, "base"), max_parallel_cases=requested,
+                )
+                run_ids = [run.id for run in created]
+            else:
+                body = {**submission(dataset, "base", 3), "max_parallel_cases": requested}
+                response = client.post(
+                    "/api/agent-platform/evaluations", json=body,
+                    headers={"X-Agent-Platform-Token": "token"},
+                )
+                assert response.status_code == 202, response.text
+                run_ids = response.json()["data"]["run_ids"]
+            for run_id in run_ids:
+                run = deps.repository.get_run(run_id)
+                assert run.manifest.max_parallel_cases == requested
+                if requested == 2:
+                    old_runs.append(run)
+        for old_run in old_runs:
+            stored = deps.repository.get_run(old_run.id)
+            assert stored.manifest == old_run.manifest
+            assert stored.manifest.max_parallel_cases == 2
+            assert stored.manifest.manifest_sha256 == old_run.manifest.manifest_sha256
+
+
+@pytest.mark.parametrize("requested_parallelism", [None, 2])
+def test_mock_ab_keeps_serial_manifests_regardless_of_call_parallelism(
+    requested_parallelism, mock_peer, monkeypatch, tmp_path
+):
+    origin, _ = mock_peer
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-obsolete-config")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / "mock-ab.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    try:
+        arguments = comparison_arguments(deps, seed(deps), "base")
+        if requested_parallelism is not None:
+            arguments["max_parallel_cases"] = requested_parallelism
+        runs = submit_platform_comparison(**arguments)
+        assert dispatcher.ids == [run.id for run in runs]
+        assert all(deps.repository.get_run(run.id).manifest.max_parallel_cases == 1 for run in runs)
+    finally:
+        deps.close()
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+def test_inbank_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path, mode):
+    from jsonschema import validate
+    from test_inbank_trace_server_adapters import _adapter, _TraceServer, _Transport
+
+    from agentgate.integrations.targets.inbank.chatabc import resolve_chatabc_trace
+    from agentgate.integrations.targets.inbank.yunxia import resolve_yunxia_trace
+
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / f"{mode}-inputs.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    variables = [{"name": "centreId", "value": "810000"},
+                 {"name": "userId", "value": "test-user"}]
+    initial = ({"config_variables": variables} if mode == "workflow" else
+               {"prompt_variables": variables, "tool_variables": []} if mode == "base" else {})
+    values = [{"user_input_text": "第一轮", "menuId": "TRANSLATE", "form": {"items": [0, False, None]}},
+              {"user_input_text": "第二轮", "lang_tar": "fr_FR"}]
+    if mode == "claw":
+        values = [{"txt": "第一轮", "appHistory": [{"role": "user", "content": "历史"}],
+                   "custID": "hk_yat", "config_variables": variables},
+                  {"txt": "第二轮"}]
+    with TestClient(app) as client:
+        response = client.post("/api/datasets", json={"name": "ChatABC input acceptance"})
+        assert response.status_code == 201, response.text
+        dataset_id = response.json()["data"]["dataset"]["id"]
+        case_ids = []
+        for index, (inputs, expected) in enumerate([(values, "customer answer"), (values[:1], "wrong")]):
+            case = Case(name=f"Case {index}", initial_state=initial, turns=[
+                CaseTurn(input=value, expectations=[{"kind": "output", "path": "message" if mode == "claw" else "output",
+                    "condition": {"kind": "equals", "expected": expected}}]) for value in inputs
+            ])
+            case_ids.append(case.id)
+            saved = client.post(f"/api/datasets/{dataset_id}/drafts/cases", json=case.model_dump(mode="json"))
+            assert saved.status_code == 201, saved.text
+        published = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
+        assert published.status_code == 200, published.text
+        body = {**submission(dataset_id, mode), "max_parallel_cases": 1}
+        if mode == "claw":
+            body["target"]["branch_id"] = "customer-branch"
+        submitted = client.post("/api/agent-platform/evaluations", json=body,
+                                headers={"X-Agent-Platform-Token": "workflow-test-token"})
+        assert submitted.status_code == 202, submitted.text
+        task = submitted.json()["data"]
+        source_id = task["run_ids"][0]
+        snapshot = deps.repository.get_run(source_id).manifest
+        descriptor = deps.repository.get_target_descriptor(snapshot.target.descriptor_sha256)
+        validate(values[0], descriptor.input_schema.to_dict())
+        assert snapshot.dataset.cases[0].initial_state.to_dict() == initial
+        assert [turn.input.to_dict() for turn in snapshot.dataset.cases[0].turns] == values
+
+        def execute(run_id):
+            adapter_mode = "yunxia" if mode == "claw" else mode
+            adapter = _adapter(adapter_mode, _Transport(adapter_mode), _TraceServer())
+            try:
+                completed = deps.runs.execute_run(run_id, adapter,
+                    resolve_yunxia_trace if mode == "claw" else resolve_chatabc_trace)
+            finally:
+                adapter.close()
+            assert completed.status.value == "completed"
+            response = client.get(f"/api/runs/{run_id}")
+            assert response.status_code == 200, response.text
+            report = response.json()["data"]
+            assert sorted(
+                (result["case_id"], result["outcome"]) for result in report["results"]
+            ) == sorted(zip(case_ids, ["pass", "fail"]))
+            overall = next(metric for metric in report["metrics"] if metric["level"] == "overall")
+            assert overall["score"] == 0.5
+            assert overall["passed"] == overall["failed"] == 1
+            for case_id, expected_inputs in zip(case_ids, [values, values[:1]]):
+                trace = deps.repository.get_trace(run_id, case_id)
+                assert trace is not None
+                assert [trace.turn_outcomes[turn.id]["input"].to_dict()
+                        for turn in snapshot.dataset.cases[case_ids.index(case_id)].turns] == expected_inputs
+                if mode == "claw":
+                    assert trace.final_output.to_dict() == {
+                        "status": "completed", "message": "customer answer",
+                        "intent_code": "lookup-intent", "slots": {"city": "上海"},
+                        "workflow_calls": [{"id": "workflow-one"}],
+                    }
+            return report
+
+        first_report = execute(source_id)
+        rerun = client.post(f"/api/evaluation-tasks/{task['id']}/rerun", json={"source_run_id": source_id})
+        assert rerun.status_code == 202, rerun.text
+        rerun_id = rerun.json()["data"]["run_ids"][0]
+        assert deps.repository.get_run(rerun_id).manifest == snapshot
+        execute(rerun_id)
+        assert client.get(f"/api/runs/{source_id}").json()["data"] == first_report
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+def test_mock_platform_still_rejects_business_json(mock_peer, monkeypatch, tmp_path, mode):
+    origin, _ = mock_peer
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    app = create_app(tmp_path / "unsupported-input.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    dataset = deps.datasets.create_dataset("Unsupported business input")
+    deps.datasets.create_draft(dataset.id)
+    deps.datasets.save_case(dataset.id, Case(
+        name="Business JSON", turns=[CaseTurn(input={"user_input_text": "查询年休假政策"})]
+    ))
+    deps.datasets.publish_draft(dataset.id)
+    with TestClient(app) as client:
+        response = client.post("/api/agent-platform/evaluations", json=submission(dataset.id, mode),
+                               headers={"X-Agent-Platform-Token": "test-token"})
+        assert response.status_code == 422, response.text
+        assert not deps.repository.list_evaluation_tasks()
+        assert not deps.api_keys.list_api_keys()
 
 
 def test_invalid_selection_and_dispatch_failure_preserve_truth(mock_peer, monkeypatch, tmp_path):
@@ -335,19 +616,21 @@ def test_initial_state_rejected_without_leaving_credentials_or_tasks(
         assert not deps.api_keys.list_api_keys()
 
 
-def test_platform_comparison_persists_user_task_name(mock_peer, monkeypatch, tmp_path):
+@pytest.mark.parametrize("requested_parallelism", [None, 2])
+def test_platform_comparison_persists_user_task_name(
+    mock_peer, monkeypatch, tmp_path, requested_parallelism
+):
     origin, _ = mock_peer
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    monkeypatch.setenv("AGENTGATE_INBANK_MAX_PARALLEL_CASES", "invalid-inbank-config")
     app = create_app(tmp_path / "named-ab.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
     deps = app.state.dependencies
     dataset = seed(deps)
-    body = submission(dataset, "base")
-    body["target"].pop("agent_version")
-    body["target"].update(baseline_version="1.0", candidate_version="2.0")
-    for key in ("max_parallel_cases", "max_retries", "repetitions"):
-        body.pop(key)
+    body = comparison_submission(dataset, "base")
     body["name"] = "自定义 A/B 任务"
+    if requested_parallelism is not None:
+        body["max_parallel_cases"] = requested_parallelism
     with TestClient(app) as client:
         response = client.post("/api/agent-platform/comparisons", json=body,
                                headers={"X-Agent-Platform-Token": "test-private-token"})
@@ -355,3 +638,6 @@ def test_platform_comparison_persists_user_task_name(mock_peer, monkeypatch, tmp
         task_id = response.json()["data"]["baseline"]["run_id"]
         assert deps.repository.get_evaluation_task(task_id).name == body["name"]
         assert client.get("/api/evaluation-tasks/" + task_id).json()["data"]["name"] == body["name"]
+        for side in ("baseline", "candidate"):
+            run_id = response.json()["data"][side]["run_id"]
+            assert deps.repository.get_run(run_id).manifest.max_parallel_cases == 1

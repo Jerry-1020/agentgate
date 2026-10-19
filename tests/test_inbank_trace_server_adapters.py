@@ -6,13 +6,16 @@ import threading
 from copy import deepcopy
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from time import time
 from typing import Any
+from unittest.mock import Mock
 from urllib.parse import urlparse
+from uuid import UUID
 
 import pytest
 from test_trace_server_client import DETAIL, Response, sparse_inbank_detail
 
-from agentgate.domain import Case, CaseTurn, TargetRef, TargetSnapshot, TargetType
+from agentgate.domain import Case, CaseTurn, TargetRef, TargetSnapshot, TargetType, Trace
 from agentgate.integrations.observability.trace_server import InbankTraceSettings, TraceServerClient
 from agentgate.integrations.targets.inbank.chatabc import (
     ChatABCSettings,
@@ -259,7 +262,7 @@ def _adapter(
     }
     if arrange_type == "yunxia":
         return InbankYunxiaTargetAdapter(
-            YunxiaSettings(**settings, agent_namespace="chatabc", test_customer_prefix="test"),
+            YunxiaSettings(**settings, agent_namespace="chatabc"),
             http=transport,
             trace_client=trace_server,
             **options,
@@ -267,6 +270,375 @@ def _adapter(
     return InbankChatABCTargetAdapter(
         ChatABCSettings(**settings), http=transport, trace_client=trace_server, **options
     )
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+def test_chatabc_preserves_complete_business_inputs_and_case_sessions(monkeypatch, arrange_type):
+    transport = _Transport(arrange_type)
+    initializations, chats, payloads = [], [], []
+    request_json, request_bytes = transport.request_json, transport.request_bytes
+
+    def capture_json(method, url, **kwargs):
+        if url.endswith("/init_session"):
+            assert method == "POST" and url.endswith("/chatabc/init_session")
+            payloads.append(deepcopy(kwargs["payload"]))
+            initializations.append(deepcopy(kwargs["payload"]["data"]))
+            return {"resCode": "FAIAG0000", "data": {
+                "session_id": f"session-{len(initializations)}"
+            }}
+        return request_json(method, url, **kwargs)
+
+    def capture_chat(method, url, **kwargs):
+        assert method == "POST" and url.endswith("/chatabc/chat")
+        payloads.append(deepcopy(kwargs["payload"]))
+        chats.append(deepcopy(kwargs["payload"]["data"]))
+        return request_bytes(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_json", capture_json)
+    monkeypatch.setattr(transport, "request_bytes", capture_chat)
+    variables = [{"name": "centreId", "value": "810000"},
+                 {"name": "userId", "value": "hk_yat"},
+                 {"name": "bankNo", "value": "810000"}]
+    inputs = [
+        {"user_input_text": "帮我查一下收文"},
+        {"user_input_text": "请翻译 acquisition", "menuId": "TRANSLATE",
+         "lang_src": "auto_detect", "lang_tar": "fr_FR",
+         "form": {"items": [0, False, None, {"amount": 12.5}]},
+         "session_id": "business-value-not-transport-session"},
+        {"user_input_text": "换一个例子", "intent": "follow-up", "collected_data": {}},
+        {"user_input": "查询年休假政策"},
+        {"txt": "business text", "menuId": "KNOWLEDGE_QUERY"},
+    ]
+    initial = (
+        {"config_variables": variables}
+        if arrange_type == "workflow"
+        else {"prompt_variables": variables, "tool_variables": [
+            {"name": "catalog", "value": "test", "type": "str"}
+        ]}
+    )
+    request = _request(arrange_type)
+    case = Case(name="Structured ChatABC input", initial_state=initial,
+                turns=[CaseTurn(id=f"turn-{i}", input=value, extensions=[
+                    {"key": "custom_variables", "value": "annotation-not-sent"}
+                ]) for i, value in enumerate(inputs)])
+    adapter = _adapter(arrange_type, transport, _TraceServer())
+    before_ms = int(time() * 1000)
+    try:
+        first = adapter.wait(adapter.start(replace(request, case=case)), 30)
+        second = adapter.wait(adapter.start(replace(
+            request, execution_id="execution-2", case=case.model_copy(update={"id": "case-2"})
+        )), 30)
+    finally:
+        adapter.close()
+    after_ms = int(time() * 1000)
+    assert initializations == [initial] * 2
+    assert [chat["session_id"] for chat in chats] == (
+        ["session-1"] * len(inputs) + ["session-2"] * len(inputs)
+    )
+    assert [json.loads(chat["txt"]) for chat in chats] == inputs * 2
+    assert all(chat["files"] == [] and chat["stream"] is True for chat in chats)
+    assert all(set(chat) == {"session_id", "txt", "files", "stream"} for chat in chats)
+    assert len(payloads) == 2 * (len(inputs) + 1)
+    assert len({payload["requestId"] for payload in payloads}) == len(payloads)
+    for payload in payloads:
+        assert set(payload) == {"appId", "trCode", "trVersion", "timestamp", "requestId", "data"}
+        assert payload["appId"] == "BDC201704_01"
+        assert payload["trCode"] == "AISPNLPCHATBOT"
+        assert payload["trVersion"] == "1"
+        assert isinstance(payload["timestamp"], int)
+        assert before_ms <= payload["timestamp"] <= after_ms
+        assert str(UUID(payload["requestId"])) == payload["requestId"]
+    for result in (first, second):
+        trace = result.inline_trace
+        assert [trace.turn_outcomes[turn.id]["input"].to_dict()
+                for turn in case.turns] == inputs
+        assert trace.final_output["output"] == "customer answer"
+        assert {span.attributes["agentgate.turn.id"] for span in trace.spans
+                if span.operation_type == "turn"} == {turn.id for turn in case.turns}
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+def test_chatabc_mixes_text_json_strings_and_business_objects_without_double_encoding(monkeypatch, arrange_type):
+    transport = _Transport(arrange_type)
+    actual, original = [], transport.request_bytes
+
+    def capture(method, url, **kwargs):
+        actual.append(kwargs["payload"]["data"]["txt"])
+        return original(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_bytes", capture)
+    encoded = '{"user_input_text":"帮我查一下收文"}'
+    values = [{"txt": "普通文本"}, {"txt": encoded}, {"txt": "兼容空附件", "files": []},
+              {"form": {"enabled": True}}]
+    case = Case(name="Mixed inputs", turns=[CaseTurn(input=value) for value in values])
+    adapter = _adapter(arrange_type, transport, _TraceServer())
+    try:
+        adapter.wait(adapter.start(replace(_request(arrange_type), case=case)), 30)
+    finally:
+        adapter.close()
+    assert actual[:3] == ["普通文本", encoded, "兼容空附件"]
+    assert json.loads(actual[3]) == values[3]
+
+
+@pytest.mark.parametrize("variables", [
+    ["invalid"], [{"name": " ", "value": "x"}], [{"name": "missing"}],
+    [{"name": "same", "value": 0}, {"name": "same", "value": False}],
+])
+def test_workflow_rejects_malformed_initial_variables_before_remote_calls(variables):
+    adapter = _adapter("workflow", _Transport("workflow"), _TraceServer())
+    request = _request("workflow")
+    case = request.case.model_copy(update={
+        "initial_state": request.case.initial_state.__class__({"config_variables": variables})
+    })
+    try:
+        with pytest.raises(TargetExecutionError, match="config_variables"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("arrange_type", ["yunxia"])
+def test_business_json_does_not_enable_other_agent_protocols(arrange_type):
+    request = _request(arrange_type)
+    case = Case(name="Unsupported JSON", turns=[CaseTurn(input={"menuId": "QUERY"})])
+    adapter = _adapter(arrange_type, _Transport(arrange_type), _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError, match="input"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("custom_session", [None, "customer-session"])
+def test_yunxia_native_inputs_keep_txt_optional_defaults_and_per_turn_fields(monkeypatch, custom_session):
+    transport = _Transport("yunxia")
+    messages, calls = [], []
+    original_json, original_bytes = transport.request_json, transport.request_bytes
+
+    def capture_json(method, url, **kwargs):
+        calls.append(url)
+        return original_json(method, url, **kwargs)
+
+    def capture_message(method, url, **kwargs):
+        messages.append(deepcopy(kwargs["payload"]))
+        return original_bytes(method, url, **kwargs)
+
+    monkeypatch.setattr(transport, "request_json", capture_json)
+    monkeypatch.setattr(transport, "request_bytes", capture_message)
+    encoded = '{"user_input_text":"查询年休假政策"}'
+    inputs = [
+        {"txt": "只填文本"},
+        {"txt": encoded},
+        {"txt": "历史", "appHistory": [{"role": "user", "content": "之前的问题"}]},
+        {"txt": "客户", "custID": "hk_yat"},
+        {"txt": "变量", "config_variables": [{"name": "centreId", "value": "810000"}]},
+        {"txt": "完整", "appHistory": {"role": "user", "content": "history"},
+         "custID": "another-customer", "config_variables": [{"open": [0, False, None]}]},
+        {"txt": "选填留空", "sessionId": None, "custID": None,
+         "appHistory": None, "config_variables": None},
+    ]
+    if custom_session:
+        inputs[0]["sessionId"] = custom_session
+    case = Case(id="native-case", name="Native Yunxia input", turns=[
+        CaseTurn(id=f"turn-{index}", input=value) for index, value in enumerate(inputs)
+    ])
+    adapter = _adapter("yunxia", transport, _TraceServer())
+    try:
+        first = adapter.wait(adapter.start(replace(_request("yunxia"), case=case)), 30)
+        second = adapter.wait(adapter.start(replace(_request("yunxia"),
+            execution_id="execution-2", case=Case(id="other-case", name="Only txt",
+                turns=[CaseTurn(input={"txt": "另一条用例"})])
+        )), 30)
+    finally:
+        adapter.close()
+    assert not any(url.endswith("/init_session") for url in calls)
+    assert [message["txt"] for message in messages] == [value["txt"] for value in inputs] + ["另一条用例"]
+    session_id = custom_session or case.id
+    assert [message["sessionId"] for message in messages] == [session_id] * len(inputs) + ["other-case"]
+    prefix = session_id
+    assert messages[0]["custID"].startswith(prefix)
+    suffix = messages[0]["custID"][len(prefix):]
+    assert UUID(suffix).hex == suffix
+    assert messages[3]["custID"] == f"hk_yat{suffix}"
+    assert messages[5]["custID"] == f"another-customer{suffix}"
+    assert messages[-1]["custID"] == f"other-case{suffix}"
+    assert messages[2]["appHistory"] == inputs[2]["appHistory"]
+    assert messages[5]["appHistory"] == [inputs[5]["appHistory"]]
+    assert messages[4]["config_variables"] == inputs[4]["config_variables"]
+    assert messages[5]["config_variables"] == inputs[5]["config_variables"]
+    for index in (0, 1, 6, len(inputs)):
+        assert messages[index]["appHistory"] == messages[index]["config_variables"] == []
+    for message in messages:
+        assert set(message) == {"sessionId", "custID", "txt", "appHistory", "config_variables",
+                                "executionMode", "stream", "debugTrace"}
+        assert message["executionMode"] == "execute"
+        assert message["stream"] is message["debugTrace"] is True
+    assert [first.inline_trace.turn_outcomes[turn.id]["input"].to_dict()
+            for turn in case.turns] == inputs
+    assert second.inline_trace.final_output["message"] == "customer answer"
+
+
+@pytest.mark.parametrize("customer_id", [None, "hk_yat"])
+def test_yunxia_customer_id_directly_appends_one_uuid_per_run(monkeypatch, customer_id):
+    turn_input = {"txt": "查询", "sessionId": "same-session"}
+    if customer_id is not None:
+        turn_input["custID"] = customer_id
+    case = Case(id="same-case", name="Same customer", turns=[
+        CaseTurn(id=f"turn-{index}", input=turn_input) for index in range(2)
+    ])
+    suffixes = []
+    for index in range(2):
+        transport = _Transport("yunxia")
+        capture = Mock(wraps=transport.request_bytes)
+        monkeypatch.setattr(transport, "request_bytes", capture)
+        adapter = _adapter("yunxia", transport, _TraceServer())
+        try:
+            request = replace(_request("yunxia"), run_id=f"run-1234567{index}", case=case)
+            result = adapter.wait(adapter.start(request), 30)
+        finally:
+            adapter.close()
+        assert result.error is None
+        messages = [call.kwargs["payload"] for call in capture.call_args_list]
+        assert len(messages) == 2
+        prefix = customer_id or "same-session"
+        suffix = messages[0]["custID"][len(prefix):]
+        assert UUID(suffix).hex == suffix
+        assert all(message["custID"] == prefix + suffix for message in messages)
+        assert all(message["sessionId"] == "same-session" for message in messages)
+        suffixes.append(suffix)
+    assert suffixes[0] != suffixes[1]
+
+
+@pytest.mark.parametrize("trace_available", [True, False])
+@pytest.mark.parametrize("message_kind", [
+    "object", "minimal_object", "empty_object", "plain_text", "json_text",
+    "array", "number", "boolean", "null",
+])
+def test_yunxia_final_output_preserves_each_last_message_without_span_copy(
+    monkeypatch, trace_available, message_kind,
+):
+    transport = _Transport("yunxia")
+    server = _TraceServer()
+    request_bytes = transport.request_bytes
+    messages = []
+    expected_outputs = []
+    for index in range(2):
+        output = f"customer answer {index}"
+        if message_kind == "object":
+            message = {
+                "status": "completed", "message": output,
+                "intent_code": "lookup-intent", "slots": {"city": "上海"},
+                "workflow_calls": [{"id": "workflow-one"}],
+                "business_result": {"turn": index, "details": [0, False, None, {"任意字段": "保留"}]},
+                "output": {"customer_owned": index},
+            }
+        elif message_kind == "minimal_object":
+            message = {"business_result": {"turn": index, "enabled": False}}
+        elif message_kind == "empty_object":
+            message = {}
+        elif message_kind in {"plain_text", "json_text"}:
+            message = output
+        else:
+            message = {
+                "array": [index, False, None, {"业务字段": "保留"}],
+                "number": index,
+                "boolean": False,
+                "null": None,
+            }[message_kind]
+        raw = output if message_kind == "plain_text" else json.dumps(
+            message, ensure_ascii=False, separators=(",", ":"),
+        )
+        messages.append(raw)
+        expected_outputs.append(message if isinstance(message, dict) else {"output": message})
+
+    def message_response(method, url, **kwargs):
+        wire = request_bytes(method, url, **kwargs)
+        _, _, rest = wire.partition(b"\n\n")
+        interim = 'event: message\ndata: {"message":"interim answer"}\n\n'
+        final = f"event: message\ndata: {messages[transport.chat_count - 1]}\n\n"
+        return (interim + final).encode() + rest
+
+    monkeypatch.setattr(transport, "request_bytes", message_response)
+    if not trace_available:
+        def reject(*_args, **_kwargs):
+            raise TargetExecutionError("rejected", "trace not integrated")
+        monkeypatch.setattr(server, "fetch_events", reject)
+    adapter = _adapter("yunxia", transport, server)
+    try:
+        result = adapter.wait(adapter.start(_request("yunxia")), 30)
+        trace = result.inline_trace
+    finally:
+        adapter.close()
+    assert result.error is None
+    restored = Trace.model_validate_json(trace.model_dump_json())
+    assert restored == trace
+    assert trace.final_output.to_dict() == expected_outputs[-1]
+    assert len(trace.spans) == (4 if trace_available else 2)
+    assert [span.sequence for span in trace.spans] == list(range(len(trace.spans)))
+    for index, turn_id in enumerate(("turn-1", "turn-2")):
+        scoped = restored.for_turn(turn_id)
+        roots = [span for span in scoped.spans if span.operation_type == "turn"]
+        assert len(roots) == 1
+        root = roots[0]
+        assert root.attributes["inbank.evidence_mode"] == (
+            "trace_server" if trace_available else "output_only"
+        )
+        assert scoped.final_output.to_dict() == expected_outputs[index]
+        assert restored.turn_outcomes[turn_id]["output"].to_dict() == expected_outputs[index]
+        assert all("inbank.response.message_data" not in span.attributes
+                   for span in scoped.spans)
+
+
+@pytest.mark.parametrize("inputs", [
+    [{"txt": " "}], [{"appHistory": []}], [{"txt": 1}],
+    [{"txt": "hello", "custID": 123}], [{"txt": "hello", "sessionId": []}],
+    [{"txt": "hello", "config_variables": {}}],
+    [{"txt": "hello", "files": ["unsupported"]}],
+    [{"txt": "hello", "app_history": []}],
+    [{"txt": "one", "sessionId": "one"}, {"txt": "two", "sessionId": "two"}],
+])
+def test_yunxia_rejects_invalid_native_inputs_before_remote_calls(monkeypatch, inputs):
+    transport = _Transport("yunxia")
+    remote = Mock(wraps=transport.request_json)
+    monkeypatch.setattr(transport, "request_json", remote)
+    adapter = _adapter("yunxia", transport, _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError):
+            adapter.start(replace(_request("yunxia"), case=Case(name="Invalid input", turns=[
+                CaseTurn(input=value) for value in inputs
+            ])))
+        remote.assert_not_called()
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("initial", [{"customer_id": "test-user"}, {"config_variables": []}])
+def test_yunxia_does_not_read_request_fields_from_case_initialization(initial):
+    request = _request("yunxia")
+    case = Case(name="Fields belong in input", initial_state=initial,
+                turns=[CaseTurn(input={"txt": "hello"})])
+    adapter = _adapter("yunxia", _Transport("yunxia"), _TraceServer())
+    try:
+        with pytest.raises(TargetExecutionError, match="input"):
+            adapter.start(replace(request, case=case))
+    finally:
+        adapter.close()
+
+
+@pytest.mark.parametrize("arrange_type", ["base", "workflow"])
+@pytest.mark.parametrize("value", [
+    {}, {"txt": " "}, {"txt": 7}, {"txt": "hello", "files": ["file"]},
+    {"txt": "hello", "files": {}}, {"files": []},
+])
+def test_chatabc_rejects_empty_text_and_attachment_envelopes(value, arrange_type):
+    adapter = _adapter(arrange_type, _Transport(arrange_type), _TraceServer())
+    try:
+        with pytest.raises(ValueError if not value else TargetExecutionError):
+            adapter.start(replace(_request(arrange_type), case=Case(
+                name="Invalid envelope", turns=[CaseTurn(input=value)]
+            )))
+    finally:
+        adapter.close()
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
@@ -291,7 +663,7 @@ def test_builds_multiturn_trace_from_trace_server(arrange_type: str) -> None:
     for sequence, turn in enumerate(request.case.turns, 1):
         outcome = result.inline_trace.turn_outcomes[turn.id]
         assert outcome["input"] == turn.input
-        assert outcome["output"]["output"] == "customer answer"
+        assert outcome["output"]["message" if arrange_type == "yunxia" else "output"] == "customer answer"
         assert outcome["state"] == {"execution_status": "success"}
         if arrange_type == "yunxia":
             assert outcome["output"]["intent_code"] == "lookup-intent"
@@ -361,7 +733,7 @@ def test_execution_state_reaches_rules_without_leaking_across_turns(arrange_type
             assert check.outcome.value == ("pass" if index == 1 else "fail")
             assert check.actual == "success"
             assert not check.actual_missing
-        assert scoped.final_output["output"] == "customer answer"
+        assert scoped.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
         if arrange_type == "yunxia":
             assert scoped.final_output["intent_code"] == "lookup-intent"
     assert trace.final_state == trace.turn_outcomes[turns[-1].id]["state"]
@@ -399,7 +771,7 @@ def test_sse_trace_references_are_not_used_for_query_binding(arrange_type, refer
         adapter.close()
 
     trace = result.inline_trace
-    assert trace.final_output["output"] == "customer answer"
+    assert trace.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
     assert len(trace.turn_outcomes) == transport.chat_count == 2
     assert len(trace.spans) == 4
     assert all(span.attributes["inbank.evidence_mode"] == "trace_server"
@@ -430,8 +802,16 @@ def test_trace_or_output_fallback_does_not_hide_later_chat_failure(arrange_type,
         monkeypatch.setattr(trace_server, "fetch_events", reject)
     adapter = _adapter(arrange_type, transport, trace_server)
     try:
-        with pytest.raises(TargetExecutionError, match="second Turn"):
-            adapter.start(_request(arrange_type))
+        result = adapter.wait(adapter.start(_request(arrange_type)), 30)
+        assert result.error.code == "rejected"
+        assert "second Turn" in result.error.message
+        assert result.inline_trace.for_turn("turn-1").final_output[
+            "message" if arrange_type == "yunxia" else "output"
+        ] == "customer answer"
+        failed = result.inline_trace.for_turn("turn-2")
+        assert failed.final_output == {}
+        assert failed.spans[0].status == "error"
+        assert failed.spans[0].attributes["agentgate.execution.error"]["code"] == "rejected"
         assert adapter.get_status("execution-1") is CaseExecutionStatus.FAILED
     finally:
         adapter.close()
@@ -470,7 +850,7 @@ def test_trace_failure_keeps_output_without_synthetic_evidence(arrange_type, fai
         assert adapter.get_status("execution-1") is CaseExecutionStatus.COMPLETED
         trace = result.inline_trace
         assert len(trace.spans) == 2
-        assert trace.final_output["output"] == "customer answer"
+        assert trace.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
         assert trace.final_state == {}
         assert all(outcome["state"] == {} for outcome in trace.turn_outcomes.values())
         for span, request_id in zip(trace.spans, transport.request_ids, strict=True):
@@ -540,7 +920,9 @@ def test_trace_readiness_retries_without_replaying_chat(arrange_type, pending, m
     )
     try:
         result = adapter.wait(adapter.start(_request(arrange_type)), 30)
-        assert result.inline_trace.final_output["output"] == "customer answer"
+        assert result.inline_trace.final_output[
+            "message" if arrange_type == "yunxia" else "output"
+        ] == "customer answer"
         assert [call[1] for call in trace_server.calls] == [
             *([transport.request_ids[0]] * 5), *([transport.request_ids[1]] * 3),
         ]
@@ -743,7 +1125,9 @@ def test_export_boundary_keeps_seven_real_spans_and_observations_per_turn(arrang
                 assert span.attributes["trace_sdk.metadata"]["inbank.parent_span_not_returned"] is True
         assert by_source["read-skill"].operation_type == "tool"
         assert sum(len(span.events) for span in spans) == 2
-        assert result.inline_trace.turn_outcomes[turn.id]["output"]["output"] == "customer answer"
+        assert result.inline_trace.turn_outcomes[turn.id]["output"][
+            "message" if arrange_type == "yunxia" else "output"
+        ] == "customer answer"
 
 
 @pytest.mark.parametrize("arrange_type", ["base", "workflow", "yunxia"])
@@ -802,7 +1186,9 @@ def test_each_turn_preserves_its_own_evidence_mode(arrange_type, missing_turn, m
                 "output_only" if index == missing_turn else "trace_server"
             )
             assert sum(s.operation_type != "turn" for s in evidence.spans) == (index != missing_turn)
-            assert evidence.final_output["output"] == "customer answer"
+            assert evidence.final_output[
+                "message" if arrange_type == "yunxia" else "output"
+            ] == "customer answer"
         assert [s.sequence for s in trace.spans] == list(range(len(trace.spans)))
     finally:
         adapter.close()
@@ -892,7 +1278,7 @@ def test_adapters_fetch_trace_server_over_http(arrange_type, initial_404, monkey
             result = adapter.wait(adapter.start(_request(arrange_type)), 30)
             trace = result.inline_trace
             assert trace is not None
-            assert trace.final_output["output"] == "customer answer"
+            assert trace.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
             assert len(trace.turn_outcomes) == 2
             assert any(
                 event["event_type"] == "observation"
@@ -962,7 +1348,7 @@ def test_adapted_multicase_multiturn_evidence_reaches_rules_judge_and_saved_repo
                     {"kind": "tool_argument", "tool": "read_file", "path": "arguments.file_path",
                      "condition": {"kind": "equals",
                                    "expected": f"/mnt/oneagent-skills/bundle/skills/{name}/SKILL.md"}},
-                    {"kind": "output", "path": "output",
+                    {"kind": "output", "path": "message" if arrange_type == "yunxia" else "output",
                      "condition": {"kind": "equals", "expected": "customer answer"}},
                 ) + state_expectations,
             ))
@@ -1121,7 +1507,7 @@ def test_stable_snapshot_without_tool_span_is_accepted_without_synthetic_tools(
     assert transport.chat_count == 2 and transport.deleted
     assert queries == [item for request_id in transport.request_ids for item in [request_id] * 3]
     assert clock.now == 8
-    assert trace.final_output["output"] == "customer answer"
+    assert trace.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
     for turn in ("turn-1", "turn-2"):
         scoped = trace.for_turn(turn)
         root = scoped.spans[0]
@@ -1167,7 +1553,7 @@ def test_unstable_snapshot_times_out_without_synthetic_tools(arrange_type, probl
     assert transport.chat_count == 2 and transport.deleted
     assert len(queries) == 10 and clock.now == 20
     assert len(trace.spans) == 2
-    assert trace.final_output["output"] == "customer answer"
+    assert trace.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
     for span in trace.spans:
         assert span.operation_type == "turn"
         assert span.attributes["inbank.evidence_mode"] == "output_only"
@@ -1182,7 +1568,6 @@ def _trace_wait_settings(arrange_type, value=None, *, trace_environment=None):
         f"AGENTGATE_INBANK_{prefix}_POD_API_BASE_URL": "https://bank.test",
         f"AGENTGATE_INBANK_{prefix}_DELETE_BASE_URL": "https://bank.test",
         "AGENTGATE_INBANK_YUNXIA_AGENT_NAMESPACE": "chatabc",
-        "AGENTGATE_INBANK_YUNXIA_TEST_CUSTOMER_PREFIX": "test",
         "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS": "600",
     }
     if value is not None:
@@ -1337,7 +1722,7 @@ def test_configured_trace_wait_handles_delayed_evidence_per_turn(
         scoped = trace.for_turn(turn.id)
         root = scoped.spans[0]
         assert root.attributes["inbank.evidence_mode"] == mode
-        assert scoped.final_output["output"] == "customer answer"
+        assert scoped.final_output["message" if arrange_type == "yunxia" else "output"] == "customer answer"
         if mode == "trace_server":
             readiness = root.attributes["inbank.trace_source"]["readiness"]
             assert readiness["stable_samples"] == 3
