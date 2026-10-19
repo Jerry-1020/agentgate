@@ -30,6 +30,13 @@ The user authorized committing and integrating this work into
 `open-fin-sub/agentgate:integration/baibo1017`, with conflict review and regression
 verification before publishing. Preserve the destination branch's existing features.
 
+Integration checkpoint: merge destination `a7cbbaf` with PR #57 head `98ff389`
+and execution-parity commit `dbe00ca`, retaining both histories and the destination's
+platform-only in-bank form. Merged-tree verification passed: 2653 backend tests
+(85 skipped), 112 frontend unit tests, 80 platform browser tests, and 31 sample-editor
+browser tests. Type checking and production build passed; no live in-bank/BJS
+acceptance is claimed.
+
 Verify three agent modes, ordinary/stability/A/B page values and HTTP manifests,
 default/invalid concurrency, actual bounded overlap, ordered sessions, cancellation
 before Pod cleanup, saved-manifest immutability, and unchanged external behavior.

@@ -109,7 +109,7 @@ function tag(id: string, name: string, event: Event) {
         </template>
       </div>
       <div class="evaluator-scoring">
-        <h4>人工标注 · {{ entry.spec.name }}</h4>
+        <h4>标注 · {{ entry.spec.name }}</h4>
         <label v-for="d in criteria" :key="d.key" class="score-field">
           <span>{{ d.text }}（{{ min }}—{{ max }}）</span>
           <input
@@ -143,7 +143,7 @@ function tag(id: string, name: string, event: Event) {
             rows="16"
             :value="value(entry.spec.id).optimizedPrompt"
             :aria-label="entry.spec.name + ' 优化后的提示词'"
-            placeholder="填写优化后的提示词，随本次人工标注保存"
+            placeholder="填写优化后的提示词，随本次标注保存"
             @input="
               update(entry.spec.id, {
                 optimizedPrompt: ($event.target as HTMLTextAreaElement).value,

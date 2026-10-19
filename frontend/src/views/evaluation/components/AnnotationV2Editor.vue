@@ -237,9 +237,9 @@ function save() {
       <section
         v-if="task.template.v2?.agent?.enabled"
         class="object-section"
-        :aria-label="'智能体人工标注 第' + (index + 1) + '轮'"
+        :aria-label="'智能体标注 第' + (index + 1) + '轮'"
       >
-        <h3>智能体人工标注（待设计）</h3>
+        <h3>智能体标注（待设计）</h3>
       </section>
     </section>
     <footer class="annotation-save">

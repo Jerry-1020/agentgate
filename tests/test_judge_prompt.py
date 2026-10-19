@@ -20,7 +20,6 @@ from agentgate.evaluator.judge.prompt import (
     select_material,
 )
 
-
 TRACE_ID = "a" * 32
 
 
@@ -90,22 +89,24 @@ def redact(value: Any) -> Any:
     return value
 
 
-def request(selection: str = "full_trajectory"):
-    return build_judge_request(
-        model_id="judge-1",
-        instruction="Judge raw-secret answers.",
-        rubric={"accuracy": "Do not reveal raw-secret"},
-        case=multi_turn_case(),
-        trace=execution_trace(),
-        input_selection=selection,
-        pass_threshold=0.8,
-        temperature=0,
-        seed=7,
-        max_output_tokens=256,
-        timeout_seconds=30,
-        max_input_chars=4_000,
-        redact=redact,
-    )
+def request(selection: str = "full_trajectory", **overrides: Any):
+    options = {
+        "model_id": "judge-1",
+        "instruction": "Judge raw-secret answers.",
+        "rubric": {"accuracy": "Do not reveal raw-secret"},
+        "case": multi_turn_case(),
+        "trace": execution_trace(),
+        "input_selection": selection,
+        "pass_threshold": 0.8,
+        "temperature": 0,
+        "seed": 7,
+        "max_output_tokens": 256,
+        "timeout_seconds": 30,
+        "max_input_chars": 4_000,
+        "redact": redact,
+    }
+    options.update(overrides)
+    return build_judge_request(**options)
 
 
 def test_select_material_has_explicit_evidence_levels() -> None:
@@ -180,3 +181,103 @@ def test_prompt_rejects_invalid_configuration_and_identity() -> None:
         )
     with pytest.raises(ValueError, match="at least"):
         render_bounded_evidence({"message": "x" * 100}, 10)
+
+
+def test_templates_render_selected_redacted_input_and_output_once() -> None:
+    trace = execution_trace().model_copy(
+        update={"final_output": FrozenJsonObject({"answer": "raw-secret {{input}} {{unknown}}"})}
+    )
+    built = request(
+        "final_output",
+        instruction="Assess conciseness.\nInput: {{ input }}\nOutput: {{output}}",
+        user_prompt="Explain the score for {{output}}.",
+        render_template=True,
+        trace=trace,
+    )
+    combined = f"{built.system_prompt}\n{built.user_prompt}"
+
+    assert 'Input: [{"index":0,"input":{"message":"first [redacted]"}}' in built.system_prompt
+    assert 'Output: {"answer":"[redacted] {{input}} {{unknown}}"}' in built.system_prompt
+    assert built.user_prompt.startswith('Explain the score for {"answer":"[redacted] {{input}} {{unknown}}"}.')
+    assert "raw-secret" not in combined
+    assert "lookup_account" not in combined
+    assert "final_state" not in combined
+    assert "untrusted data" in combined
+
+
+def test_template_evidence_occurrences_share_one_total_character_budget() -> None:
+    trace = execution_trace().model_copy(
+        update={"final_output": FrozenJsonObject({"answer": "x" * 20_000})}
+    )
+    built = request(
+        "final_output",
+        instruction="{{input}}\n{{output}}",
+        user_prompt="{{output}}",
+        render_template=True,
+        trace=trace,
+        max_input_chars=1_200,
+    )
+    system_values = built.system_prompt.split("\n\nRubric:")[0].splitlines()
+    user_value = built.user_prompt.splitlines()[0]
+    evidence = built.user_prompt.split("Evidence:\n", 1)[1]
+    rendered_values = [*system_values, user_value, evidence]
+
+    assert sum(map(len, rendered_values)) <= 1_200
+    assert json.loads(system_values[1])["truncated"] is True
+    assert all(json.loads(value) is not None for value in rendered_values)
+    assert json.loads(user_value) == json.loads(system_values[1])
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"instruction": "Assess {{reference}}"},
+        {"user_prompt": "Assess {{secret}}"},
+        {"user_prompt": " "},
+    ],
+)
+def test_prompt_rejects_unknown_template_variables_and_blank_user_prompt(overrides) -> None:
+    with pytest.raises(ValueError, match="prompt"):
+        request(render_template=True, **overrides)
+
+
+def test_optional_user_prompt_preserves_explicit_selection_evidence() -> None:
+    built = request("output_and_tools", user_prompt="Return the score and reason.")
+
+    assert built.user_prompt.startswith("Return the score and reason.\n")
+    assert "lookup_account" in built.user_prompt
+    assert "final_state" not in built.user_prompt
+
+
+@pytest.mark.parametrize("render_template", [False, True])
+def test_template_rendering_is_explicitly_enabled(render_template) -> None:
+    built = request(
+        instruction="Read {{input}}.",
+        user_prompt="Judge {{output}}.",
+        render_template=render_template,
+    )
+
+    assert ("Read {{input}}." in built.system_prompt) is not render_template
+    assert built.user_prompt.startswith("Judge {{output}}.") is not render_template
+
+
+def test_default_rendering_preserves_historical_literal_variables() -> None:
+    built = request(
+        instruction="The literal {{reference}} is an example, alongside {{input}}.",
+        user_prompt="Keep literal {{output}} and {{unknown}}.",
+    )
+
+    assert built.system_prompt.startswith("The literal {{reference}} is an example, alongside {{input}}.")
+    assert built.user_prompt.startswith("Keep literal {{output}} and {{unknown}}.")
+
+
+@pytest.mark.parametrize("value", [True, False, 1.5, 0, -1, "12000"])
+def test_template_budget_rejects_invalid_original_value(value) -> None:
+    with pytest.raises(ValueError, match="max_input_chars"):
+        request(max_input_chars=value)
+
+
+@pytest.mark.parametrize("value", [0, 1, "true", None])
+def test_template_switch_requires_a_boolean(value) -> None:
+    with pytest.raises(ValueError, match="render_template"):
+        request(render_template=value)

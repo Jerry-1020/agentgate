@@ -7,20 +7,26 @@ import type { Report, Trace } from './client';
 import type { DatasetSummary } from '../views/datasets/types/index';
 import type { EvaluationRun, RunProgress } from '../views/evaluation/types/run';
 export type { Report, Trace, DatasetSummary, EvaluationRun, RunProgress };
-export type Kind = 'rule' | 'llm_judge' | 'hybrid';
-export interface EvaluatorSummary {
+export type Kind = 'rule' | 'llm_judge' | 'hybrid' | 'llm_group';
+export interface EvaluatorIdentity {
   id: string;
   name: string;
   description: string;
-  kind: Kind;
   source: string;
   enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+  owner_evaluator_id?: string | null;
+}
+export interface EvaluatorSummary extends EvaluatorIdentity {
+  kind: Kind;
   latest_version: string | null;
   has_draft: boolean;
   dimension: string;
   metric: string;
   implementation_id: string;
   implementation_version: string;
+  child_count?: number;
 }
 export interface Definition {
   kind: Kind;
@@ -36,7 +42,7 @@ export interface Definition {
   content_sha256?: string;
 }
 export interface EvaluatorDetail {
-  evaluator: EvaluatorSummary;
+  evaluator: EvaluatorIdentity;
   latest: Definition | null;
   draft: Definition | null;
 }
@@ -127,7 +133,9 @@ export async function request<T>(
       if (taskRerun && (typeof source !== 'string' || !source.trim()))
         throw Error('重跑请求缺少原运行记录。');
       const manifest = await request<{ primary_evaluator_ids: string[] }>(
-        runRerun ? path.replace(/\/rerun$/, '/manifest') : `/runs/${encodeURIComponent(source!)}/manifest`,
+        runRerun
+          ? path.replace(/\/rerun$/, '/manifest')
+          : `/runs/${encodeURIComponent(source!)}/manifest`,
       );
       assertLocallyEnabled(manifest.primary_evaluator_ids);
     }
@@ -155,7 +163,9 @@ export const api = {
     request<Trace>(`/runs/${encodeURIComponent(id)}/traces/${encodeURIComponent(caseId)}`),
 };
 export const kindLabel = (kind: string) =>
-  ({ rule: '规则评估器', llm_judge: 'LLM 评估器', hybrid: '复合评估器' })[kind] ?? kind;
+  ({ rule: '规则评估器', llm_judge: 'LLM 评估器', llm_group: 'LLM 评估器', hybrid: '复合评估器' })[
+    kind
+  ] ?? kind;
 export const statusLabel = (value: string) =>
   ({
     pending: '排队中',
@@ -179,6 +189,8 @@ export const metricLabel = (key: string) =>
       overall: '综合得分',
       rule: '规则评估得分',
       llm_judge: '模型评估得分',
+      llm_group: 'LLM 综合得分',
+      llm_group_score: 'LLM 综合得分',
       hybrid: '复合评估得分',
       routing: '路由',
       tool_use: '工具使用',

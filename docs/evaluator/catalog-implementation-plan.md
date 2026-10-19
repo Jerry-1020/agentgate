@@ -1,5 +1,109 @@
 # Evaluator Catalog Implementation Plan
 
+## 2026-10-16：Prompt 变量动态提示
+
+`evaluator-templates.ts` 提供共用变量名提取函数，分别扫描 System/User Prompt 的完整双大括号，
+去除名称首尾空格、忽略空名称并按出现顺序去重。`LLMGroupEditor.vue` 及
+`PromptEvaluatorEditor.vue` 以计算属性展示当前内容的变量；无变量时移除整行提示，
+清空、移除 User Prompt、全屏编辑与切换子评估器均直接随表单更新。
+沿用现有前后端执行契约：只支持 input/output，识别并显示其他名称不代表新增运行时变量。
+不新增持久化字段、独立状态副本或后端接口，保留现有保存校验。
+验证：lint、类型检查、生产构建、15 项相关单元测试及 10 项隔离浏览器回归通过；
+现有自定义创建与历史单体编辑场景覆盖输入、清空、去重、移除 User Prompt 和切换子项。
+
+## 2026-10-16：卡片与输入框样式统一
+
+按用户最新要求，综合模板不再使用深色标题背景，改为复用 `review-assets.scss` 中规则卡
+的基础样式；`LLMGroupTemplateCard.vue` 保留四子项及原有查看/应用语义。
+`JudgeSystem.vue` 的 LLM 网格与 `LLMGroupEditor.vue` 的模板网格统一为 320px 列，
+小屏幕按可用宽度收缩。父评估器备注使用与名称同高的单行输入框，保存契约不变。
+沿用现有功能分支与已授权的 UI 调整范围，不改动后端或被测 Agent 路由。
+验证：lint、类型检查、生产构建及原有 10 项隔离浏览器回归通过；更新现有样式断言，
+直接比较规则卡/模板卡样式、首页/弹窗卡片宽高及名称/备注输入框高度，并复核截图。
+
+## 2026-10-16：已发布 LLM 实例删除
+
+用户确认需要删除目录中已有的 7 个实例。复用当前 Catalog 删除入口、身份 JSON 存储、
+精确版本与历史快照；新增身份字段 `archived`，无需数据表迁移或旧契约别名。
+已发布用户 LLM 单体和综合评估器的 `DELETE /api/evaluators/{id}` 归档并停用身份，
+重复删除幂等，目录即使包含停用项也不返回归档项。已发布规则/Hybrid 仍不支持删除。
+
+领域层约束归档身份必须为用户资产且停用；应用层拒绝归档后的更新、草稿操作和发布，
+存储层在单体及整组事务中再次检查，阻止绕过应用层写入。精确版本和整组历史读取保留，
+原 RunManifest 仍可执行；新任务不能选用归档项。归档不改写已发布版本或任务证据。
+没有修改被测 Agent 目录或 Token 路由。
+
+本机备份后已实际删除指定 7 项，确认其余目录条目不变，历史版本、Run 和引用的整表指纹不变。
+Python 全量 2501 项通过、83 项跳过，10 项隔离浏览器测试通过；新增归档生命周期、
+存储事务及刷新后仅剩综合模板的回归。MySQL 未配置，相关集成用例跳过。
+
+## 2026-10-16：单一综合模板与首页只读查看
+
+根据用户最新补充，预置模板入口仅保留“回答质量综合评估”；单项提示词作为综合模板内部配置保留，
+不再在 `LLMGroupEditor.vue` 或历史 `PromptEvaluatorEditor.vue` 中提供独立模板选择。
+`LLMGroupTemplateCard.vue` 区分新建流程的应用动作和首页的查看动作；
+`LLMGroupTemplatePreview.vue` 负责只读展示综合模板及各子项权重、提示词，无持久化或模型请求。
+`JudgeSystem.vue` 删除首页直接应用路径。仍复用现有综合模板、四子配置和新建后的保存发布流程，
+没有后端契约变动，也不修改既有自建资产或历史配置。
+验证：前端检查、110 项单元测试及生产构建通过，9 项隔离浏览器测试通过。
+验证首页只有查看入口、四子配置只读且不产生写入、新建流程只有综合模板、编辑页无单项模板入口，
+以及保存发布、取消重开与历史配置；已检查首页及只读详情截图。
+
+## 2026-10-16：预置 LLM 目录替换
+
+沿用同一功能的授权及当前分支。`JudgeSystem.vue` 的 LLM 列表移除旧内置单体入口，展示
+`evaluator-group.ts` 已定义的综合模板；直接应用通过 `LLMGroupEditor.vue` 的初始模板参数
+进入独立四子表单，复用既有保存、发布和历史版本行为。模板没有模型配置及发布身份，不混入任务目录。
+新增 `LLMGroupTemplateCard.vue` 共享列表和模板弹窗的展示职责：深绿色名称背景、白字、
+四子项名称/权重及应用按钮。没有后端契约变化，原内置定义保留以解析已有任务和组合引用。
+本次复用当前 refactor 的模板配置及表单初始化，未采用历史分支的旧目录契约。
+验证：前端栈检查、lint、类型检查、110 项单元测试和生产构建通过；9 项隔离浏览器测试通过，
+覆盖目录替换、两处标题样式一致、直接应用无持久化副作用、取消/重开、配置删增及保存发布。
+
+## 2026-10-16：综合评估器模板入口修正
+
+根据用户对同一功能的补充，新建入口改为综合评估器模板，不再将子评估器模板直接列作新建评估器模板。
+在原有 `evaluator-group.ts` 内预置“回答质量综合评估”，引用现有简洁性、相关性、准确性、合理性
+四个完整子模板，初始权重依次为 10%、30%、40%、20%。`LLMGroupEditor.vue` 应用模板后创建独立可编辑的父子表单，
+子项列表逐行提供删除按钮，“新增”直接创建空白子项并切换到该项。删除其他子项保留当前编辑项，
+沿用 32 项上限、子项配置及整组发布流程。自定义创建保持可用。
+
+初始综合模板弹窗整体高度提高约三分之一，并限制在 92vh 内；Prompt 模板替换仍可使用原有子模板。
+本次沿用已审查的当前 refactor 实现和 `feature/llm-child-evaluators` 分支，未引入新模块或后端契约。
+验证覆盖完整四子模板及权重、直接新增空白子项、逐行删除与取消、删除其他子项保持当前编辑项、
+修改与删增后不污染模板、持久化/发布/历史版本和弹窗尺寸。
+前端检查与 110 项单元测试、8 项隔离浏览器测试、生产构建通过；1000px 高视口下
+模板面板实测高 839.33px，约为原高度的 1.33 倍，未溢出视口。
+
+## 2026-10-16：LLM 子评估器（已实施）
+
+用户已确认 UI，并明确授权自主实施 Goal、豁免逐文件确认；本次不提交、推送或合并。
+功能分支 `feature/llm-child-evaluators` 基于刚同步的 `origin/refactor-1`（`102ed29`），
+保留工作区既有修改及本地 `refactor-1` 的原有分歧提交引用。
+
+源码评估：`goal/p1-demo` 没有可复用的组合执行实现或当前 Vue 编辑页；
+`integration/p1-new` 的评估器页面是旧契约只读列表，新建及组合实现未完成。
+本次复用当前 refactor 的 Catalog、精确版本引用、执行缓存、JudgeRecord、事务发布及
+RunManifest；新写父子生命周期和编辑页面，适配已有聚合与结果展示，不复制旧契约。
+
+确认的实现边界：
+
+- 新增 `llm_group` 执行类型，父项聚合、子项独立执行，保留既有 `hybrid` 的规则与 LLM 混合语义。
+- 父评估器拥有一个或多个 `llm_judge` 子项；子项身份记录 `owner_evaluator_id`，不能独立从目录选用或修改。
+- 父版本用精确 `EvaluatorRef` 保存子版本与权重；备注、模板来源随父版本保存，历史详情不读取子项最新配置替代旧版本。
+- 整组草稿保存、发布和清理在存储事务内完成；草稿使用乐观并发检查；发布一次启用整组，失败完全回滚。
+- UI 复用单 LLM 的模型、System/User Prompt、模板和通过分数配置。相关性、准确性、合理性为新增模板；保留简洁性原文。
+- 任务选择父项，快照含所有子项；综合分只统计父结果，子分、理由、模型调用记录独立保存并展示。
+- 名称、备注、状态、版本、创建/更新时间使用服务端数据；不把更新时间当发布日期。
+- 被测 Agent 的行内/行外数据源和 Token 路由不变；模型密钥只由已有服务端配置读取。
+
+完成验证：领域与事务校验、API/版本固定、前端转换与交互测试通过；Python 全量
+2483 项通过、78 项跳过；前端 108 项单元测试、8 项浏览器交互、检查与构建通过。
+跳过项为未配置 MySQL/Redis Cluster、私有客户归档和适配器不适用用例。
+三子项实际调用 DeepSeek 官方 `deepseek-v4-pro`，独立证据和父加权结果均已验证，
+完整服务重启后结果仍可恢复。实例和复现见 [子评估器示例](../../examples/llm-group/README.md)，
+工程进度及操作指南已更新；没有提交、推送或合并。
+
 ## 2026-10-08：LLM 设计页接通持久化
 
 用户批准“保存服务端草稿 → 发布不可变版本 → 按版本运行”，并授权完成后推送。
@@ -298,11 +402,12 @@ Built-ins are always enabled in this POC and reject mutation attempts.
 ### Delete
 
 Hard delete is permitted only for a user Evaluator with no publications. The delete
-transaction removes its draft and stable identity. Once any version has been published,
-the identity and versions must be retained; disable is the supported removal action.
-
-This rule protects historical references and avoids adding tombstone or cascade semantics
-that the POC does not need.
+transaction removes its draft and stable identity. Deleting a published user LLM Judge or
+LLM Group archives and disables its identity while retaining drafts, immutable versions,
+owned children, and Run references. Archived identities are excluded from every catalog
+listing and reject further mutation; repeated deletion is idempotent. Exact-version reads
+and historical execution remain supported. Published Rule and Hybrid deletion is rejected;
+disabling remains their supported availability control.
 
 ## Domain Design
 
@@ -453,10 +558,10 @@ HTTP behavior:
 
 - `201` for identity/draft creation;
 - `200` for reads, updates, and publication;
-- `204` for draft discard and allowed hard delete;
+- `204` for draft discard, allowed hard delete, and published LLM archival;
 - `404` for unknown identities, drafts, or versions;
 - `409` for lifecycle conflicts such as duplicate draft, stale publication, enabling an
-  unpublished Evaluator, or deleting a published Evaluator;
+  unpublished Evaluator, modifying an archived Evaluator, or deleting a published Rule or Hybrid;
 - `422` for invalid domain configuration or unsupported implementations.
 
 Routes translate transport models and errors only. They do not allocate versions,
@@ -606,7 +711,7 @@ At minimum, automated tests cover:
 19. omitted evaluator IDs retain the default built-in set;
 20. explicit mixed built-in/user selection embeds exact specifications;
 21. deleting an unpublished Evaluator removes its draft;
-22. deleting a published Evaluator is rejected;
+22. deleting a published LLM archives it without changing historical evidence; deleting a published Rule or Hybrid is rejected;
 23. exact version endpoints distinguish unknown identity from unknown version;
 24. existing databases initialize catalog tables without losing prior data;
 25. evaluator-version lineage still returns Runs containing that exact publication;

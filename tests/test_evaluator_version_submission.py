@@ -233,7 +233,10 @@ def test_invalid_evaluator_selection_never_dispatches(system, kind, invalid):
 
 @pytest.mark.parametrize("kind", ["platform-ab", "platform", "demo", "stability", "bank"])
 @pytest.mark.parametrize("selection", ["ids", "refs"])
-def test_composite_dependencies_are_pinned_without_becoming_primary(system, kind, selection):
+@pytest.mark.parametrize("composition_kind", ["hybrid", "llm_group"])
+def test_composite_dependencies_are_pinned_without_becoming_primary(
+    system, kind, selection, composition_kind
+):
     client, dependencies, dispatcher, dataset_id = system
 
     class JudgeClient:
@@ -265,29 +268,72 @@ def test_composite_dependencies_are_pinned_without_becoming_primary(system, kind
                 dispatcher=dispatcher,
             ),
         )
-    created = client.post(
-        "/api/evaluators",
-        json={
-            "name": "Composite only",
-            "draft": {
-                "kind": "hybrid",
-                "dimension": "quality",
-                "metric": "combined_quality",
-                "severity": "standard",
-                "implementation_id": "composite",
-                "implementation_version": "1",
-                "config": {},
+    if composition_kind == "llm_group":
+        created = client.post(
+            "/api/evaluators/llm-groups",
+            json={
+                "name": "LLM group only",
+                "pass_threshold": 0.8,
                 "children": [
-                    {"evaluator_id": "final-output", "evaluator_version": "1"},
-                    {"evaluator_id": "answer-quality", "evaluator_version": "1"},
+                    {
+                        "name": name,
+                        "weight": 0.5,
+                        "definition": {
+                            "kind": "llm_judge",
+                            "dimension": "answer",
+                            "metric": name,
+                            "implementation_id": "answer_quality",
+                            "config": {
+                                "model": {
+                                    "provider_id": "test-provider",
+                                    "model_id": "test-model",
+                                    "credential_ref": "env:TEST_JUDGE_KEY",
+                                },
+                                "instruction": "Judge the answer.",
+                                "rubric": {"quality": "Answer is correct"},
+                            },
+                        },
+                    }
+                    for name in ("relevance", "accuracy")
                 ],
-                "combination": "all",
             },
-        },
-    )
-    assert created.status_code == 201, created.text
-    evaluator_id = created.json()["evaluator"]["id"]
-    published = client.post(f"/api/evaluators/{evaluator_id}/drafts/publish")
+        )
+        assert created.status_code == 201, created.text
+        detail = created.json()
+        evaluator_id = detail["evaluator"]["id"]
+        dependencies_ids = {item["evaluator"]["id"] for item in detail["children"]}
+        published = client.post(
+            f"/api/evaluators/{evaluator_id}/llm-group/publish",
+            json={
+                "expected_draft_id": detail["definition"]["id"],
+                "expected_draft_updated_at": detail["definition"]["updated_at"],
+            },
+        )
+    else:
+        created = client.post(
+            "/api/evaluators",
+            json={
+                "name": "Composite only",
+                "draft": {
+                    "kind": "hybrid",
+                    "dimension": "quality",
+                    "metric": "combined_quality",
+                    "severity": "standard",
+                    "implementation_id": "composite",
+                    "implementation_version": "1",
+                    "config": {},
+                    "children": [
+                        {"evaluator_id": "final-output", "evaluator_version": "1"},
+                        {"evaluator_id": "answer-quality", "evaluator_version": "1"},
+                    ],
+                    "combination": "all",
+                },
+            },
+        )
+        assert created.status_code == 201, created.text
+        evaluator_id = created.json()["evaluator"]["id"]
+        dependencies_ids = {"final-output", "answer-quality"}
+        published = client.post(f"/api/evaluators/{evaluator_id}/drafts/publish")
     assert published.status_code == 200, published.text
     assert (
         client.patch(f"/api/evaluators/{evaluator_id}", json={"enabled": True}).status_code == 200
@@ -302,9 +348,5 @@ def test_composite_dependencies_are_pinned_without_becoming_primary(system, kind
     assert len(manifests) == (2 if kind == "platform-ab" else 3 if kind == "stability" else 1)
     for manifest in manifests:
         assert manifest.primary_evaluator_ids == (evaluator_id,)
-        assert {spec.id for spec in manifest.evaluator_specs} == {
-            evaluator_id,
-            "final-output",
-            "answer-quality",
-        }
+        assert {spec.id for spec in manifest.evaluator_specs} == {evaluator_id, *dependencies_ids}
         assert manifest.evaluator_specs == manifests[0].evaluator_specs

@@ -32,12 +32,6 @@ from agentgate.evaluator.executor import (
 )
 from agentgate.evaluator.judge import AnswerQualityJudge, JudgeModelClient
 from agentgate.evaluator.judge.dimension_quality import DimensionQualityJudge
-from agentgate.evaluator.versioning import (
-    clone_evaluator_version_to_draft,
-    create_evaluator_draft,
-    replace_evaluator_draft,
-    publish_evaluator_draft as build_evaluator_publication,
-)
 from agentgate.evaluator.models import (
     DuplicateEvaluatorId,
     EvaluatorKindMismatch,
@@ -59,8 +53,16 @@ from agentgate.evaluator.rule.execution import ExecutionPathEvaluator
 from agentgate.evaluator.rule.json_schema import validate_json_schema
 from agentgate.evaluator.rule.operators import resolve_condition_operator
 from agentgate.evaluator.rule.policy import validate_policy_id
-from agentgate.storage.repository import AgentGateRepository
+from agentgate.evaluator.versioning import (
+    clone_evaluator_version_to_draft,
+    create_evaluator_draft,
+    replace_evaluator_draft,
+)
+from agentgate.evaluator.versioning import (
+    publish_evaluator_draft as build_evaluator_publication,
+)
 from agentgate.server.user_context import get_user_info
+from agentgate.storage.repository import AgentGateRepository
 
 
 class EvaluatorNotFound(UnknownEvaluator, ValueError):
@@ -90,11 +92,11 @@ class EvaluatorManagement:
     """Coordinate persistent catalog workflows and evaluator execution."""
 
     __slots__ = (
-        "repository",
         "_builtin_evaluators",
         "_builtin_specs",
         "_builtin_specs_by_id",
         "_implementations",
+        "repository",
     )
 
     def __init__(
@@ -151,9 +153,12 @@ class EvaluatorManagement:
         )
         if collisions:
             raise EvaluatorCatalogConflict(
-                f"user Evaluator conflicts with built-in: {sorted(collisions)[0]}"
+                f"user Evaluator conflicts with built-in: {min(collisions)}"
             )
-        return (*self._builtin_evaluators.values(), *users)
+        return (
+            *self._builtin_evaluators.values(),
+            *(item for item in users if item.owner_evaluator_id is None and not item.archived),
+        )
 
     def get_evaluator(self, evaluator_id: str) -> Evaluator:
         builtin = self._builtin_evaluators.get(evaluator_id)
@@ -181,6 +186,8 @@ class EvaluatorManagement:
         children: Sequence[EvaluatorRef] = (),
         combination: CombinationPolicy | None = None,
     ) -> tuple[Evaluator, EvaluatorDraft]:
+        if kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to create a group")
         created_at = utcnow()
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
@@ -229,6 +236,10 @@ class EvaluatorManagement:
             raise ValueError("Evaluator update must contain at least one field")
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
+        if name is not None or description is not None:
+            definition = self.repository.get_evaluator_draft(evaluator_id, user_team_id=user_team_id) or self.repository.get_latest_evaluator_version(evaluator_id, user_team_id=user_team_id)
+            if definition is not None and definition.kind == EvaluatorKind.LLM_GROUP:
+                raise EvaluatorCatalogConflict("use the LLM group workflow to change group metadata")
         if enabled and self.repository.get_latest_evaluator_version(
             evaluator_id, user_team_id=user_team_id
         ) is None:
@@ -249,15 +260,30 @@ class EvaluatorManagement:
         return updated
 
     def delete_evaluator(self, evaluator_id: str) -> None:
-        self._user_evaluator(evaluator_id)
+        evaluator = self._user_evaluator(evaluator_id, allow_archived=True)
+        if evaluator.archived:
+            return
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
-        if self.repository.get_latest_evaluator_version(
+        latest = self.repository.get_latest_evaluator_version(
             evaluator_id, user_team_id=user_team_id
-        ) is not None:
-            raise EvaluatorCatalogConflict(
-                "published Evaluator cannot be deleted; disable it instead"
-            )
+        )
+        if latest is not None:
+            if latest.kind not in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP):
+                raise EvaluatorCatalogConflict(
+                    "published Evaluator cannot be deleted; disable it instead"
+                )
+            archived = Evaluator.model_validate({
+                **evaluator.model_dump(),
+                "archived": True,
+                "enabled": False,
+                "updated_at": max(utcnow(), evaluator.updated_at),
+            })
+            self.repository.save_evaluator(archived)
+            return
+        draft = self.repository.get_evaluator_draft(evaluator_id, user_team_id=user_team_id)
+        if draft is not None and draft.kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to delete a group")
         self.repository.delete_unpublished_evaluator(
             evaluator_id, user_team_id=user_team_id
         )
@@ -296,6 +322,8 @@ class EvaluatorManagement:
             raise EvaluatorCatalogConflict(
                 "Evaluator without a publication cannot clone a draft"
             )
+        if base.kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to edit a group")
         draft = clone_evaluator_version_to_draft(
             evaluator,
             base,
@@ -320,6 +348,8 @@ class EvaluatorManagement:
         combination: CombinationPolicy | None,
     ) -> EvaluatorDraft:
         draft = self.get_draft(evaluator_id)
+        if draft.kind == EvaluatorKind.LLM_GROUP or kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to edit a group")
         updated = replace_evaluator_draft(
             draft,
             utcnow(),
@@ -338,6 +368,8 @@ class EvaluatorManagement:
 
     def discard_draft(self, evaluator_id: str) -> None:
         draft = self.get_draft(evaluator_id)
+        if draft.kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to discard a group")
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
         self.repository.delete_evaluator_draft(
@@ -348,7 +380,7 @@ class EvaluatorManagement:
         builtin = self._builtin_specs_by_id.get(evaluator_id)
         if builtin is not None:
             return (builtin,)
-        self._user_evaluator(evaluator_id)
+        self._user_evaluator(evaluator_id, allow_owned=True, allow_archived=True)
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
         return tuple(
@@ -365,7 +397,7 @@ class EvaluatorManagement:
             raise EvaluatorVersionNotFound(
                 f"unknown Evaluator version: {evaluator_id}@{version}"
             )
-        self._user_evaluator(evaluator_id)
+        self._user_evaluator(evaluator_id, allow_owned=True, allow_archived=True)
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
         published = self.repository.get_evaluator_version(
@@ -380,6 +412,8 @@ class EvaluatorManagement:
     def publish_draft(self, evaluator_id: str) -> EvaluatorSpec:
         evaluator = self._user_evaluator(evaluator_id)
         draft = self.get_draft(evaluator_id)
+        if draft.kind == EvaluatorKind.LLM_GROUP:
+            raise EvaluatorCatalogConflict("use the LLM group workflow to publish a group")
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""
         latest = self.repository.get_latest_evaluator_version(
@@ -477,17 +511,7 @@ class EvaluatorManagement:
                 if child.evaluator_version != child_spec.version:
                     raise EvaluatorVersionMismatch(child.evaluator_id)
                 children.append(child_spec)
-            if spec.kind == EvaluatorKind.HYBRID:
-                if any(child.kind == EvaluatorKind.HYBRID for child in children):
-                    raise InvalidHybridEvaluator("nested Hybrid is not supported")
-                child_kinds = {child.kind for child in children}
-                if not {
-                    EvaluatorKind.RULE,
-                    EvaluatorKind.LLM_JUDGE,
-                }.issubset(child_kinds):
-                    raise InvalidHybridEvaluator(
-                        "Hybrid requires Rule and LLM Judge children"
-                    )
+            self._validate_child_composition(spec, children)
 
         for case in dataset.cases:
             for turn in case.turns:
@@ -524,7 +548,9 @@ class EvaluatorManagement:
         )
         return results
 
-    def _user_evaluator(self, evaluator_id: str) -> Evaluator:
+    def _user_evaluator(
+        self, evaluator_id: str, *, allow_owned: bool = False, allow_archived: bool = False
+    ) -> Evaluator:
         if evaluator_id in self._builtin_evaluators:
             raise BuiltinEvaluatorMutation(
                 f"built-in Evaluator is read-only: {evaluator_id}"
@@ -534,6 +560,10 @@ class EvaluatorManagement:
         evaluator = self.repository.get_evaluator(evaluator_id, user_team_id=user_team_id)
         if evaluator is None:
             raise EvaluatorNotFound(f"unknown Evaluator: {evaluator_id}")
+        if evaluator.archived and not allow_archived:
+            raise EvaluatorCatalogConflict("archived Evaluator cannot be changed")
+        if evaluator.owner_evaluator_id is not None and not allow_owned:
+            raise EvaluatorCatalogConflict("owned child Evaluators can only be changed through their group")
         return evaluator
 
     def _validate_supported_spec(self, spec: EvaluatorSpec) -> None:
@@ -562,7 +592,7 @@ class EvaluatorManagement:
             )
         if spec.kind == EvaluatorKind.RULE and spec.config:
             raise ValueError("Rule Evaluator config must be empty")
-        if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "validate_spec", None))):
+        if spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "validate_spec", None))):
             validate_spec = getattr(implementation, "validate_spec", None)
             if not callable(validate_spec):
                 raise TypeError("LLM Judge implementation must validate specifications")
@@ -585,9 +615,15 @@ class EvaluatorManagement:
                     raise EvaluatorCatalogConflict(
                         f"disabled Evaluator cannot be selected: {child.id}"
                     )
+        self._validate_child_composition(spec, children)
+        return children
+
+    def _validate_child_composition(self, spec: EvaluatorSpec, children: Sequence[EvaluatorSpec]) -> None:
+        if spec.kind in (EvaluatorKind.HYBRID, EvaluatorKind.LLM_GROUP) and any(
+            child.kind in (EvaluatorKind.HYBRID, EvaluatorKind.LLM_GROUP) for child in children
+        ):
+            raise InvalidHybridEvaluator("nested evaluator groups are not supported")
         if spec.kind == EvaluatorKind.HYBRID:
-            if any(child.kind == EvaluatorKind.HYBRID for child in children):
-                raise InvalidHybridEvaluator("nested Hybrid is not supported")
             child_kinds = {child.kind for child in children}
             if not {EvaluatorKind.RULE, EvaluatorKind.LLM_JUDGE}.issubset(
                 child_kinds
@@ -595,7 +631,13 @@ class EvaluatorManagement:
                 raise InvalidHybridEvaluator(
                     "Hybrid requires Rule and LLM Judge children"
                 )
-        return children
+        for child in children:
+            owner = self.get_evaluator(child.id).owner_evaluator_id
+            if spec.kind == EvaluatorKind.LLM_GROUP:
+                if child.kind != EvaluatorKind.LLM_JUDGE or owner != spec.id:
+                    raise InvalidHybridEvaluator("LLM group children must be owned LLM Judge Evaluators")
+            elif owner is not None:
+                raise InvalidHybridEvaluator("owned child Evaluators cannot be referenced by another evaluator")
 
     def _add_selectable(
         self,
@@ -603,7 +645,11 @@ class EvaluatorManagement:
         selected: dict[str, EvaluatorSpec],
         *,
         exact_version: str | None = None,
+        owner_evaluator_id: str | None = None,
     ) -> None:
+        identity = self.get_evaluator(evaluator_id)
+        if identity.owner_evaluator_id != owner_evaluator_id:
+            raise EvaluatorCatalogConflict("owned child Evaluators cannot be selected independently")
         existing = selected.get(evaluator_id)
         if existing is not None:
             if exact_version is not None and existing.version != exact_version:
@@ -613,7 +659,6 @@ class EvaluatorManagement:
                 )
             return
 
-        identity = self.get_evaluator(evaluator_id)
         if not identity.enabled:
             raise EvaluatorCatalogConflict(
                 f"disabled Evaluator cannot be selected: {evaluator_id}"
@@ -638,6 +683,7 @@ class EvaluatorManagement:
                 child.id,
                 selected,
                 exact_version=child.version,
+                owner_evaluator_id=spec.id if spec.kind == EvaluatorKind.LLM_GROUP else None,
             )
 
 
@@ -728,8 +774,9 @@ def build_default_evaluator_management(
 
     specs = _BUILTIN_EVALUATOR_SPECS
     implementations = dict(_BUILTIN_IMPLEMENTATIONS)
-    from agentgate.evaluator.hybrid import CompositeEvaluator
+    from agentgate.evaluator.hybrid import CompositeEvaluator, LLMGroupEvaluator
     implementations[("composite", "1")] = CompositeEvaluator()
+    implementations[("llm_group", "1")] = LLMGroupEvaluator()
     if judge_client is not None:
         assert judge_model_id is not None
         assert judge_credential_ref is not None

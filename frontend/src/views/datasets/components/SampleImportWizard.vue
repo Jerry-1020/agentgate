@@ -35,6 +35,7 @@ function reset() {
 }
 const manualItem = ref<EvaluationCase>(blankSample(''));
 const manualDirty = ref(false);
+const manualEditor = ref<InstanceType<typeof SampleEditor> | null>(null);
 function next() {
   reset();
   manualItem.value = blankSample('');
@@ -88,7 +89,7 @@ async function readAnnotations() {
       sample.difficulty = source.difficulty;
       sample.tags = [...source.tags];
       sample.notes =
-        '人工标注来源：模板 ' +
+        '标注来源：模板 ' +
         task.value.id +
         '；测评 ' +
         run +
@@ -189,8 +190,8 @@ function close() {
       <div v-if="step === 1" class="methods">
         <button
           v-for="m in [
-            { id: 'manual', name: '＋ 手动创建', description: '多轮对话、期望输出与工具调用' },
             { id: 'file', name: '⇧ 导入测评集', description: 'JSON / Excel (.xlsx) / CSV / ZIP' },
+            { id: 'manual', name: '＋ 手动创建', description: '多轮对话、期望输出与工具调用' },
             {
               id: 'annotation',
               name: '✓ 从标注导入',
@@ -199,6 +200,7 @@ function close() {
           ]"
           :key="m.id"
           :class="{ selected: method === m.id }"
+          :disabled="m.id === 'annotation'"
           @click="method = m.id"
         >
           <strong>{{ m.name }}</strong
@@ -208,6 +210,8 @@ function close() {
       <template v-if="step === 2">
         <SampleEditor
           v-if="method === 'manual'"
+          ref="manualEditor"
+          hide-save-button
           :item="manualItem"
           :editable="true"
           :saving="busy"
@@ -253,7 +257,7 @@ function close() {
             </select></label
           >
           <p>
-            读取当前页面已保存的人工标注；独立标注服务尚未接通。导入后的样本会保存到数据库，标注源本身仍为页面内存。
+            读取当前页面已保存的标注；独立标注服务尚未接通。导入后的样本会保存到数据库，标注源本身仍为页面内存。
           </p>
           <label v-for="key in sessions" :key="key" class="session"
             ><input
@@ -264,7 +268,7 @@ function close() {
               @change="reset()"
             />测评 / 会话：{{ key }}</label
           >
-          <p v-if="!sessions.length">暂无已保存的标注会话，请先在人工标注中完成评分并保存。</p>
+          <p v-if="!sessions.length">暂无已保存的标注会话，请先在标注中完成评分并保存。</p>
           <button
             class="secondary"
             :disabled="!selected.length || busy || saved > 0"
@@ -314,24 +318,39 @@ function close() {
       <p v-if="error" role="alert" class="error">{{ error }}</p>
     </div>
     <template #footer
-      ><button class="secondary" :disabled="busy" @click="close">
-        {{ step === 3 ? '返回数据样本' : '取消' }}</button
-      ><button v-if="step === 1" class="primary" @click="next">下一步</button
-      ><template v-if="step === 2"
-        ><button class="secondary" :disabled="busy || saved > 0" @click="previous">上一步</button
-        ><button
-          v-if="method !== 'manual'"
-          class="primary"
-          :disabled="busy || !items.length"
-          @click="save"
+      ><div class="wizard-actions">
+        <button class="secondary" :disabled="busy" @click="close">
+          {{ step === 3 ? '返回数据样本' : '取消' }}</button
+        ><button v-if="step === 1" class="primary" @click="next">下一步</button
+        ><template v-if="step === 2"
+          ><button class="secondary" :disabled="busy || saved > 0" @click="previous">上一步</button
+          ><button
+            v-if="method === 'manual'"
+            class="primary"
+            :disabled="busy"
+            @click="manualEditor?.save()"
+          >
+            {{ busy ? '保存中…' : '保存样本' }}</button
+          ><button v-else class="primary" :disabled="busy || !items.length" @click="save">
+            {{ saved ? '继续导入' : '确认导入到草稿' }}
+          </button></template
         >
-          {{ saved ? '继续导入' : '确认导入到草稿' }}
-        </button></template
-      ></template
+      </div></template
     >
   </el-dialog>
 </template>
 <style scoped>
+.wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.wizard-actions button + button {
+  margin-left: 0;
+}
+.wizard-actions button {
+  flex-shrink: 0;
+}
 .sample-wizard {
   color: #344158;
 }
@@ -421,6 +440,9 @@ td {
   padding: 30px;
 }
 @media (max-width: 760px) {
+  .wizard-actions button {
+    padding: 0 10px;
+  }
   .methods {
     grid-template-columns: 1fr;
   }

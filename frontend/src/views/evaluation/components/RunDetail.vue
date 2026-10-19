@@ -359,6 +359,7 @@ onUnmounted(() => {
           :sample="sample"
           :results="results"
           :primary-ids="evidence.run.manifest.primary_evaluator_ids"
+          :evaluator-specs="evidence.run.manifest.evaluator_specs"
           :trace="trace"
           :trace-error="traceError"
           :trace-loading="traceLoading"

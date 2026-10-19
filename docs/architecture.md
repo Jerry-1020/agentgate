@@ -177,6 +177,14 @@ The domain owns stable `Evaluator` identities, editable `EvaluatorDraft` objects
 immutable content-addressed `EvaluatorSpec` publications. Pure draft and publication
 transformations live in `evaluator/versioning.py`.
 
+`llm_group` is an LLM-only composition with one or more independently configured Judge
+children. Each child has an immutable `owner_evaluator_id` on its catalog identity; it is
+not independently listed, selected, or mutated through the public authoring workflow.
+The parent pins exact child versions and positive weights summing to one. This is distinct
+from `answer_quality@2`, which asks one model request to score several rubric dimensions.
+`LLMGroupEvaluator` in `evaluator/hybrid.py` aggregates cached child Results without an
+additional model call. Child Results retain their own model evidence, scores, and reasons.
+
 ### Result
 
 ```text
@@ -247,6 +255,7 @@ application/
 ├── dataset_generation.py      future
 ├── target_catalog.py
 ├── evaluator_management.py
+├── llm_evaluator_groups.py
 ├── skill_analysis.py
 ├── result_reader.py
 └── lineage_queries.py
@@ -262,6 +271,12 @@ Run selection. Built-ins are always enabled and are never copied into SQLite. Ev
 composition root supplies the repository explicitly; no process-global catalog owns a
 second view of persistence.
 
+`llm_evaluator_groups.py` owns the complete group authoring workflow: read a draft or exact
+publication with its children, save the whole editable group, validate every child before
+publication, and discard a draft. It composes existing evaluator configuration and
+versioning; it does not own provider access or execute model requests. Existing single
+Judge and mixed Rule/Judge Hybrid workflows remain separate and executable.
+
 ### Storage
 
 ```text
@@ -269,6 +284,8 @@ storage/
 ├── __init__.py
 ├── repository.py
 ├── sqlite.py
+├── mysql.py
+├── evaluator_groups.py
 └── artifacts.py
 ```
 
@@ -277,6 +294,14 @@ published Evaluator versions. Draft publication is atomic and published specific
 are immutable. Redis and Celery state is operational only. Artifact metadata is stored in
 the database while large bytes use local Artifact storage. PostgreSQL and object storage
 are later adapters behind the same contracts.
+
+SQLite and MySQL implement group save, publish-and-enable, and draft discard as individual
+transactions using the existing identity, draft, and version tables. Group saves compare
+the parent's identity and draft revisions before changing any owned child; publication
+checks every current draft and next version before consuming the drafts. Discard compares
+the expected draft ID and update timestamp. `storage/evaluator_groups.py` contains shared
+validation for these operations. Removed unpublished children are cleaned up; published
+child identities and immutable versions survive for old parent versions and Run snapshots.
 
 ### CLI
 
@@ -364,6 +389,11 @@ Web/CLI/API
 New Runs resolve explicit user Evaluator IDs to the latest enabled publication and embed
 the exact specifications in `RunManifest`. Worker execution uses those embedded
 specifications even if an Evaluator is later disabled or a newer version is published.
+
+Selecting an LLM group adds its exact child specifications as execution dependencies,
+while `primary_evaluator_ids` contains the selected parent. Metrics and sample summaries
+therefore count the parent once. The report can expand the parent into independent child
+scores, weights, reasons, and model records using the manifest's version-pinned references.
 
 ### Static Skill Evaluation
 

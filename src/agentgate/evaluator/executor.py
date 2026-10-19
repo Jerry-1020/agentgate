@@ -288,7 +288,7 @@ def _require_case_evaluator(
 
 def _output_only_check(spec: EvaluatorSpec, trace: Trace, turn_id: str | None = None) -> CheckDraft | None:
     """Missing trajectory is unknown evidence, not proof of absent tool/skill use."""
-    if spec.kind == EvaluatorKind.HYBRID:
+    if spec.kind in (EvaluatorKind.HYBRID, EvaluatorKind.LLM_GROUP):
         return None  # Compose the actual child results, including skipped checks.
     if spec.kind == EvaluatorKind.RULE and spec.implementation_id == "final_output":
         return None
@@ -378,7 +378,7 @@ def execute_evaluators(
                 "Evaluator started: run_id=%s case_id=%s evaluator_id=%s kind=%s dimension=%s metric=%s",
                 trace.run_id, case.id, spec.id, spec.kind.value, spec.dimension, spec.metric,
             )
-            if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
+            if spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
                 skipped = _output_only_check(spec, trace)
                 case_evaluation = Evaluation(checks=()) if execution_errors else (

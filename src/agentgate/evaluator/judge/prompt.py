@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, TypeAlias
 
@@ -10,7 +11,6 @@ from agentgate.domain import Case, Trace, canonical_json
 
 from .contract import response_instructions
 from .model_protocol import JudgeRequest
-
 
 JudgeInputSelection: TypeAlias = Literal[
     "final_output",
@@ -21,6 +21,20 @@ RedactValue: TypeAlias = Callable[[Any], Any]
 _INPUT_SELECTIONS = frozenset(
     {"final_output", "output_and_tools", "full_trajectory"}
 )
+_TEMPLATE_VARIABLE = re.compile(r"\{\{([^{}]*)\}\}")
+_PROMPT_VARIABLES = frozenset({"input", "output"})
+
+
+def validate_prompt_template(template: str) -> tuple[str, ...]:
+    """Validate supported evidence placeholders without inspecting their values."""
+
+    if not isinstance(template, str) or not template.strip():
+        raise ValueError("Judge prompt template must not be blank")
+    variables = tuple(match.group(1).strip() for match in _TEMPLATE_VARIABLE.finditer(template))
+    unknown = set(variables).difference(_PROMPT_VARIABLES)
+    if unknown:
+        raise ValueError(f"unknown Judge prompt variables: {', '.join(sorted(unknown))}")
+    return variables
 
 
 def _behavior_attributes(attributes: Mapping[str, Any]) -> dict[str, Any]:
@@ -133,6 +147,8 @@ def build_judge_request(
     timeout_seconds: float,
     max_input_chars: int,
     redact: RedactValue,
+    user_prompt: str | None = None,
+    render_template: bool = False,
 ) -> JudgeRequest:
     """Build one secret-free, case-level request for a Judge provider."""
 
@@ -142,12 +158,49 @@ def build_judge_request(
         raise ValueError("Judge rubric must not be empty")
     if not callable(redact):
         raise TypeError("Judge prompt requires a redaction callable")
+    if not isinstance(render_template, bool):
+        raise ValueError("Judge render_template must be a boolean")  # noqa: TRY004
+    if isinstance(max_input_chars, bool) or not isinstance(max_input_chars, int) or max_input_chars < 1:
+        raise ValueError("max_input_chars must be a positive integer")
+    if user_prompt is not None and (not isinstance(user_prompt, str) or not user_prompt.strip()):
+        raise ValueError("Judge user prompt must not be blank")
+
+    variables = validate_prompt_template(instruction) if render_template else ()
+    if render_template and user_prompt is not None:
+        variables += validate_prompt_template(user_prompt)
 
     protected_instruction = redact(instruction.strip())
+    protected_user_prompt = redact(user_prompt) if user_prompt is not None else None
     protected_rubric = redact(rubric)
     protected_material = redact(select_material(case, trace, input_selection))
     if not isinstance(protected_instruction, str):
         raise TypeError("Judge redactor must return text for instruction input")
+    if protected_user_prompt is not None and not isinstance(protected_user_prompt, str):
+        raise TypeError("Judge redactor must return text for user prompt input")
+
+    # Every occurrence and the canonical evidence share one budget. Repeated
+    # placeholders cannot multiply the amount of execution data sent to the model.
+    evidence_budget = max_input_chars // (len(variables) + 1)
+    evidence = render_bounded_evidence(protected_material, evidence_budget)
+    if variables:
+        if not isinstance(protected_material, Mapping):
+            raise TypeError("Judge redactor must return an object for evidence input")
+        values = {
+            "input": protected_material["turn_inputs"],
+            "output": protected_material["final_output"],
+        }
+        rendered = {
+            name: render_bounded_evidence(values[name], evidence_budget)
+            for name in set(variables)
+        }
+        # A single substitution pass leaves placeholder-looking execution data inert.
+        protected_instruction = _TEMPLATE_VARIABLE.sub(
+            lambda match: rendered[match.group(1).strip()], protected_instruction
+        )
+        if protected_user_prompt is not None:
+            protected_user_prompt = _TEMPLATE_VARIABLE.sub(
+                lambda match: rendered[match.group(1).strip()], protected_user_prompt
+            )
 
     system_prompt = "\n\n".join(
         (
@@ -156,15 +209,15 @@ def build_judge_request(
             response_instructions(pass_threshold),
         )
     )
-    user_prompt = (
-        "Evaluate this Agent execution against the rubric.\n"
+    rendered_user_prompt = (
+        (protected_user_prompt or "Evaluate this Agent execution against the rubric.") + "\n"
         f"Evidence selection: {input_selection}\n\n"
-        f"Evidence:\n{render_bounded_evidence(protected_material, max_input_chars)}"
+        f"Evidence:\n{evidence}"
     )
     return JudgeRequest(
         model_id=model_id,
         system_prompt=system_prompt,
-        user_prompt=user_prompt,
+        user_prompt=rendered_user_prompt,
         temperature=temperature,
         seed=seed,
         max_output_tokens=max_output_tokens,
@@ -179,4 +232,5 @@ __all__ = [
     "build_judge_request",
     "render_bounded_evidence",
     "select_material",
+    "validate_prompt_template",
 ]

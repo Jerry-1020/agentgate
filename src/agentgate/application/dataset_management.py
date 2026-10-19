@@ -166,6 +166,11 @@ class DatasetManagement:
             dataset_id, draft.id, user_team_id=user_team_id
         )
 
+    def delete_published_version(self, dataset_id: str, version: int) -> None:
+        self.get_version(dataset_id, version)
+        user_team_id, _, _ = _user_context()
+        self.repository.delete_dataset_version(dataset_id, version, user_team_id=user_team_id)
+
     def _draft(self, dataset_id: str) -> DatasetVersion:
         draft = self.get_draft(dataset_id)
         if draft is None:
@@ -210,7 +215,11 @@ class DatasetManagement:
         latest = self.repository.get_latest_published_dataset_version(
             dataset_id, user_team_id=user_team_id
         )
-        next_version = (latest.version if latest and latest.version else 0) + 1
+        dataset = self.get_dataset(dataset_id)
+        next_version = max(
+            latest.version if latest and latest.version else 0,
+            dataset.deleted_version_high_watermark,
+        ) + 1
         published = build_publication(
             draft,
             publication_id=str(uuid4()),
@@ -309,4 +318,3 @@ class DatasetManagement:
         dataset = self.get_dataset(dataset_id)
         published = self.get_version(dataset_id, version)
         return export_dataset(dataset, published, format_name)
-

@@ -14,6 +14,8 @@ export interface EvaluationRun {
       kind: string;
       version: string;
       content_sha256: string;
+      children?: { evaluator_id: string; evaluator_version: string; weight: number | null }[];
+      combination?: string | null;
     }[];
     target: {
       adapter_type?: string;

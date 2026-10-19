@@ -6,7 +6,7 @@ const navigation = [
   ['datasets', '测评集'],
   ['evaluators', '评估器'],
   ['tasks', '测评任务'],
-  ['annotations', '人工标注'],
+  ['annotations', '标注'],
 ];
 </script>
 <template>

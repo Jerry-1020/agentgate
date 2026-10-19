@@ -7,7 +7,6 @@ import { agentDirectory, localAgentDirectory } from '../../../api/agent-platform
 import { useAuthStore } from '../../../stores/modules/auth';
 import { ApiError, httpRequest } from '../../../utils/request';
 import { assertLocallyEnabled } from '../utils/evaluator-preferences';
-import TargetStructure from './TargetStructure.vue';
 import {
   api,
   request,
@@ -16,6 +15,7 @@ import {
   type BankTarget,
 } from '../../../api/evaluations';
 import { recommendEvaluators } from '../utils/evaluator-guidance';
+import { selectableEvaluator } from '../utils/evaluator-display';
 import { refreshTaskLinks, saveTaskLink, type TaskLink } from '../utils/task-links';
 const props = defineProps<{
   source?: {
@@ -34,7 +34,9 @@ const taskKind = ref<'single' | 'ab'>('single'),
   includeStatic = ref(false);
 const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
 const platformSelection = ref<AgentTargetSelection | null>(null);
-const localBankSelected = computed(() => platformSelection.value?.localTarget?.adapter_type === 'local_bank');
+const localBankSelected = computed(
+  () => platformSelection.value?.localTarget?.adapter_type === 'local_bank',
+);
 const auth = useAuthStore();
 const inbankPlatformSelected = computed(() =>
   auth.loginMode === 'bank' && !!platformSelection.value && !platformSelection.value.localTarget,
@@ -50,7 +52,9 @@ const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId :
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   platformSelection.value = selection;
   if (selection?.localTarget?.adapter_type === 'local_bank') {
-    concurrency.value = 1; timeout.value = 180; retries.value = 0;
+    concurrency.value = 1;
+    timeout.value = 180;
+    retries.value = 0;
   }
 }
 const platformCandidateVersion = ref('');
@@ -72,7 +76,6 @@ watch(platformSelection, async (selection) => {
     platformCandidateVersions.value = [];
   }
 });
-const gradingMode = ref<'overall' | 'per_turn'>('overall');
 const staticDialog = ref(false),
   staticLoading = ref(false),
   staticError = ref('');
@@ -117,7 +120,11 @@ async function confirmStatic() {
       }
       if (exactTarget && report.target_descriptor_sha256 !== exactTarget.content_sha256)
         throw Error('分析报告与所选智能体定义不一致，请重新分析。');
-      reports.push({ version, reportId: report.id, descriptorHash: report.target_descriptor_sha256 });
+      reports.push({
+        version,
+        reportId: report.id,
+        descriptorHash: report.target_descriptor_sha256,
+      });
       if (!staticReport.value) staticReport.value = report;
     }
     staticReports.value = reports;
@@ -191,88 +198,32 @@ const branchMismatch = computed(
     normalizedBranch(gitBranchUrl.value) !==
       normalizedBranch(bankTarget.value.git_branch_url ?? ''),
 );
-const targetDescriptor = computed(() => {
-  if (branchMismatch.value) return undefined;
-  if (platformSelection.value?.localTarget) return platformSelection.value.localTarget.descriptor;
-  if (bankTarget.value) return bankTarget.value.descriptor;
-  if (platformSelection.value) {
-    const sel = platformSelection.value;
-    const topology = buildFrontendTopology(sel);
-    if (topology) {
-      return {
-        ref: {
-          source_id: 'platform',
-          target_type: 'agent',
-          external_target_id: sel.agentId,
-          external_version_id: sel.agentVersion,
-        },
-        display_name: sel.agentName,
-        description: null,
-        prompt: null,
-        prompt_sha256: null,
-        skills: (sel.skills ?? []).map((s) => ({
-          external_skill_id: s.id,
-          external_version_id: 'v1',
-          name: s.name ?? s.id,
-          description: s.description ?? '',
-          tools: [],
-          prompt: null,
-        })),
-        tools: (sel.tools ?? []).map((t) => ({
-          name: t?.function?.name ?? '',
-          description: t?.function?.description ?? '',
-          input_schema: {},
-        })),
-        input_schema: {},
-        output_schema: {},
-        metadata: { topology },
-        fetched_at: '',
-        content_sha256: '',
-      } as any;
-    }
-  }
-  return undefined;
-});
+const staticTarget = computed(() =>
+  auth.loginMode === 'external'
+    ? (platformSelection.value?.localTarget?.descriptor ?? bankTarget.value?.descriptor)
+    : undefined,
+);
+const staticAvailable = computed(() =>
+  staticTarget.value
+    ? staticTarget.value.skills.length >= 2
+    : auth.loginMode === 'external' &&
+      taskKind.value === 'ab' &&
+      !platformSelection.value &&
+      selectedAgent.value === 'demo',
+);
+watch(
+  [
+    platformSelection,
+    selectedAgent,
+    selectedVersion,
+    candidateVersion,
+    taskKind,
+    () => auth.loginMode,
+    () => auth.teamId,
+  ],
+  cancelAnalysis,
+);
 
-const staticTarget = computed(() => auth.loginMode === 'external'
-  ? platformSelection.value?.localTarget?.descriptor ?? bankTarget.value?.descriptor
-  : undefined);
-const staticAvailable = computed(() => staticTarget.value
-  ? staticTarget.value.skills.length >= 2
-  : auth.loginMode === 'external' && taskKind.value === 'ab' && !platformSelection.value && selectedAgent.value === 'demo');
-watch([platformSelection, selectedAgent, selectedVersion, candidateVersion, taskKind,
-  () => auth.loginMode, () => auth.teamId], cancelAnalysis);
-
-function buildFrontendTopology(sel: NonNullable<typeof platformSelection.value>) {
-  if (!sel.tools?.length && !sel.skills?.length) return null;
-  const composition = sel.platformArrangeType ?? sel.typeGroup.split('/')[0] ?? 'base';
-  const nodes: { id: string; kind: string; label: string; description: string }[] = [
-    { id: sel.agentId, kind: 'agent', label: sel.agentName, description: `被测智能体（${composition}）` },
-  ];
-  const edges: { source: string; target: string; relation: string }[] = [];
-  for (const skill of sel.skills ?? []) {
-    const skillId = `${sel.agentId}:skill:${skill.id}`;
-    nodes.push({ id: skillId, kind: 'skill', label: skill.name ?? skill.id, description: skill.description ?? '' });
-    edges.push({ source: sel.agentId, target: skillId, relation: 'includes_skill' });
-    for (const toolName of skill.tools ?? []) {
-      const toolId = `${sel.agentId}:tool:${toolName}`;
-      if (!nodes.some((n) => n.id === toolId)) {
-        nodes.push({ id: toolId, kind: 'tool', label: toolName, description: `工具：${toolName}` });
-      }
-      edges.push({ source: skillId, target: toolId, relation: 'includes_tool' });
-    }
-  }
-  for (const tool of sel.tools ?? []) {
-    const name = tool?.function?.name ?? '';
-    if (!name) continue;
-    const toolId = `${sel.agentId}:tool:${name}`;
-    if (!nodes.some((n) => n.id === toolId)) {
-      nodes.push({ id: toolId, kind: 'tool', label: name, description: tool?.function?.description ?? '' });
-      edges.push({ source: sel.agentId, target: toolId, relation: 'includes_tool' });
-    }
-  }
-  return { composition, nodes, edges };
-}
 watch(
   bankTarget,
   (target) => {
@@ -292,7 +243,7 @@ const versionOptions = computed(() =>
     : versions.value,
 );
 watch(selectedAgent, (agent) => {
-  if (taskKind.value !== 'ab') return;
+  if (auth.loginMode !== 'external' || taskKind.value !== 'ab') return;
   selectedVersion.value =
     agent === 'demo'
       ? (versions.value[0]?.id ?? '')
@@ -371,7 +322,7 @@ async function openCreate(source?: {
     const [d, e] = await Promise.all([api.datasets(), api.evaluators()]);
     if (ticket !== formSequence) return;
     datasets.value = d.filter((x) => x.version !== null && !x.archived);
-    evaluators.value = e.filter((x) => x.enabled && x.latest_version && x.kind !== 'hybrid');
+    evaluators.value = e.filter(selectableEvaluator);
     selectedDataset.value = source?.id || datasets.value[0]?.id || '';
     selectedEvaluators.value = source?.evaluatorId ? [source.evaluatorId] : [];
   } catch (e) {
@@ -384,7 +335,7 @@ const legacyLoading = ref(false);
 let legacyLoaded = false;
 let legacySequence = 0;
 async function loadLegacyTargets() {
-  if (legacyLoaded || legacyLoading.value) return;
+  if (auth.loginMode !== 'external' || legacyLoaded || legacyLoading.value) return;
   const ticket = ++legacySequence;
   legacyLoading.value = true;
   targetError.value = '';
@@ -420,6 +371,22 @@ async function loadLegacyTargets() {
     if (ticket === legacySequence) legacyLoading.value = false;
   }
 }
+watch(
+  () => auth.loginMode,
+  () => {
+    legacySequence++;
+    legacyLoaded = false;
+    legacyLoading.value = false;
+    targetError.value = '';
+    versions.value = [];
+    bankTargets.value = [];
+    selectedAgent.value = 'demo';
+    selectedVersion.value = '';
+    candidateVersion.value = '';
+    if (taskKind.value === 'ab') void loadLegacyTargets();
+  },
+  { flush: 'sync' },
+);
 const recommended = ref<string[]>([]),
   recommendationError = ref('');
 let recommendationSequence = 0;
@@ -493,11 +460,14 @@ async function submit() {
     formError.value = '本地智能体仅支持行外模式。';
     return;
   }
-  if (localTarget?.adapter_type === 'local_bank' && (concurrency.value !== 1 || retries.value !== 0 || timeout.value > 300)) {
+  if (
+    localTarget?.adapter_type === 'local_bank' &&
+    (concurrency.value !== 1 || retries.value !== 0 || timeout.value > 300)
+  ) {
     formError.value = '贷款智能体要求并发 1、重试 0、超时不超过 300 秒。';
     return;
   }
-  if (taskKind.value === 'single' && !platform) {
+  if ((taskKind.value === 'single' || auth.loginMode !== 'external') && !platform) {
     formError.value = '请完整选择被测智能体及版本。';
     return;
   }
@@ -512,11 +482,6 @@ async function submit() {
     }
   }
   formError.value = '';
-  if (gradingMode.value === 'per_turn') {
-    formError.value =
-      '逐轮评分尚未接入后端任务契约；当前不会以整体评分代替提交。请先选择整体评分。';
-    return;
-  }
   if (branchMismatch.value) {
     formError.value = '该 Git 分支尚未登记可运行版本，请选择已登记分支，或先部署并登记所填分支。';
     return;
@@ -746,32 +711,52 @@ async function submit() {
     creating = true;
     if (localTarget && taskKind.value === 'single') {
       const common = {
-        dataset_id: snapshot.datasetId, dataset_version: snapshot.datasetVersion,
-        case_ids: snapshot.caseIds, evaluator_refs: snapshot.evaluatorRefs,
-        timeout_seconds: snapshot.timeout, scheduled_for: snapshot.scheduledFor,
+        dataset_id: snapshot.datasetId,
+        dataset_version: snapshot.datasetVersion,
+        case_ids: snapshot.caseIds,
+        evaluator_refs: snapshot.evaluatorRefs,
+        timeout_seconds: snapshot.timeout,
+        scheduled_for: snapshot.scheduledFor,
       };
       const created = await request<{ id?: string; run_id?: string; run_ids?: string[] }>(
-        localTarget.adapter_type === 'local_bank' ? '/bank-evaluations'
-          : snapshot.repetitions > 1 ? '/stability-experiments' : '/evaluations',
-        'POST', localTarget.adapter_type === 'local_bank'
-          ? { ...common, name: snapshot.name, mode: localTarget.mode,
+        localTarget.adapter_type === 'local_bank'
+          ? '/bank-evaluations'
+          : snapshot.repetitions > 1
+            ? '/stability-experiments'
+            : '/evaluations',
+        'POST',
+        localTarget.adapter_type === 'local_bank'
+          ? {
+              ...common,
+              name: snapshot.name,
+              mode: localTarget.mode,
               target_descriptor_sha256: localTarget.descriptor.content_sha256,
-              repetitions: snapshot.repetitions }
-          : { ...common, version: platform!.target.agentVersion,
-              max_parallel_cases: snapshot.concurrency, max_retries: snapshot.retries,
-              ...(snapshot.repetitions > 1 ? { repetitions: snapshot.repetitions } : {}) },
+              repetitions: snapshot.repetitions,
+            }
+          : {
+              ...common,
+              version: platform!.target.agentVersion,
+              max_parallel_cases: snapshot.concurrency,
+              max_retries: snapshot.retries,
+              ...(snapshot.repetitions > 1 ? { repetitions: snapshot.repetitions } : {}),
+            },
       );
       const id = created.id ?? created.run_id;
       if (!id) throw Error('Invalid local task response');
-      const link: TaskLink = { id, name: snapshot.name,
+      const link: TaskLink = {
+        id,
+        name: snapshot.name,
         kind: snapshot.repetitions > 1 ? 'stability' : 'single',
-        runIds: created.run_ids ?? [id], staticReports: snapshot.staticReports };
+        runIds: created.run_ids ?? [id],
+        staticReports: snapshot.staticReports,
+      };
       await saveTaskLink(link);
       emit('created', link);
       ElMessage.success('测评任务已提交');
       return;
     }
-    if (localTarget?.adapter_type === 'local_bank') invalid('该贷款智能体仅登记一个版本，暂不支持 A/B试验。');
+    if (localTarget?.adapter_type === 'local_bank')
+      invalid('该贷款智能体仅登记一个版本，暂不支持 A/B试验。');
     if (platform && !localTarget && taskKind.value === 'ab') {
       const target = platform.target;
       const created = await httpRequest<{
@@ -977,7 +962,7 @@ onMounted(() => void openCreate(props.source));
     :close-on-click-modal="false"
   >
     <p v-if="formLoading || datasetLoading" role="status">正在加载任务配置…</p>
-    <p v-if="targetError" role="alert">{{ targetError }}</p>
+    <p v-if="auth.loginMode === 'external' && targetError" role="alert">{{ targetError }}</p>
 
     <div class="form-section-heading full">
       <span>01</span>
@@ -1054,13 +1039,11 @@ onMounted(() => void openCreate(props.source));
         >
         <p class="muted platform-candidate-hint">与基线版本同一目录加载；必须选择不同的版本。</p>
       </div>
-      <p class="muted full">
-        平台目录的图谱数据来源于智能体描述符；行内部署如未提供拓扑信息，此处仅展示已注册的
-        Skill 与 Tool 列表。
+      <p v-if="auth.loginMode === 'external' && legacyLoading" class="full" role="status">
+        正在加载 A/B 智能体目录…
       </p>
-      <p v-if="legacyLoading" class="full" role="status">正在加载 A/B 智能体目录…</p>
       <div
-        v-if="taskKind === 'ab' && !platformSelection"
+        v-if="auth.loginMode === 'external' && taskKind === 'ab' && !platformSelection"
         class="target-choice full"
         :class="{ 'is-ab': taskKind === 'ab', 'has-git-branch': usesGitBranch }"
       >
@@ -1145,12 +1128,8 @@ onMounted(() => void openCreate(props.source));
         </p>
       </div>
       <p v-if="branchMismatch" class="notice error full" role="alert">
-        该地址未匹配到当前智能体的已登记分支，版本与图谱不可用。请先部署并登记，或从下拉建议恢复当前分支。
+        该地址未匹配到当前智能体的已登记分支，版本不可用。请先部署并登记，或从下拉建议恢复当前分支。
       </p>
-      <details v-if="targetDescriptor" class="full task-graph">
-        <summary>智能体图谱</summary>
-        <TargetStructure :descriptor="targetDescriptor" hide-source />
-      </details>
       <div class="form-section-heading full">
         <span>04</span>
         <div><h3>测评数据</h3></div>
@@ -1216,34 +1195,6 @@ onMounted(() => void openCreate(props.source));
         @static="openStatic"
         @cancel-analysis="cancelAnalysis"
       />
-      <div class="full grading-mode">
-        <h4>多轮对话评分模式</h4>
-        <div class="task-kind-choice" role="radiogroup" aria-label="评分模式">
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="gradingMode === 'overall'"
-            :class="{ selected: gradingMode === 'overall' }"
-            @click="
-              gradingMode = 'overall';
-              formError = '';
-            "
-          >
-            <b>整体评分</b><small>按完整会话汇总评估结果</small></button
-          ><button
-            type="button"
-            role="radio"
-            :aria-checked="gradingMode === 'per_turn'"
-            :class="{ selected: gradingMode === 'per_turn' }"
-            @click="gradingMode = 'per_turn'"
-          >
-            <b>逐轮评分</b><small>逐轮评判后汇总 · 待后端接入</small>
-          </button>
-        </div>
-        <p v-if="gradingMode === 'per_turn'" class="notice warn">
-          当前后端不支持任务级逐轮 LLM 评分，暂不能启动此模式。
-        </p>
-      </div>
       <div class="form-section-heading full">
         <span>06</span>
         <div><h3>执行设置</h3></div>
@@ -1288,7 +1239,9 @@ onMounted(() => void openCreate(props.source));
             class="input"
             :disabled="taskKind === 'ab'"
             v-model.number="timeout"
-            :title="bankTarget || localBankSelected ? '1–300 秒，最大 300 秒' : '1–3600 秒，最大 3600 秒'"
+            :title="
+              bankTarget || localBankSelected ? '1–300 秒，最大 300 秒' : '1–3600 秒，最大 3600 秒'
+            "
             aria-label="执行超时（秒）"
             type="number"
             min="1"
@@ -1332,9 +1285,11 @@ onMounted(() => void openCreate(props.source));
       }}
       ·
       {{
-        (taskKind === 'single'
-          ? platformSelection?.agentName
-          : versionOptions.find((v) => v.id === selectedVersion)?.label) ?? '待选目标'
+        platformSelection?.agentName ??
+        (auth.loginMode === 'external' && taskKind === 'ab'
+          ? versionOptions.find((v) => v.id === selectedVersion)?.label
+          : undefined) ??
+        '待选目标'
       }}
       · v{{ selectedDatasetVersion ?? '—' }} · {{ executionCases.length }} 条用例 ×
       {{ repetitions }} 次 · {{ selectedEvaluators.length }} 个评估器
@@ -1374,7 +1329,7 @@ onMounted(() => void openCreate(props.source));
           :disabled="
             submitting ||
             legacyLoading ||
-            (taskKind === 'single' && !platformSelection) ||
+            ((taskKind === 'single' || auth.loginMode !== 'external') && !platformSelection) ||
             (taskKind === 'ab' && !!platformSelection && !platformCandidateVersion) ||
             (taskKind === 'ab' &&
               !!platformSelection &&
@@ -1445,11 +1400,13 @@ onMounted(() => void openCreate(props.source));
 }
 .platform-candidate-row .platform-candidate-field {
   grid-column: 3;
+  grid-row: 1;
 }
 .platform-candidate-row .platform-candidate-hint {
   grid-column: 1 / 3;
-  align-self: end;
-  margin: 0 0 24px;
+  grid-row: 1;
+  align-self: center;
+  margin: 0;
 }
 .dataset-selection {
   display: grid;
@@ -1465,6 +1422,15 @@ onMounted(() => void openCreate(props.source));
   min-width: 0;
 }
 @media (max-width: 650px) {
+  .platform-candidate-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .platform-candidate-row .platform-candidate-field,
+  .platform-candidate-row .platform-candidate-hint {
+    grid-column: auto;
+    grid-row: auto;
+  }
   .dataset-selection {
     grid-template-columns: 1fr;
   }

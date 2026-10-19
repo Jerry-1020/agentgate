@@ -70,6 +70,11 @@ export function recommendationReason(
 }
 
 export function evaluatorTechnicalChecks(evaluator: EvaluatorSummary, cases: any[]): string[] {
+  if (evaluator.kind === 'llm_group')
+    return [
+      '各子评估器使用独立的模型与提示词评分。',
+      '按配置权重汇总总分，并保留各子项得分、理由与调用记录。',
+    ];
   const checks = cases.flatMap((c) => c.turns.flatMap((t: any) => t.expectations ?? []));
   const spec: Record<string, [string, string, string]> = {
     skill_routing: [

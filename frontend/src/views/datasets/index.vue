@@ -73,21 +73,24 @@ async function openDelete(item: DatasetSummary) {
     showError(e, '无法读取待删除版本');
   }
 }
-async function deleteSelectedDraft() {
+async function deleteSelectedVersion() {
   if (!deleteItem.value || deleting.value) return;
   const version = deleteVersions.value.find((v) => v.id === deleteVersionId.value);
-  if (version?.status !== 'draft') return;
+  if (!version) return;
   try {
     await ElMessageBox.confirm(
-      '确认删除此草稿及其中的用例？已发布版本和历史报告不变。',
-      '删除草稿',
-      { type: 'warning', confirmButtonText: '删除草稿', cancelButtonText: '取消' },
+      deleteVersions.value.length === 1
+        ? '删除此版本将同时删除整个测评集。历史测评报告保留。确认删除？'
+        : '确认删除所选版本及其中的用例？其他版本和历史测评报告保留。',
+      '删除版本',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
     );
     deleting.value = true;
-    await datasetApi.discardDraft(deleteItem.value.id);
+    if (version.status === 'draft') await datasetApi.discardDraft(deleteItem.value.id);
+    else if (version.version !== null) await datasetApi.deleteVersion(deleteItem.value.id, version.version);
     deleteItem.value = null;
     datasets.value = await datasetApi.list();
-    ElMessage.success('草稿已删除，测评集记录保留');
+    ElMessage.success(deleteVersions.value.length === 1 ? '测评集已删除' : '版本已删除');
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') showError(e, '删除失败');
   } finally {
@@ -582,13 +585,24 @@ async function createDraft(base: number | null) {
 }
 
 async function discardDraft() {
-  await ElMessageBox.confirm('放弃当前草稿？草稿中的修改将无法恢复。', '放弃草稿', {
+  const hasPublished = versions.value.some((v) => v.status === 'published');
+  await ElMessageBox.confirm(hasPublished
+    ? '放弃当前草稿？草稿中的修改将无法恢复。'
+    : '该测评集没有已发布版本，放弃草稿将同时删除整个测评集。确认删除？', '放弃草稿', {
     type: 'warning',
   });
   await datasetApi.discardDraft(activeDatasetId.value);
-  await selectDataset(activeDatasetId.value);
+  editorDirty.value = false;
+  if (hasPublished) await selectDataset(activeDatasetId.value);
+  else {
+    showingDetail.value = false;
+    activeDatasetId.value = '';
+    versions.value = [];
+    chooseVersion();
+    await router.replace('/datasets');
+  }
   datasets.value = await datasetApi.list();
-  ElMessage.success('草稿已放弃');
+  ElMessage.success(hasPublished ? '草稿已放弃' : '测评集已删除');
 }
 
 async function publishDraft() {
@@ -657,11 +671,19 @@ onMounted(async () => {
 <template>
   <section class="dataset-workspace" aria-labelledby="dataset-workspace-title">
     <div class="workspace-heading">
-      <div>
+      <div class="workspace-title-block">
         <button v-if="showingDetail" class="link" data-testid="back-datasets" @click="backToList">
           ← 返回测评集列表
         </button>
-        <h1 id="dataset-workspace-title">{{ showingDetail ? activeDataset?.name : '测评集' }}</h1>
+        <div class="workspace-title-row">
+          <h1 id="dataset-workspace-title">{{ showingDetail ? activeDataset?.name : '测评集' }}</h1>
+          <p
+            v-if="showingDetail && activeDataset?.description?.trim()"
+            class="dataset-description"
+          >
+            {{ activeDataset.description }}
+          </p>
+        </div>
       </div>
       <div v-if="!showingDetail" class="actions" style="margin-left: auto">
         <button class="primary" data-testid="create-dataset" :disabled="busy" @click="openCreate">
@@ -683,12 +705,6 @@ onMounted(async () => {
         >
           编辑基本信息</button
         ><button class="secondary" @click="versionHistoryDialog = true">版本记录</button
-        ><button
-          class="secondary"
-          :disabled="busy || !copySources.length"
-          @click="openCopy(activeDataset)"
-        >
-          复制测评集</button
         ><button class="secondary" @click="openExport(activeDataset.id, activeVersionId)">
           导出样本
         </button>
@@ -910,7 +926,7 @@ onMounted(async () => {
           </tbody>
         </table>
         <p v-if="!sampleView && !filteredSamples.length" class="empty">
-          暂无样本，点击新增样本进行手动创建、文件导入或从标注导入。
+          暂无样本，点击新增样本进行手动创建或文件导入。
         </p>
         <CaseEditor
           v-if="sampleView"
@@ -985,7 +1001,7 @@ onMounted(async () => {
     <p class="muted">
       {{
         deleteHasPublished
-          ? '当前后端只支持删除草稿。已发布版本删除尚无接口，暂不可提交；不会用归档替代删除。'
+          ? '可删除草稿或已发布版本；删除最后一个版本时，将同时删除测评集。历史测评报告保留。'
           : '该测评集没有已发布版本，可永久删除整个测评集记录（不可恢复）。'
       }}
     </p>
@@ -994,11 +1010,11 @@ onMounted(async () => {
       ><button
         class="primary"
         :disabled="
-          deleting || deleteVersions.find((v) => v.id === deleteVersionId)?.status !== 'draft'
+          deleting || !deleteVersions.some((v) => v.id === deleteVersionId)
         "
-        @click="deleteSelectedDraft"
+        @click="deleteSelectedVersion"
       >
-        删除草稿
+        删除
       </button>
       <button
         v-if="!deleteHasPublished"
@@ -1136,7 +1152,44 @@ section.dataset-workspace {
 .workspace-heading .link {
   margin-bottom: 12px;
 }
+.workspace-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+.workspace-title-block {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.workspace-title-row {
+  overflow-wrap: anywhere;
+}
+.workspace-title-row h1 {
+  margin: 0;
+}
+.workspace-title-row .dataset-description {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+.workspace-heading .actions {
+  flex: 0 0 auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.workspace-heading .actions button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 @media (max-width: 760px) {
+  .workspace-title-block {
+    flex: initial;
+    width: 100%;
+  }
+  .workspace-heading .actions {
+    align-self: stretch;
+    justify-content: flex-start;
+  }
   .dataset-workspace .dataset-layout {
     display: block;
     min-height: 0;
