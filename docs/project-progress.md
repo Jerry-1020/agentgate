@@ -2,6 +2,42 @@
 
 Last updated: 2026-10-19
 
+## 2026-10-19 — Restore complete sample expectations
+
+The current sample page replaces the two simplified state/tool controls with the
+reference backup's Add expectation workflow: final state, tool arguments and final
+output. Adapt the existing ExpectationEditor and reuse the current domain, dataset
+API, publication and rule execution contracts. All rules stay configurable and
+removable after reload. The basic expected-output field shares one equality-rule ID
+with the complete editor, so editing either does not duplicate or erase checks.
+
+The full editor preserves unfinished JSON drafts, validates required references and
+numeric conditions, edits membership as a JSON array, and exposes JSON Schema.
+Overflowing JSON numbers are rejected rather than silently serialized as null.
+Fix `Equals.expected` and `OneOf.allowed` JSON serialization of frozen nested
+objects/arrays while preserving immutable domain values. No schema migration or
+Agent directory/token routing change is introduced.
+
+The retained `examples/expectation-rules/` dataset contains a two-turn sample with
+state, nested tool arguments and final-output checks, along with synthetic pass/fail
+traces, a replay script and deterministic results. HTTP contract tests cover authoring,
+editing, persistence, publication and export; RunManagement/RunEngine tests create
+and execute real local tasks and read persisted reports, including an immutable v1
+task snapshot after publishing v2. This is isolated acceptance with synthetic evidence,
+not a live in-bank or external Agent execution.
+
+Verification: related backend regression **245 passed**; the actual sample editor and
+manual-create wizard browser suite **41 passed** with the production theme, desktop
+and narrow-screen layout checks; the shared editor's older CaseEditor entry has
+**3 passed** isolated browser regressions (44 browser cases total). Existing frontend
+unit tests **112 passed**, and
+the output helper suite including the new overflow case **6 passed** (113 distinct
+unit cases overall). Type checking, affected ESLint and production build pass; the
+existing large-bundle warning remains. Other-field regression covers initialization,
+structured input, classification, multi-turn data, expected Skill and tool constraints,
+hidden notes/extensions and unchanged expectation identities. The user subsequently
+authorized committing and pushing this verified change to `integration/baibo1017`.
+
 ## 2026-10-19 — Integration with baibo1017, including PR #57
 
 The user authorized delivering both PR #57 (head `98ff389`) and the execution-parity

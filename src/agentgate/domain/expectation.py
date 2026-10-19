@@ -6,9 +6,16 @@ import re
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
-from .base import DomainModel, FrozenJsonObject, canonical_json, freeze_json, require_non_blank
+from .base import (
+    DomainModel,
+    FrozenJsonObject,
+    canonical_json,
+    freeze_json,
+    require_non_blank,
+    thaw_json,
+)
 
 
 class Equals(DomainModel):
@@ -21,6 +28,10 @@ class Equals(DomainModel):
     @classmethod
     def freeze_expected(cls, value: Any) -> Any:
         return freeze_json(value)
+
+    @field_serializer("expected", when_used="json")
+    def serialize_expected(self, value: Any) -> Any:
+        return thaw_json(value)
 
 
 class WithinTolerance(DomainModel):
@@ -76,6 +87,10 @@ class OneOf(DomainModel):
     @classmethod
     def freeze_allowed(cls, value: Any) -> tuple[Any, ...]:
         return tuple(freeze_json(item) for item in value)
+
+    @field_serializer("allowed", when_used="json")
+    def serialize_allowed(self, value: tuple[Any, ...]) -> list[Any]:
+        return [thaw_json(item) for item in value]
 
     @model_validator(mode="after")
     def validate_unique_values(self) -> "OneOf":

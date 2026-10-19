@@ -3,6 +3,33 @@
 Status: backend implementation complete; generation and public benchmarks remain
 separate future capabilities tracked in `docs/project-progress.md`
 
+### 2026-10-19 — Complete expected-result editing in the current sample page
+
+The current sample editor restores the reference backup's declarative expectation
+workflow: an Add expectation menu offers final state, tool arguments, and final output.
+Reuse the existing typed expectation schema, DatasetManagement persistence/publication,
+and `final-state`, `tool-arguments`, `final-output` evaluators. Adapt the existing
+ExpectationEditor instead of copying the backup application or adding another API.
+
+- Keep every expectation visible and individually configurable/removable after reload.
+  The basic expected-output field and its complete-output equality rule share one ID;
+  editing either updates that rule, and saving never appends a duplicate.
+- Preserve unfinished JSON locally and block saving/turn changes until corrected;
+  require state/tool paths and tool names, validate numerical conditions, and support
+  JSON arrays for membership plus JSON Schema objects. Reject overflowing JSON numbers.
+- Preserve the rest of the Case/Turn contract, including initialization variables,
+  category, multi-turn input, Skill/tool constraints, notes, extensions and stored
+  execution-path expectations. Agent directory and token mode routing do not change.
+- Serialize frozen JSON objects in `Equals.expected` and `OneOf.allowed` explicitly
+  at the JSON boundary. The domain values remain recursively immutable; there is no
+  schema migration or alternate payload format.
+
+Verification uses private SQLite and isolated browser fixtures: author/edit/reload/
+publish, read-only publications, other-field regression, actual three-rule pass/fail,
+and RunManagement/RunEngine reports pinned to the selected DatasetVersion. Retained
+reproduction data and synthetic traces are in `examples/expectation-rules/`; these
+are offline acceptance evidence, not an in-bank or external Agent deployment test.
+
 Authority:
 
 1. `docs/architecture.md`

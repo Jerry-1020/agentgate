@@ -1,0 +1,595 @@
+{
+  "offline_rules_verified": true,
+  "trace_source": "synthetic",
+  "dataset_id": "expectation-rules-example",
+  "dataset_version": 1,
+  "dataset_content_sha256": "dbae63a17d4e130016893f85be9797ddcafd4e00a3c61bc9e7baa07a85927ab0",
+  "scenarios": {
+    "pass": [
+      {
+        "run_id": "expectation-rules-pass",
+        "case_id": "expectation-rules-case",
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evaluator_id": "final-state",
+        "evaluator_name": "Final State",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "cd594f7a2fbf9d2d5e6f366940847d002fe8fec579a5df482435ab40ba127a4b",
+        "evaluator_kind": "rule",
+        "dimension": "state",
+        "metric": "final_state_match",
+        "severity": "standard",
+        "outcome": "pass",
+        "score": 1.0,
+        "reason": "所有适用检查均通过",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": null,
+        "checks": [
+          {
+            "name": "进入人工复核",
+            "turn_id": "review-turn",
+            "expectation_id": "review-state",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "decision 符合预期",
+            "expected": {
+              "kind": "one_of",
+              "allowed": [
+                {
+                  "history": [
+                    {
+                      "approved": false
+                    }
+                  ],
+                  "status": "review"
+                },
+                {
+                  "history": [],
+                  "status": "pending"
+                }
+              ]
+            },
+            "actual": {
+              "status": "review",
+              "history": [
+                {
+                  "approved": false
+                }
+              ]
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "is_one_of",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000004"
+            ],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          },
+          {
+            "name": "最终状态保留 JSON 类型",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-state",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "decision.details 符合预期",
+            "expected": {
+              "kind": "equals",
+              "expected": {
+                "approved": true,
+                "limit": 120000,
+                "reasons": [
+                  {
+                    "code": "verified",
+                    "sources": [
+                      "manual"
+                    ]
+                  }
+                ],
+                "reviewer": null
+              }
+            },
+            "actual": {
+              "approved": true,
+              "limit": 120000,
+              "reasons": [
+                {
+                  "code": "verified",
+                  "sources": [
+                    "manual"
+                  ]
+                }
+              ],
+              "reviewer": null
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "equals",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000008"
+            ],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          }
+        ]
+      },
+      {
+        "run_id": "expectation-rules-pass",
+        "case_id": "expectation-rules-case",
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evaluator_id": "tool-arguments",
+        "evaluator_name": "Tool Arguments",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "3576f7688371a7a6f64c4654e8c0bcc4544f4d814ae63b5e93f570e5daacf2df",
+        "evaluator_kind": "rule",
+        "dimension": "tool_use",
+        "metric": "tool_argument_accuracy",
+        "severity": "standard",
+        "outcome": "pass",
+        "score": 1.0,
+        "reason": "所有适用检查均通过",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": null,
+        "checks": [
+          {
+            "name": "最后一次查询正确客户",
+            "turn_id": "review-turn",
+            "expectation_id": "review-tool",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "工具参数符合预期",
+            "expected": {
+              "kind": "equals",
+              "expected": "C-100"
+            },
+            "actual": "C-100",
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "equals",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000003"
+            ],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          },
+          {
+            "name": "每次审批额度均在范围内",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-tool",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "工具参数符合预期",
+            "expected": {
+              "kind": "within_range",
+              "minimum": 100000.0,
+              "maximum": 150000.0
+            },
+            "actual": [
+              120000,
+              130000
+            ],
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "within_range",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000006",
+              "0000000000000007"
+            ],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          }
+        ]
+      },
+      {
+        "run_id": "expectation-rules-pass",
+        "case_id": "expectation-rules-case",
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evaluator_id": "final-output",
+        "evaluator_name": "Final Output",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "48bff7696645cda6693687b5940b82d90a94bd25fec9b14ab953ff3ae6127c11",
+        "evaluator_kind": "rule",
+        "dimension": "answer",
+        "metric": "final_output_match",
+        "severity": "standard",
+        "outcome": "pass",
+        "score": 1.0,
+        "reason": "所有适用检查均通过",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": null,
+        "checks": [
+          {
+            "name": "复核提交文案",
+            "turn_id": "review-turn",
+            "expectation_id": "review-output",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "最终输出符合预期",
+            "expected": {
+              "kind": "matches_pattern",
+              "pattern": "^已提交复核$"
+            },
+            "actual": "已提交复核",
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "matches_pattern",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          },
+          {
+            "name": "完整输出满足 Schema",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-output",
+            "outcome": "pass",
+            "score": 1.0,
+            "reason": "最终输出符合预期",
+            "expected": {
+              "kind": "matches_json_schema",
+              "json_schema": {
+                "properties": {
+                  "answer": {
+                    "const": "审核完成"
+                  },
+                  "decision": {
+                    "properties": {
+                      "approved": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "approved"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "answer",
+                  "decision"
+                ],
+                "type": "object"
+              }
+            },
+            "actual": {
+              "answer": "审核完成",
+              "decision": {
+                "approved": true
+              }
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "matches_json_schema",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [],
+            "failure_stage": null,
+            "failure_sequence": null,
+            "failure_span_id": null
+          }
+        ]
+      }
+    ],
+    "fail": [
+      {
+        "run_id": "expectation-rules-fail",
+        "case_id": "expectation-rules-case",
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "evaluator_id": "final-state",
+        "evaluator_name": "Final State",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "cd594f7a2fbf9d2d5e6f366940847d002fe8fec579a5df482435ab40ba127a4b",
+        "evaluator_kind": "rule",
+        "dimension": "state",
+        "metric": "final_state_match",
+        "severity": "standard",
+        "outcome": "fail",
+        "score": 0.0,
+        "reason": "值不在允许集合中；实际值与预期值不相等",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": "final_state",
+        "checks": [
+          {
+            "name": "进入人工复核",
+            "turn_id": "review-turn",
+            "expectation_id": "review-state",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "值不在允许集合中",
+            "expected": {
+              "kind": "one_of",
+              "allowed": [
+                {
+                  "history": [
+                    {
+                      "approved": false
+                    }
+                  ],
+                  "status": "review"
+                },
+                {
+                  "history": [],
+                  "status": "pending"
+                }
+              ]
+            },
+            "actual": {
+              "status": "rejected",
+              "history": [
+                {
+                  "approved": false
+                }
+              ]
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "is_one_of",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000004"
+            ],
+            "failure_stage": "final_state",
+            "failure_sequence": 3,
+            "failure_span_id": "0000000000000004"
+          },
+          {
+            "name": "最终状态保留 JSON 类型",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-state",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "实际值与预期值不相等",
+            "expected": {
+              "kind": "equals",
+              "expected": {
+                "approved": true,
+                "limit": 120000,
+                "reasons": [
+                  {
+                    "code": "verified",
+                    "sources": [
+                      "manual"
+                    ]
+                  }
+                ],
+                "reviewer": null
+              }
+            },
+            "actual": {
+              "approved": "true",
+              "limit": 120000,
+              "reasons": [
+                {
+                  "code": "verified",
+                  "sources": [
+                    "manual"
+                  ]
+                }
+              ],
+              "reviewer": null
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "equals",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000008"
+            ],
+            "failure_stage": "final_state",
+            "failure_sequence": 7,
+            "failure_span_id": "0000000000000008"
+          }
+        ]
+      },
+      {
+        "run_id": "expectation-rules-fail",
+        "case_id": "expectation-rules-case",
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "evaluator_id": "tool-arguments",
+        "evaluator_name": "Tool Arguments",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "3576f7688371a7a6f64c4654e8c0bcc4544f4d814ae63b5e93f570e5daacf2df",
+        "evaluator_kind": "rule",
+        "dimension": "tool_use",
+        "metric": "tool_argument_accuracy",
+        "severity": "standard",
+        "outcome": "fail",
+        "score": 0.0,
+        "reason": "实际值与预期值不相等；数值不在允许范围内",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": "tool_arguments",
+        "checks": [
+          {
+            "name": "最后一次查询正确客户",
+            "turn_id": "review-turn",
+            "expectation_id": "review-tool",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "实际值与预期值不相等",
+            "expected": {
+              "kind": "equals",
+              "expected": "C-100"
+            },
+            "actual": "C-999",
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "equals",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000003"
+            ],
+            "failure_stage": "tool_arguments",
+            "failure_sequence": 2,
+            "failure_span_id": "0000000000000003"
+          },
+          {
+            "name": "每次审批额度均在范围内",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-tool",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "数值不在允许范围内",
+            "expected": {
+              "kind": "within_range",
+              "minimum": 100000.0,
+              "maximum": 150000.0
+            },
+            "actual": [
+              120000,
+              90000
+            ],
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "within_range",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [
+              "0000000000000006",
+              "0000000000000007"
+            ],
+            "failure_stage": "tool_arguments",
+            "failure_sequence": 6,
+            "failure_span_id": "0000000000000007"
+          }
+        ]
+      },
+      {
+        "run_id": "expectation-rules-fail",
+        "case_id": "expectation-rules-case",
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "evaluator_id": "final-output",
+        "evaluator_name": "Final Output",
+        "evaluator_version": "1",
+        "evaluator_content_sha256": "48bff7696645cda6693687b5940b82d90a94bd25fec9b14ab953ff3ae6127c11",
+        "evaluator_kind": "rule",
+        "dimension": "answer",
+        "metric": "final_output_match",
+        "severity": "standard",
+        "outcome": "fail",
+        "score": 0.0,
+        "reason": "文本不符合格式；JSON Schema violation at $.decision.approved (const)",
+        "judge_record": null,
+        "error_detail": null,
+        "primary_failure_stage": "final_output",
+        "checks": [
+          {
+            "name": "复核提交文案",
+            "turn_id": "review-turn",
+            "expectation_id": "review-output",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "文本不符合格式",
+            "expected": {
+              "kind": "matches_pattern",
+              "pattern": "^已提交复核$"
+            },
+            "actual": "待补充信息",
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "matches_pattern",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [],
+            "failure_stage": "final_output",
+            "failure_sequence": 8,
+            "failure_span_id": null
+          },
+          {
+            "name": "完整输出满足 Schema",
+            "turn_id": "approve-turn",
+            "expectation_id": "approve-output",
+            "outcome": "fail",
+            "score": 0.0,
+            "reason": "JSON Schema violation at $.decision.approved (const)",
+            "expected": {
+              "kind": "matches_json_schema",
+              "json_schema": {
+                "properties": {
+                  "answer": {
+                    "const": "审核完成"
+                  },
+                  "decision": {
+                    "properties": {
+                      "approved": {
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "approved"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "answer",
+                  "decision"
+                ],
+                "type": "object"
+              }
+            },
+            "actual": {
+              "answer": "审核完成",
+              "decision": {
+                "approved": false
+              }
+            },
+            "actual_missing": false,
+            "methods": [
+              {
+                "implementation_id": "matches_json_schema",
+                "implementation_version": "1"
+              }
+            ],
+            "span_ids": [],
+            "failure_stage": "final_output",
+            "failure_sequence": 8,
+            "failure_span_id": null
+          }
+        ]
+      }
+    ]
+  }
+}

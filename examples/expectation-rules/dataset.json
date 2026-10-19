@@ -1,0 +1,217 @@
+{
+  "format": "agentgate.dataset",
+  "format_version": 1,
+  "dataset": {
+    "id": "expectation-rules-example",
+    "name": "期望结果 · 三类规则离线示例",
+    "description": "固定合成 Trace；真实内置规则各自验证通过和失败。",
+    "archived": false,
+    "deleted_version_high_watermark": 0,
+    "created_at": "2026-10-19T00:00:00Z",
+    "updated_at": "2026-10-19T00:00:00Z",
+    "user_team_id": "",
+    "user_id": "",
+    "user_name": ""
+  },
+  "version": {
+    "id": "expectation-rules-example-v1",
+    "dataset_id": "expectation-rules-example",
+    "dataset_name": "期望结果 · 三类规则离线示例",
+    "dataset_description": "固定合成 Trace；真实内置规则各自验证通过和失败。",
+    "version": 1,
+    "status": "published",
+    "based_on_version": null,
+    "cases": [
+      {
+        "id": "expectation-rules-case",
+        "name": "贷款审核：三类期望与多轮字段保留",
+        "turns": [
+          {
+            "id": "review-turn",
+            "input": {
+              "txt": "请查询客户 C-100 并提交审核。",
+              "channel": "web"
+            },
+            "expectations": [
+              {
+                "id": "review-state",
+                "name": "进入人工复核",
+                "kind": "state",
+                "path": "decision",
+                "condition": {
+                  "kind": "one_of",
+                  "allowed": [
+                    {
+                      "status": "review",
+                      "history": [
+                        {
+                          "approved": false
+                        }
+                      ]
+                    },
+                    {
+                      "status": "pending",
+                      "history": []
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "review-tool",
+                "name": "最后一次查询正确客户",
+                "kind": "tool_argument",
+                "tool": "lookup_customer",
+                "path": "arguments.customer.id",
+                "occurrence": "last",
+                "condition": {
+                  "kind": "equals",
+                  "expected": "C-100"
+                }
+              },
+              {
+                "id": "review-output",
+                "name": "复核提交文案",
+                "kind": "output",
+                "path": "answer",
+                "condition": {
+                  "kind": "matches_pattern",
+                  "pattern": "^已提交复核$"
+                }
+              },
+              {
+                "id": "lookup-required",
+                "name": "已有工具调用期望",
+                "kind": "tool_call",
+                "tool": "lookup_customer",
+                "mode": "required"
+              }
+            ],
+            "notes": "第一轮备注保留",
+            "extensions": [
+              {
+                "key": "业务场景",
+                "value": "贷前复核"
+              }
+            ]
+          },
+          {
+            "id": "approve-turn",
+            "input": {
+              "txt": "复核通过，请完成审批。",
+              "confirmed": true
+            },
+            "expectations": [
+              {
+                "id": "approve-state",
+                "name": "最终状态保留 JSON 类型",
+                "kind": "state",
+                "path": "decision.details",
+                "condition": {
+                  "kind": "equals",
+                  "expected": {
+                    "approved": true,
+                    "limit": 120000,
+                    "reasons": [
+                      {
+                        "code": "verified",
+                        "sources": [
+                          "manual"
+                        ]
+                      }
+                    ],
+                    "reviewer": null
+                  }
+                }
+              },
+              {
+                "id": "approve-tool",
+                "name": "每次审批额度均在范围内",
+                "kind": "tool_argument",
+                "tool": "approve_loan",
+                "path": "arguments.request.limit",
+                "occurrence": "all",
+                "condition": {
+                  "kind": "within_range",
+                  "minimum": 100000.0,
+                  "maximum": 150000.0
+                }
+              },
+              {
+                "id": "approve-output",
+                "name": "完整输出满足 Schema",
+                "kind": "output",
+                "path": null,
+                "condition": {
+                  "kind": "matches_json_schema",
+                  "json_schema": {
+                    "type": "object",
+                    "required": [
+                      "answer",
+                      "decision"
+                    ],
+                    "properties": {
+                      "answer": {
+                        "const": "审核完成"
+                      },
+                      "decision": {
+                        "type": "object",
+                        "required": [
+                          "approved"
+                        ],
+                        "properties": {
+                          "approved": {
+                            "const": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "approval-path",
+                "name": "已有执行路径期望",
+                "kind": "execution_path",
+                "scope": "tool",
+                "expected": [
+                  "approve_loan",
+                  "approve_loan"
+                ],
+                "allowed_tools": null
+              }
+            ],
+            "notes": "第二轮备注保留",
+            "extensions": [
+              {
+                "key": "审批凭据",
+                "value": "合成-0001"
+              }
+            ]
+          }
+        ],
+        "initial_state": {
+          "customer": {
+            "id": "C-100"
+          },
+          "approved": false
+        },
+        "category": "boundary",
+        "difficulty": "hard",
+        "tags": [
+          "期望规则",
+          "多轮",
+          "合成数据"
+        ],
+        "notes": "样本备注保留；所有输入、状态和证据均为合成。"
+      }
+    ],
+    "notes": "不执行 Agent、LLM 或外部服务。",
+    "created_at": "2026-10-19T00:00:00Z",
+    "updated_at": "2026-10-19T00:00:00Z",
+    "published_at": "2026-10-19T00:00:00Z",
+    "content_sha256": "dbae63a17d4e130016893f85be9797ddcafd4e00a3c61bc9e7baa07a85927ab0",
+    "user_team_id": "",
+    "user_id": "",
+    "user_name": ""
+  }
+}

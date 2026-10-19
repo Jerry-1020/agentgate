@@ -32,7 +32,13 @@ export function outputCondition(text: string, json: boolean, current: Condition)
     new RegExp(text);
     return { kind: current.kind, pattern: text };
   }
-  const value = json ? JSON.parse(text) : text;
+  const value = json
+    ? JSON.parse(text, (_key, item) => {
+        if (typeof item === 'number' && !Number.isFinite(item))
+          throw Error('JSON 数字必须是有限值');
+        return item;
+      })
+    : text;
   if (current.kind === 'within_tolerance') {
     const expected = Number(value);
     if ((typeof value !== 'number' && typeof value !== 'string') || !Number.isFinite(expected))

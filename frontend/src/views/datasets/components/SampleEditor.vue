@@ -52,13 +52,28 @@ const configVariablesRaw = ref<Record<InitializationField, string | null>>({
   tool_variables: null,
 });
 type OutputRule = Extract<Expectation, { kind: 'output' }>;
-const outputRules = ref<OutputRule[][]>([]);
+const outputRules = ref<OutputRule[]>([]);
 const originalOutputs = ref<{ text: string; json: boolean }[]>([]);
 const ruleEditor = ref<{ validate: () => void } | null>(null);
 const ruleDraftDirty = ref(false);
+const editorRevision = ref(0);
 const baseline = ref(''),
   inputField = ref<'query' | 'txt'>('txt');
 const turn = computed(() => form.value?.turns[index.value]);
+const basicOutput = computed({
+  get: () => outputs.value[index.value],
+  set: (value: string) => {
+    outputs.value[index.value] = value;
+    syncBasicOutput();
+  },
+});
+const basicOutputJson = computed({
+  get: () => outputJson.value[index.value],
+  set: (value: boolean) => {
+    outputJson.value[index.value] = value;
+    syncBasicOutput();
+  },
+});
 function snapshot() {
   return JSON.stringify([
     form.value,
@@ -80,6 +95,7 @@ watch(dirty, (v) => emit('dirtyChange', v));
 watch(
   () => props.item,
   (item) => {
+    editorRevision.value++;
     inputField.value = item?.turns.some((t) => 'txt' in t.input)
       ? 'txt'
       : item?.turns.some((t) => String(t.input.query ?? '').trim())
@@ -114,12 +130,13 @@ watch(
       ) ?? [];
     outputRules.value =
       form.value?.turns.map((t) => {
-        const rules = t.expectations.filter((e): e is OutputRule => e.kind === 'output');
-        const primary = rules.findIndex((e) => e.path === null && e.condition.kind === 'equals');
-        if (primary > 0) rules.unshift(...rules.splice(primary, 1));
-        return rules.length ? rules : [emptyOutputRule()];
+        const primary = t.expectations.find(
+          (e): e is OutputRule =>
+            e.kind === 'output' && e.path === null && e.condition.kind === 'equals',
+        );
+        return primary ? JSON.parse(JSON.stringify(primary)) : emptyOutputRule();
       }) ?? [];
-    const values = outputRules.value.map((r) => outputEditorValue(r[0].condition));
+    const values = outputRules.value.map((r) => outputEditorValue(r.condition));
     originalOutputs.value = values.map((v) => ({ ...v }));
     outputs.value = values.map((v) => v.text);
     outputJson.value = values.map((v) => v.json);
@@ -173,6 +190,24 @@ function emptyOutputRule(): Extract<Expectation, { kind: 'output' }> {
     condition: { kind: 'equals', expected: '' },
   };
 }
+function syncBasicOutput() {
+  if (!turn.value) return;
+  const i = index.value;
+  try {
+    const rule = outputRules.value[i];
+    const condition = outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
+    const position = turn.value.expectations.findIndex((e) => e.id === rule.id);
+    if (condition) {
+      const updated = { ...rule, condition };
+      if (position < 0) turn.value.expectations.push(updated);
+      else turn.value.expectations.splice(position, 1, updated);
+      outputRules.value[i] = JSON.parse(JSON.stringify(updated));
+    } else if (position >= 0) turn.value.expectations.splice(position, 1);
+    originalOutputs.value[i] = { text: outputs.value[i], json: outputJson.value[i] };
+  } catch {
+    // Keep the basic field's invalid JSON draft visible; save reports its parse error.
+  }
+}
 function validateRules() {
   try {
     ruleEditor.value?.validate();
@@ -195,7 +230,7 @@ function add() {
   outputs.value.push('');
   outputJson.value.push(false);
   const rule = emptyOutputRule();
-  outputRules.value.push([rule]);
+  outputRules.value.push(rule);
   originalOutputs.value.push({ text: '', json: false });
   requiredTools.value.push('');
   forbiddenTools.value.push('');
@@ -286,23 +321,19 @@ function save() {
         .split(/[,，]/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const original = t.expectations;
-      t.expectations = original.filter((e) => e.kind !== 'output');
-      for (const [ruleIndex, rule] of outputRules.value[i].entries()) {
-        if (ruleIndex > 0) {
-          t.expectations.push(rule);
-          continue;
-        }
-        const previous = original.find((e) => e.id === rule.id);
-        const unchanged =
-          outputs.value[i] === originalOutputs.value[i].text &&
-          outputJson.value[i] === originalOutputs.value[i].json;
-        const condition =
-          unchanged && previous?.condition.kind === rule.condition.kind
-            ? rule.condition
-            : outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
-        if (condition) t.expectations.push({ ...rule, path: rule.path?.trim() || null, condition });
-      }
+      const rule = outputRules.value[i];
+      const unchanged =
+        outputs.value[i] === originalOutputs.value[i].text &&
+        outputJson.value[i] === originalOutputs.value[i].json;
+      const position = t.expectations.findIndex((e) => e.id === rule.id);
+      const condition =
+        unchanged && position >= 0
+          ? rule.condition
+          : outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
+      if (condition) {
+        if (position >= 0) t.expectations.splice(position, 1, { ...rule, condition });
+        else t.expectations.push({ ...rule, condition });
+      } else if (position >= 0) t.expectations.splice(position, 1);
     });
     emit('save', item);
   } catch (e) {
@@ -311,10 +342,24 @@ function save() {
 }
 function updateExpectations(values: Expectation[]) {
   if (!turn.value) return;
-  turn.value.expectations = [
-    ...turn.value.expectations.filter((e) => e.kind === 'output'),
-    ...values,
-  ];
+  turn.value.expectations = values;
+  const i = index.value;
+  const previous = outputRules.value[i];
+  const candidates = values.filter(
+    (e): e is OutputRule => e.kind === 'output' && e.path === null && e.condition.kind === 'equals',
+  );
+  const primary =
+    candidates.find((e) => e.id === previous.id) ?? candidates[0] ?? emptyOutputRule();
+  if (
+    primary.id !== previous.id ||
+    JSON.stringify(primary.condition) !== JSON.stringify(previous.condition)
+  ) {
+    const value = outputEditorValue(primary.condition);
+    outputs.value[i] = value.text;
+    outputJson.value[i] = value.json;
+    originalOutputs.value[i] = value;
+  }
+  outputRules.value[i] = JSON.parse(JSON.stringify(primary));
 }
 defineExpose({ save });
 </script>
@@ -482,18 +527,18 @@ defineExpose({ save });
                   <b>期望输出</b><span>{{ outputs[index].length }} 字</span>
                 </header>
                 <label
-                  ><input type="checkbox" v-model="outputJson[index]" :disabled="!editable" />结构化
+                  ><input type="checkbox" v-model="basicOutputJson" :disabled="!editable" />结构化
                   JSON 期望</label
                 ><JsonCodeEditor
                   v-if="outputJson[index]"
                   :key="turn.id + 'output'"
-                  :model-value="outputs[index]"
+                  :model-value="basicOutput"
                   :disabled="!editable"
                   label="期望输出 JSON"
-                  @update:model-value="outputs[index] = $event"
+                  @update:model-value="basicOutput = $event"
                 /><textarea
                   v-else
-                  v-model="outputs[index]"
+                  v-model="basicOutput"
                   :disabled="!editable"
                   rows="5"
                   aria-label="期望输出"
@@ -525,12 +570,10 @@ defineExpose({ save });
             </div>
             <div class="advanced">
               <ExpectationEditor
-                :key="turn.id"
+                :key="`${editorRevision}:${turn.id}`"
                 ref="ruleEditor"
-                simplified
                 @draft-change="ruleDraftDirty = $event"
-                :model-value="turn.expectations.filter((e) => e.kind !== 'output')"
-                :kinds="['state', 'tool_argument']"
+                :model-value="turn.expectations"
                 :disabled="!editable"
                 @update:model-value="updateExpectations($event)"
               />

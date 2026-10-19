@@ -47,3 +47,10 @@ test('range and missing-field checks survive an empty expected output', () => {
   for (const check of checks) expect(outputCondition('', false, check)).toEqual(check);
   expect(outputCondition(' ', false, { kind: 'equals', expected: '' })).toBeNull();
 });
+
+test('structured expected output rejects overflowing JSON numbers without converting to null', () => {
+  const condition = { kind: 'equals' as const, expected: '' };
+  for (const value of ['1e400', '-1e400', '{"limit":1e400}', '[{"score":1e400}]'])
+    expect(() => outputCondition(value, true, condition)).toThrow('JSON 数字必须是有限值');
+  expect(outputCondition('1e400', false, condition)).toEqual({ kind: 'equals', expected: '1e400' });
+});
