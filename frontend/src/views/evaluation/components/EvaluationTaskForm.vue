@@ -37,10 +37,10 @@ const platformSelection = ref<AgentTargetSelection | null>(null);
 const localBankSelected = computed(() => platformSelection.value?.localTarget?.adapter_type === 'local_bank');
 const auth = useAuthStore();
 const platformDirectory = computed(() =>
-  auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
+  auth.usesPlatformDirectory ? agentDirectory : localAgentDirectory,
 );
-const platformToken = computed(() => (auth.loginMode === 'bank' ? auth.token : 'local'));
-const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId : ''));
+const platformToken = computed(() => (auth.usesPlatformDirectory ? auth.token : 'local'));
+const platformTeamId = computed(() => (auth.usesPlatformDirectory ? auth.teamId : ''));
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   platformSelection.value = selection;
   if (selection?.localTarget?.adapter_type === 'local_bank') {

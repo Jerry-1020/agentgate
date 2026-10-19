@@ -1,3 +1,4 @@
+import type { LoginMode } from './auth';
 import { computed, ref, watch } from 'vue';
 import { acceptHMRUpdate, defineStore } from 'pinia';
 import {
@@ -40,7 +41,7 @@ export type AnnotationTemplate = {
 };
 export type AnnotationTarget = {
   localExecution?: { sourceId: string; adapterType: 'local_bank' | 'demo_loan' };
-  loginMode: 'bank' | 'external';
+  loginMode: LoginMode;
   teamId: string;
   agentId: string;
   agentName: string;
