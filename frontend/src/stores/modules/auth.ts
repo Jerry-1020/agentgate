@@ -1,46 +1,60 @@
 import { defineStore } from 'pinia';
 
-export type LoginMode = 'bank' | 'external';
+export type LoginMode = 'bank' | 'external' | 'integrated';
 
-export interface AuthSession {
-  loginMode: LoginMode;
+export interface PlatformIdentity {
   token: string;
   teamId: string;
   teamName: string;
+  userId: string;
+  userName: string;
 }
 
-// 纯内存会话：token 不进 localStorage/sessionStorage（与平台安全约定一致），
-// 刷新页面回到欢迎页重新登录。teamId 空串统一表示个人空间（目录查询省略
-// teamId 参数、任务提交省略 team_id 字段）。
+export interface AuthSession extends PlatformIdentity {
+  loginMode: LoginMode;
+  platformReady: boolean;
+}
+
+// Memory-only identity. Do not enable persistence for this store.
 export const useAuthStore = defineStore('agentgate-auth', {
   state: (): AuthSession => ({
     loginMode: 'bank',
     token: '',
     teamId: '',
     teamName: '个人空间',
+    userId: '',
+    userName: '',
+    platformReady: false,
   }),
   getters: {
-    authenticated: (state) => state.loginMode === 'bank' ? !!state.token : true,
+    authenticated: (state) => state.loginMode === 'external'
+      ? true
+      : state.loginMode === 'integrated'
+        ? state.platformReady
+        : !!state.token,
     isBank: (state) => state.loginMode === 'bank',
+    isIntegrated: (state) => state.loginMode === 'integrated',
+    usesPlatformDirectory: (state) => state.loginMode !== 'external',
     modeLabel: (state) =>
-      state.loginMode === 'bank'
+      state.loginMode === 'integrated'
+        ? '集成模式'
+        : state.loginMode === 'bank'
         ? state.teamId
           ? `行内 · ${state.teamName || state.teamId}`
           : '行内 · 个人空间'
         : '行外模式 · 本地环境',
   },
   actions: {
+    initializePlatform(identity: PlatformIdentity) {
+      this.$patch({ ...identity, loginMode: 'integrated', platformReady: true });
+    },
     loginBank(token: string, teamId: string, teamName: string) {
-      this.loginMode = 'bank';
-      this.token = token;
-      this.teamId = teamId;
-      this.teamName = teamName;
+      this.$reset();
+      this.$patch({ loginMode: 'bank', token, teamId, teamName });
     },
     loginExternal() {
-      this.loginMode = 'external';
-      this.token = '';
-      this.teamId = '';
-      this.teamName = '';
+      this.$reset();
+      this.$patch({ loginMode: 'external', teamName: '' });
     },
     logout() {
       this.$reset();
