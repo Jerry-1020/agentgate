@@ -1,6 +1,112 @@
 # Run Implementation Plan
 
-Last updated: 2026-09-09
+Last updated: 2026-10-19
+
+## Frontend-owned concurrency and adapter ownership — 2026-10-19
+
+This request supersedes the backend-owned configuration plan below. Reuse the page's
+existing concurrency value and persist it in the existing Run manifest. Ordinary,
+stability, and both in-bank A/B variants consume that value. External/mock A/B remains
+fixed at 1. Remove the obsolete concurrency environment setting, not the independently
+configured timeouts. Preserve data-source/token routing in both login modes.
+
+After approving the application checkpoint, the user authorized implementing the
+remaining files directly. The application no longer overrides caller concurrency;
+HTTP and frontend A/B wiring reuse the same field, with default 1 and the existing
+1–30 range. Ordinary requests retain their original required field. Page selection
+and token routing remain isolated between in-bank and external modes. Existing saved
+manifests remain fixed, including reservations and reruns. Both A/B Runs can execute
+up to the selected count independently; this is not a shared global concurrency cap.
+
+Concrete bounded thread execution now lives directly in the existing ChatABC and
+Yunxia adapters. Remove the new shared `inbank/execution.py`, without introducing a
+replacement module or wrapper class. Reuse the customer's `ThreadPoolExecutor`
+session-group strategy while retaining the platform's existing handles, persisted
+results, and cancellation protocol. Keep ordered Turns/shared sessions, failure
+isolation, partial evidence, ERROR scoring, cleanup, deadlines, and output contracts.
+Do not copy customer Excel/database/export batch orchestration, change existing
+Engine/protocol/evaluator ownership, or add the declined malformed-error-marker guard.
+The user authorized committing and integrating this work into
+`open-fin-sub/agentgate:integration/baibo1017`, with conflict review and regression
+verification before publishing. Preserve the destination branch's existing features.
+
+Verify three agent modes, ordinary/stability/A/B page values and HTTP manifests,
+default/invalid concurrency, actual bounded overlap, ordered sessions, cancellation
+before Pod cleanup, saved-manifest immutability, and unchanged external behavior.
+The obsolete environment example is removed; timeouts keep their independent settings.
+
+## Yunxia final-message output alignment — 2026-10-19
+
+Reuse the customer's last-message selection and keep final responses separate from
+customer execution spans. A JSON object from the last `event: message` becomes the
+complete turn output, with the last turn supplying Case `final_output`. Keep every
+customer field; do not create a fixed four-field projection or legacy output aliases.
+Non-object message data uses the existing `{output: value}` object container without
+changing the shared Domain contract. Empty objects and valid false/zero/null values
+must not be treated as absent data.
+
+Remove the extra `inbank.response.message_data` Span attribute, raw-response observation
+fallback, and its special redaction branch. Reuse normal output-field observation and
+structured-output redaction. Trace Server polling, tool/Skill evidence adaptation,
+Case isolation, and ChatABC output contracts remain unchanged. Verify per-turn/final
+output persistence, full-object and field-path scoring, absent-field semantics,
+structured redaction, output-only fallback, and local frontend contracts. Existing
+expectations that depend on manufactured output fields must be adjusted to customer
+field names; historical saved Traces are not rewritten.
+
+The unchanged Domain currently cannot JSON-serialize an object-valued `Equals.expected`
+when persisting/publishing the DatasetVersion. Keep this pre-existing limitation separate
+from complete customer-response persistence: direct Rule comparisons cover objects,
+while the Worker regression uses scalar nested-field expectations. Repairing the
+expectation serializer requires a separate scoped change.
+
+## In-bank execution parity — 2026-10-18
+
+The user authorized completing the agreed changes together on a new branch from
+PR #57. Attachments, retries of complete in-bank Cases, commits, pushes, and merges
+are outside this change.
+
+- Reuse the customer's request builders, SSE parsing, session initialization,
+  lifecycle retries, and default request timeouts. Adapt the customer's grouped
+  `ThreadPoolExecutor` behavior directly in the existing ChatABC/Yunxia Case adapters;
+  no separate execution module or second scheduler is introduced.
+- `CaseExecutionRequest.max_parallel_cases` carries the existing manifest limit.
+  `CaseExecutionPending` means a local wait interval elapsed, not a failed request.
+  Engine rotates pending handles and continues checking persisted cancellation.
+- `CaseExecutionResult.error` can accompany a Trace containing actual successful
+  and failed turns. A failed chat records its error and does not prevent later turns
+  or independent Cases from running. Session initialization failure records all
+  turns of that Case as failed. Shared Pod preparation failure remains task-fatal.
+- Target execution failures produce scoreless ERROR Results with category
+  `target_execution`, not incorrect-answer verdicts or fabricated success. Completed
+  Rule checks are preserved; an incomplete Case is not sent to a case-level Judge.
+  A COMPLETED Run means all Cases were processed, not that every Case passed.
+- No SQL schema, RunManifest hash, agent directory, token routing, or frontend
+  business contract is changed. Existing external adapter behavior is preserved.
+- Yunxia reuses the customer payload builder: `custID` directly concatenates the
+  explicit customer ID (or session ID) and one Run-scoped UUID hex, with no added
+  prefix or separator. Same-Run stability and cross-Run isolation remain unchanged.
+
+The overall in-bank deadline starts after Pod readiness, is shared by the Run, and
+is checked before each new turn. Zero means unlimited, as in the customer scripts.
+In-flight requests retain their independent timeout; their budgets are not reduced
+to remaining overall time. Pod readiness has its own wait budget. Lifecycle request
+timeouts are configurable in `.env.example` with the customer's defaults: create
+60s, init 30s, delete 60s, health request 10s. Existing lifecycle retry counts and
+delays remain unchanged.
+
+Source assessment: `goal/p1-demo` provides the persistence and terminal-state behavior
+but only has a fail-fast synchronous Run implementation. `integration/p1-new` has
+no compatible in-bank executor; its old domain/HTTP contracts are not copied. The
+current refactor supplies the manifest limits, adapter protocol, Trace storage,
+evaluator finalization, ERROR metric handling, and cancellation boundaries. Only
+the exercised runtime glue and failure classification are new.
+
+Focused verification covers three agent modes, single/multiple turns, independent
+Cases, explicit Yunxia shared-session ordering, partial failures, init failure,
+deadline checks, cancellation/cleanup, complete customer response fields, and whole-output
+comparisons against the customer object. Full backend and frontend regression results are recorded in
+`docs/project-progress.md`; local mocks do not replace real in-bank acceptance.
 
 Status: core Engine, Target protocol, Demo adapter wiring, atomic Run claiming,
 incremental Result persistence, infrastructure retry, and cooperative cancellation are

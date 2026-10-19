@@ -385,6 +385,23 @@ def test_required_fields_have_no_silent_defaults(field):
         assert client.post(PATH, json=body, headers=HEADERS).status_code == 422
 
 
+@pytest.mark.parametrize("mode", ["inbank", "mock", ""])
+def test_ordinary_submission_requires_parallelism_in_every_platform_mode(mode, monkeypatch):
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", mode)
+    calls = []
+
+    def submit(**kwargs):
+        calls.append(kwargs)
+        return created(**kwargs)
+
+    body = payload()
+    body.pop("max_parallel_cases")
+    with client_for(submit) as client:
+        response = client.post(PATH, json=body, headers=HEADERS)
+    assert response.status_code == 422, response.text
+    assert calls == []
+
+
 def test_valid_domain_task_with_wrong_requested_repeat_count_is_uncertain():
     body = payload()
     body["repetitions"] = 2
@@ -395,7 +412,8 @@ def test_valid_domain_task_with_wrong_requested_repeat_count_is_uncertain():
     assert "uncertain" in response.text
 
 
-def test_platform_comparison_submission_creates_ab_pair():
+@pytest.mark.parametrize("requested_parallelism", [None, 2, 30])
+def test_platform_comparison_submission_creates_ab_pair(requested_parallelism):
     calls = []
 
     def comparison(**kwargs):
@@ -427,6 +445,7 @@ def test_platform_comparison_submission_creates_ab_pair():
                 "dataset_version": 2,
                 "evaluator_ids": ["judge"],
                 "case_ids": ["case-1"],
+                **({"max_parallel_cases": requested_parallelism} if requested_parallelism is not None else {}),
                 "timeout_seconds": 300,
             },
         )
@@ -449,6 +468,7 @@ def test_platform_comparison_submission_creates_ab_pair():
             "case_ids": ("case-1",),
             "evaluator_ids": ("judge",),
             "evaluator_refs": None,
+            "max_parallel_cases": requested_parallelism if requested_parallelism is not None else 1,
             "timeout_seconds": 300,
             "token": SECRET,
             "user_team_id": "",
@@ -457,6 +477,26 @@ def test_platform_comparison_submission_creates_ab_pair():
             "name": None,
         }
     ]
+
+
+@pytest.mark.parametrize("parallelism", [0, -1, 31, 1.5, True, "2", None, SECRET])
+def test_platform_comparison_rejects_invalid_parallelism_before_submission(parallelism):
+    calls = []
+    app = FastAPI()
+    app.state.submit_agent_platform_comparison = lambda **kwargs: calls.append(kwargs)
+    app.include_router(router)
+    body = payload()
+    body["target"].pop("agent_version")
+    body["target"].update(baseline_version="v1", candidate_version="v2")
+    for field in ("max_retries", "repetitions"):
+        body.pop(field)
+    body["max_parallel_cases"] = parallelism
+    with TestClient(app) as client:
+        response = client.post("/api/agent-platform/comparisons", json=body, headers=HEADERS)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid platform comparison request"}
+    assert calls == []
+    assert SECRET not in response.text
 
 
 @pytest.mark.parametrize(

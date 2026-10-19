@@ -21,15 +21,15 @@ from agentgate.domain import (
 )
 from agentgate.storage.repository import AgentGateRepository
 
+from .retry import can_retry_target_failure, retry_delay_seconds
 from .target_protocol import (
+    CaseExecutionPending,
     CaseExecutionRequest,
     CaseExecutionResult,
     CaseExecutionStatus,
-    TargetExecutionError,
     TargetAdapterProtocol,
+    TargetExecutionError,
 )
-from .retry import can_retry_target_failure, retry_delay_seconds
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -148,6 +148,9 @@ class RunEngine:
                 self._raise_if_cancelled(run.id)
                 try:
                     outcome = self._wait_for_target(request, handle, target_adapter)
+                except CaseExecutionPending:
+                    active.rotate(-1)
+                    continue
                 except TargetExecutionError as error:
                     if not can_retry_target_failure(
                         error,
@@ -241,7 +244,9 @@ class RunEngine:
         status = target_adapter.get_status(handle)
         if status == CaseExecutionStatus.CANCELLED:
             raise TargetExecutionError("cancelled", "Target execution was cancelled")
-        if status != CaseExecutionStatus.COMPLETED:
+        if status != CaseExecutionStatus.COMPLETED and not (
+            status == CaseExecutionStatus.FAILED and outcome.error is not None
+        ):
             raise TargetExecutionError(
                 "protocol_error",
                 f"Target wait returned while execution status was {status.value}",
@@ -320,6 +325,7 @@ class RunEngine:
             target=run.manifest.target,
             timeout_seconds=run.manifest.timeout_seconds,
             traceparent=f"00-{trace_id}-{parent_span_id}-01",
+            max_parallel_cases=run.manifest.max_parallel_cases,
         )
 
     @staticmethod
@@ -374,7 +380,7 @@ class RunEngine:
     def _cancel(target_adapter: TargetAdapterProtocol, handle: str) -> None:
         try:
             target_adapter.cancel(handle)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - cancellation must not mask the original failure.
             LOGGER.warning(
                 "Target cancellation failed with %s", type(exc).__name__
             )

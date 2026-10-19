@@ -5,8 +5,22 @@ import pytest
 from agentgate.domain import FrozenJsonObject, SpanStatus, Trace, TraceSpan
 from agentgate.trace.redaction import REDACTION_MARKER, redact_trace, redact_value
 
-
 CORRELATION_UUID = "11843294-6268-4d2e-a97b-8666ab7e6076"
+
+
+def test_customer_final_output_uses_existing_redaction_without_changing_source():
+    message = {"message": "answer", "business": {"password": "private-value",
+               "nested": [{"email": "alice@example.com", "count": 0, "enabled": False}]}}
+    original = Trace(trace_id="a" * 32, run_id="run-1", case_id="case-1", spans=(),
+                     final_output=message, turn_outcomes={"turn-1": {"output": message}})
+    protected = redact_trace(original)
+    response = protected.final_output
+    assert response["business"]["password"] == REDACTION_MARKER
+    assert response["business"]["nested"][0] == {"email": REDACTION_MARKER, "count": 0, "enabled": False}
+    assert protected.turn_outcomes["turn-1"]["output"] == response
+    assert original.final_output == original.turn_outcomes["turn-1"]["output"]
+    assert original.final_output.to_dict() == message
+    assert redact_trace(protected) == protected
 
 
 @pytest.mark.parametrize("key", [

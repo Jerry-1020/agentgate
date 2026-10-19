@@ -55,9 +55,10 @@ def _error_result(
     case: Case,
     trace: Trace,
     exc: Exception,
+    *, target_failure: bool = False, checks: tuple[CheckResult, ...] = (),
 ) -> EvaluationResult:
     category = (
-        "timeout"
+        "target_execution" if target_failure else "timeout"
         if isinstance(exc, TimeoutError)
         else "invalid_output"
         if isinstance(exc, (TypeError, ValueError))
@@ -83,10 +84,11 @@ def _error_result(
         severity=spec.severity,
         outcome=Outcome.ERROR,
         score=None,
-        reason="评估器无法完成检查",
+        reason="智能体执行异常，无法完成该用例测评" if target_failure else "评估器无法完成检查",
+        checks=checks,
         error_detail=EvaluatorErrorDetail(
             category=category,
-            exception_type=type(exc).__name__,
+            exception_type="TargetExecutionError" if target_failure else type(exc).__name__,
             message=message,
             retryable=category == "timeout",
         ),
@@ -331,6 +333,11 @@ def execute_evaluators(
     }
     cache: dict[str, EvaluationResult] = {}
     resolving: set[str] = set()
+    execution_errors = {
+        span.attributes["agentgate.turn.id"]: span.attributes["agentgate.execution.error"]
+        for span in trace.spans if span.operation_type == "turn"
+        and "agentgate.execution.error" in span.attributes
+    }
 
     def resolve(spec_id: str) -> EvaluationResult:
         if spec_id in cache:
@@ -374,7 +381,7 @@ def execute_evaluators(
             if spec.kind == EvaluatorKind.LLM_JUDGE or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
                 skipped = _output_only_check(spec, trace)
-                case_evaluation = (
+                case_evaluation = Evaluation(checks=()) if execution_errors else (
                     Evaluation(checks=(skipped,)) if skipped is not None
                     else case_implementation.evaluate_case(spec, case, trace, resolver)
                 )
@@ -385,6 +392,8 @@ def execute_evaluators(
             else:
                 turn_implementation = _require_turn_evaluator(implementation)
                 for turn in case.turns:
+                    if turn.id in execution_errors:
+                        continue
                     turn_trace = trace.for_turn(turn.id)
                     if not turn_implementation.applies_to(spec, turn):
                         continue
@@ -410,6 +419,15 @@ def execute_evaluators(
 
             evaluation = Evaluation(checks=tuple(checks), judge_record=judge_record)
             result = _finalize_evaluation(spec, case, trace, evaluation)
+            if execution_errors:
+                detail = "; ".join(
+                    f"{turn_id}: {error['code']}: {error['message']}"
+                    for turn_id, error in execution_errors.items()
+                )
+                result = _error_result(
+                    spec, case, trace, RuntimeError(detail), target_failure=True,
+                    checks=result.checks,
+                )
             if judge_record is not None:
                 LOGGER.info(
                     "LLM Judge invoked: run_id=%s case_id=%s evaluator_id=%s model=%s input_tokens=%s output_tokens=%s latency=%sms",

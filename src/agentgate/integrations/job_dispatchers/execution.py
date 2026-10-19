@@ -36,10 +36,12 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
     if run.status is not RunStatus.PENDING:
         return run.status.value
     target = run.manifest.target
-    if target.adapter_type in {"local_bank", "inbank_chatabc", "inbank_yunxia"} and (
+    if target.adapter_type == "local_bank" and (
         run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1
     ):
         raise ValueError(f"{target.adapter_type} execution requires no retries and serial cases")
+    if target.adapter_type in {"inbank_chatabc", "inbank_yunxia"} and run.manifest.max_retries != 0:
+        raise ValueError(f"{target.adapter_type} execution requires no retries")
 
     with ExitStack() as resources:
         if target.adapter_type in {

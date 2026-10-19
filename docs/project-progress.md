@@ -1,6 +1,172 @@
 # AgentGate Project Progress
 
-Last updated: 2026-10-17
+Last updated: 2026-10-19
+
+## 2026-10-19 — Frontend-owned concurrency and inline customer-style workers
+
+The user superseded the backend-environment approach below: ordinary, stability,
+and in-bank A/B submissions should use the page's existing `max_parallel_cases` value.
+Both in-bank A/B variants use the same submitted value. External/mock A/B stays fixed
+at 1. After the application checkpoint, the user explicitly authorized implementing
+the remaining files together. The existing page control is restored; in-bank A/B also
+allows editing and submits the same field. HTTP A/B accepts it with default 1 and the
+existing 1–30 range. Ordinary submission retains its original required field. Remove
+`AGENTGATE_INBANK_MAX_PARALLEL_CASES` from the environment example and runtime readers.
+Run manifests, dispatch, credentials, output handling, and rerun snapshots are reused.
+No new customer business-field validation is added.
+
+The new shared `inbank/execution.py` is removed. Each existing ChatABC/Yunxia adapter
+directly owns its bounded `ThreadPoolExecutor`, futures, cancellation, and deadline.
+The customer scripts' session-group pool strategy is adapted, not replaced by a new
+scheduler: independent Cases run concurrently; Turns stay ordered, as do Yunxia Cases
+that explicitly share a session. Keep single-concurrency synchronous execution,
+partial failure evidence, scoreless ERROR handling, request payloads, complete message
+output, and joining workers before deleting the Pod. Customer Excel, batch database,
+progress, and export orchestration are not copied into the platform. No new production
+module or wrapper class is introduced. The declined malformed-error-marker guard stays
+excluded. Submission to `open-fin-sub/agentgate` branch `integration/baibo1017` is now
+authorized; integration must preserve the target branch's changes. No deployment or
+real in-bank acceptance has been performed.
+
+Verification: full backend regression **2549 passed / 58 skipped**; frontend unit
+tests **91 passed**; focused browser tests **23 passed**. Vue type checks, production
+build, affected Ruff/ESLint checks, and `git diff --check` passed. The build retains
+the existing large-chunk warnings. Coverage includes
+three agent modes, ordinary/stability/A/B caller values, actual bounded worker overlap,
+Turn/session ordering, cancellation/cleanup, ignored obsolete environment values,
+immutable saved manifests, and unchanged external routing. These are local tests,
+not in-bank acceptance.
+
+## 2026-10-19 — Unused concurrency argument cleanup
+
+Removed the unused `max_parallel_cases` argument from the private target-snapshot
+helper and its two callers; the actual submission, manifest, and adapter concurrency
+values are unchanged. The user declined the optional incomplete-error-marker guard;
+that guard and its added tests have been withdrawn. Existing execution-failure ERROR
+handling remains unchanged. No customer business fields, HTTP payloads, or Domain/Trace
+schemas are changed. No commit, push, or real in-bank deployment has been performed.
+
+Verification after withdrawing the optional guard: focused platform-submission,
+in-bank execution, evaluator, and Engine regression **374 passed / 28 skipped**;
+affected Python Ruff checks and `git diff --check` passed. The two test files added
+only for that guard are back to HEAD with no changes.
+
+## 2026-10-19 — Backend-owned in-bank Case concurrency (superseded)
+
+Historical checkpoint only; the frontend-owned implementation above replaces this
+configuration and UI behavior. The following results describe that earlier revision.
+
+The user requested backend configuration instead of a per-task frontend concurrency
+setting. `AGENTGATE_INBANK_MAX_PARALLEL_CASES` in `.env.example` now supplies one positive
+integer, default 1, for newly created in-bank ordinary, stability, and A/B Runs. Read it
+before creating target descriptors or credentials; A/B reads once and pins the same
+value on both manifests. Reuse the existing manifest, Engine, and grouped-session
+execution runtime. No second concurrency scheduler or arbitrary 30-Case environment
+limit is introduced. Invalid server configuration fails submission without creating
+task resources.
+
+The frontend hides the concurrency control for selected in-bank platform targets and
+omits it from requests. External/mock/Demo/local-bank directory, token, and execution
+behavior remain unchanged. The shared ordinary platform API allows the field to be
+omitted in in-bank mode, but still requires it in external/mock mode. Existing in-bank
+clients cannot override the backend value by sending the old request field.
+
+Configuration is pinned when creating the Run, not reloaded by workers. Existing Runs,
+reservations, and reruns keep their recorded manifests; restarting the submission
+service with a changed environment affects new tasks. This is a per-Run limit, not a
+global concurrency quota: concurrently scheduled A/B sides can use up to twice the
+configured Case count. Same-Case turns and explicitly shared sessions remain ordered.
+No customer HTTP payload, Trace parser, evaluator, database schema, worker scheduling, or
+customer attachment behavior is changed. No commit or push has been performed.
+
+Verification: full backend regression **2534 passed / 58 skipped**; frontend unit
+tests **91 passed**; affected browser checks **18 passed**. The complete task-form/
+directory browser file has **72 passed / 2 pre-existing baseline failures** (legacy
+A/B static-analysis availability and uncovered-case confirmation), not expanded in
+this change. TypeScript checks, production build, affected-file Ruff/ESLint, and
+`git diff --check` passed. The build retains the existing large-chunk warnings. Tests
+use local mocks; real in-bank deployment acceptance is still required.
+
+## 2026-10-19 — Yunxia final-message output alignment
+
+The customer original and revised `yunxia.py` both retain the last `event: message`
+data in `message_data`, independently from `event: trace`. Yunxia now uses the complete
+decoded message object as each turn's output and the last turn's `final_output`.
+Customer fields, including nested business data, are preserved without inventing
+`output`, `intent_code`, `slots`, or `workflow_calls` defaults. Non-object message data
+keeps the existing `{output: value}` container required by the object-valued Trace
+contract. No new business validation or public Domain schema is introduced.
+
+Removed the redundant response copy on Turn Span attributes, the evaluator's raw
+response fallback, and special JSON-string redaction. Normal output path observation
+and structured Trace redaction handle the customer object directly. A customer's
+`message` field is evaluated at `message`; no `output` alias is manufactured. Existing
+datasets using the synthetic four-field whole output or such an alias need their
+expectations adjusted. ChatABC, Trace collection, tool/Skill extraction, and database
+schemas are unchanged. No commit or push has been performed.
+
+Verification after this correction: full backend regression **2504 passed / 58 skipped**;
+frontend contract/data tests **91 passed**, TypeScript checks passed, and production
+build passed with the existing large-chunk warnings. Affected Python Ruff checks and
+`git diff --check` passed. Coverage includes Dataset creation/publication, execution,
+complete response persistence, native field-path scoring, and rerun snapshots. All
+services were local mocks; real in-bank acceptance remains outstanding.
+
+Known pre-existing limitation, reproduced without changing Domain code: an object-valued
+`Equals.expected` becomes `FrozenJsonObject` and fails JSON serialization while publishing
+or snapshotting a DatasetVersion. Direct whole-object Rule comparison works, but this
+is not a claim that such expectations can currently be persisted end to end. Worker
+regression verifies complete response persistence and scoring through scalar field paths.
+The unrelated expectation serializer is unchanged in this scoped output correction.
+
+## 2026-10-18 — In-bank execution parity (PR #57 baseline)
+
+Scope approved for one implementation pass: failure isolation, Case concurrency,
+independent timeout configuration, Yunxia customer-ID parity, and complete response
+evidence. Attachments remain deferred. Work is on `feature/inbank-execution-parity`
+from PR #57 HEAD `98ff389`; no commit, push, or merge has been performed.
+
+The customer HTTP payloads, session variables, SSE parsers, creation/init retries,
+and default timeouts are reused. One small in-bank runtime owns the shared thread
+pool, per-session execution order, cancellation, and the overall pre-turn deadline;
+both adapters consume it. Existing Run manifest concurrency is propagated rather
+than adding another concurrency configuration. Local-bank and external-mode
+routing/credentials remain unchanged.
+
+Failed turns retain sanitized errors and successful turns keep their real Trace
+evidence. Other turns and Cases continue as in the customer scripts. Init failure
+is isolated to its Case; shared Pod preparation and cancellation remain task-level.
+Evaluation uses the existing ERROR/report path with no normal score for an execution
+failure, retains completed Rule checks, and skips case-level Judge calls for incomplete
+conversations. Existing successful score aggregation is unchanged.
+
+Yunxia now directly concatenates the customer's session/custom-customer ID with one
+Run-scoped UUID hex, without the extra test prefix or an inserted hyphen, matching the
+customer script. Multi-turn IDs stay stable and separate Runs remain isolated.
+Final-response storage was simplified on 2026-10-19 as documented above; the entire
+customer message object is now the output rather than a second copy on Turn Spans.
+
+All timeouts are configured together in `.env.example`. Overall timeout defaults to
+unlimited and is checked before each turn, not forcibly applied to in-flight requests.
+Pod readiness is independent of the chat request timeout. No new business-field
+whitelists, required customer fields, database tables, or frontend controls are added.
+
+Verification before the final-message alignment: the complete backend suite passed
+(2489 passed, 56 skipped), including
+default/explicit customer-ID formatting, multi-turn stability, and cross-Run isolation. Frontend
+pure contract/data tests passed (91), TypeScript checks passed, and the production
+build passed with its existing large-chunk warnings. Focused execution/budget/BJS
+tests passed (131). Static syntax/import/unused-reference checks and `git diff --check`
+passed. Worker-entry concurrency coverage passed for all three agent modes (3 tests)
+and is included in the final full regression. All services were local mocks and all databases were temporary;
+real in-bank gateway and Pod acceptance is still required.
+
+Delivery files at this checkpoint: nine backend business files (the two adapters; shared in-bank execution;
+Run protocol/engine; submission/worker guards; result error classification; evaluator
+execution), six test files, `.env.example`,
+and these two existing progress/implementation documents. Local `.venv` and
+`frontend/node_modules` links only reuse installed dependencies and are not delivery
+files. No frontend business source or customer attachments were changed.
 
 ## Yunxia native request fields in turn input — 2026-10-17
 

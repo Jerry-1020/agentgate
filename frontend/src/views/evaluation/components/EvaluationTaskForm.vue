@@ -36,6 +36,12 @@ const platformPicker = ref<InstanceType<typeof AgentTargetPicker> | null>(null);
 const platformSelection = ref<AgentTargetSelection | null>(null);
 const localBankSelected = computed(() => platformSelection.value?.localTarget?.adapter_type === 'local_bank');
 const auth = useAuthStore();
+const inbankPlatformSelected = computed(() =>
+  auth.loginMode === 'bank' && !!platformSelection.value && !platformSelection.value.localTarget,
+);
+watch(inbankPlatformSelected, (selected) => {
+  if (taskKind.value === 'ab' && !selected) concurrency.value = 1;
+});
 const platformDirectory = computed(() =>
   auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
 );
@@ -293,7 +299,7 @@ watch(selectedAgent, (agent) => {
       : (bankTarget.value?.descriptor.ref.external_version_id ?? '');
   if (agent === 'demo') timeout.value = 300;
   if (agent !== 'demo') {
-    concurrency.value = 1;
+    if (!inbankPlatformSelected.value) concurrency.value = 1;
     timeout.value = 180;
     retries.value = 0;
     includeStatic.value = false;
@@ -583,6 +589,7 @@ async function submit() {
       .filter((e) => selectedEvaluators.value.includes(e.id))
       .map((e) => ({ evaluator_id: e.id, evaluator_version: e.latest_version! })),
     concurrency: concurrency.value,
+    inbankPlatform: inbankPlatformSelected.value,
     timeout: timeout.value,
     retries: retries.value,
     repetitions: repetitions.value,
@@ -791,6 +798,7 @@ async function submit() {
           dataset_version: snapshot.datasetVersion,
           ...(caseIds ? { case_ids: caseIds } : {}),
           evaluator_refs: snapshot.evaluatorRefs,
+          ...(snapshot.inbankPlatform ? { max_parallel_cases: snapshot.concurrency } : {}),
           timeout_seconds: snapshot.timeout,
         },
       });
@@ -942,7 +950,7 @@ watch(taskKind, (kind) => {
     repetitions.value = 1;
     scope.value = 'all';
     launchMode.value = 'now';
-    concurrency.value = 1;
+    if (!inbankPlatformSelected.value) concurrency.value = 1;
     timeout.value = 300;
     retries.value = 0;
   }
@@ -1267,7 +1275,7 @@ onMounted(() => void openCreate(props.source));
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
-            :disabled="taskKind === 'ab' || localBankSelected"
+            :disabled="(taskKind === 'ab' && !inbankPlatformSelected) || localBankSelected"
             title="最多 30 个样本并发"
             aria-label="并发样本数"
             type="number"
@@ -1313,7 +1321,9 @@ onMounted(() => void openCreate(props.source));
       </div>
 
       <p v-if="taskKind === 'ab'" class="muted full">
-        A/B 两侧沿用固定执行参数：并发 1，失败重试 0。
+        {{ inbankPlatformSelected
+          ? 'A/B 两侧使用相同并发数，失败重试 0。'
+          : 'A/B 两侧沿用固定执行参数：并发 1，失败重试 0。' }}
       </p>
     </fieldset>
     <p class="task-summary">
