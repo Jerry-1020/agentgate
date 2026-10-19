@@ -237,7 +237,7 @@ const versionOptions = computed(() =>
     : versions.value,
 );
 watch(selectedAgent, (agent) => {
-  if (taskKind.value !== 'ab') return;
+  if (auth.loginMode !== 'external' || taskKind.value !== 'ab') return;
   selectedVersion.value =
     agent === 'demo'
       ? (versions.value[0]?.id ?? '')
@@ -329,7 +329,7 @@ const legacyLoading = ref(false);
 let legacyLoaded = false;
 let legacySequence = 0;
 async function loadLegacyTargets() {
-  if (legacyLoaded || legacyLoading.value) return;
+  if (auth.loginMode !== 'external' || legacyLoaded || legacyLoading.value) return;
   const ticket = ++legacySequence;
   legacyLoading.value = true;
   targetError.value = '';
@@ -365,6 +365,22 @@ async function loadLegacyTargets() {
     if (ticket === legacySequence) legacyLoading.value = false;
   }
 }
+watch(
+  () => auth.loginMode,
+  () => {
+    legacySequence++;
+    legacyLoaded = false;
+    legacyLoading.value = false;
+    targetError.value = '';
+    versions.value = [];
+    bankTargets.value = [];
+    selectedAgent.value = 'demo';
+    selectedVersion.value = '';
+    candidateVersion.value = '';
+    if (taskKind.value === 'ab') void loadLegacyTargets();
+  },
+  { flush: 'sync' },
+);
 const recommended = ref<string[]>([]),
   recommendationError = ref('');
 let recommendationSequence = 0;
@@ -445,7 +461,7 @@ async function submit() {
     formError.value = '贷款智能体要求并发 1、重试 0、超时不超过 300 秒。';
     return;
   }
-  if (taskKind.value === 'single' && !platform) {
+  if ((taskKind.value === 'single' || auth.loginMode !== 'external') && !platform) {
     formError.value = '请完整选择被测智能体及版本。';
     return;
   }
@@ -847,7 +863,7 @@ onMounted(() => void openCreate(props.source));
     :close-on-click-modal="false"
   >
     <p v-if="formLoading || datasetLoading" role="status">正在加载任务配置…</p>
-    <p v-if="targetError" role="alert">{{ targetError }}</p>
+    <p v-if="auth.loginMode === 'external' && targetError" role="alert">{{ targetError }}</p>
 
     <div class="form-section-heading full">
       <span>01</span>
@@ -924,9 +940,11 @@ onMounted(() => void openCreate(props.source));
         >
         <p class="muted platform-candidate-hint">与基线版本同一目录加载；必须选择不同的版本。</p>
       </div>
-      <p v-if="legacyLoading" class="full" role="status">正在加载 A/B 智能体目录…</p>
+      <p v-if="auth.loginMode === 'external' && legacyLoading" class="full" role="status">
+        正在加载 A/B 智能体目录…
+      </p>
       <div
-        v-if="taskKind === 'ab' && !platformSelection"
+        v-if="auth.loginMode === 'external' && taskKind === 'ab' && !platformSelection"
         class="target-choice full"
         :class="{ 'is-ab': taskKind === 'ab', 'has-git-branch': usesGitBranch }"
       >
@@ -1166,9 +1184,11 @@ onMounted(() => void openCreate(props.source));
       }}
       ·
       {{
-        (taskKind === 'single'
-          ? platformSelection?.agentName
-          : versionOptions.find((v) => v.id === selectedVersion)?.label) ?? '待选目标'
+        platformSelection?.agentName ??
+        (auth.loginMode === 'external' && taskKind === 'ab'
+          ? versionOptions.find((v) => v.id === selectedVersion)?.label
+          : undefined) ??
+        '待选目标'
       }}
       · v{{ selectedDatasetVersion ?? '—' }} · {{ executionCases.length }} 条用例 ×
       {{ repetitions }} 次 · {{ selectedEvaluators.length }} 个评估器
@@ -1208,7 +1228,7 @@ onMounted(() => void openCreate(props.source));
           :disabled="
             submitting ||
             legacyLoading ||
-            (taskKind === 'single' && !platformSelection) ||
+            ((taskKind === 'single' || auth.loginMode !== 'external') && !platformSelection) ||
             (taskKind === 'ab' && !!platformSelection && !platformCandidateVersion) ||
             (taskKind === 'ab' &&
               !!platformSelection &&
@@ -1279,11 +1299,13 @@ onMounted(() => void openCreate(props.source));
 }
 .platform-candidate-row .platform-candidate-field {
   grid-column: 3;
+  grid-row: 1;
 }
 .platform-candidate-row .platform-candidate-hint {
   grid-column: 1 / 3;
-  align-self: end;
-  margin: 0 0 24px;
+  grid-row: 1;
+  align-self: center;
+  margin: 0;
 }
 .dataset-selection {
   display: grid;
@@ -1299,6 +1321,15 @@ onMounted(() => void openCreate(props.source));
   min-width: 0;
 }
 @media (max-width: 650px) {
+  .platform-candidate-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .platform-candidate-row .platform-candidate-field,
+  .platform-candidate-row .platform-candidate-hint {
+    grid-column: auto;
+    grid-row: auto;
+  }
   .dataset-selection {
     grid-template-columns: 1fr;
   }
