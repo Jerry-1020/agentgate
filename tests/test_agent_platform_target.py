@@ -172,6 +172,124 @@ def test_inbank_submission_pins_real_adapter(
     assert run.manifest.target.adapter_type == expected_adapter
     assert run.manifest.target.invocation_config.to_dict() == expected_config
     assert run.manifest.target.credential_ref
+    descriptor = deps.repository.get_target_descriptor(run.manifest.target.descriptor_sha256)
+    from jsonschema import ValidationError, validate
+
+    schema = descriptor.input_schema.to_dict()
+    validate({"txt": "only text"}, schema)
+    if mode == "claw":
+        validate({"txt": "hello", "appHistory": [], "custID": "hk_yat",
+                  "sessionId": "session", "config_variables": []}, schema)
+        with pytest.raises(ValidationError):
+            validate({"user_input_text": "missing txt"}, schema)
+    else:
+        assert schema == {"type": "object", "minProperties": 1}
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow", "claw"])
+def test_inbank_dataset_to_persisted_evaluation_and_rerun(monkeypatch, tmp_path, mode):
+    from jsonschema import validate
+    from test_inbank_trace_server_adapters import _adapter, _TraceServer, _Transport
+
+    from agentgate.integrations.targets.inbank.chatabc import resolve_chatabc_trace
+    from agentgate.integrations.targets.inbank.yunxia import resolve_yunxia_trace
+
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "inbank")
+    dispatcher = RecordingDispatcher()
+    app = create_app(tmp_path / f"{mode}-inputs.db", dispatcher, ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    variables = [{"name": "centreId", "value": "810000"},
+                 {"name": "userId", "value": "test-user"}]
+    initial = ({"config_variables": variables} if mode == "workflow" else
+               {"prompt_variables": variables, "tool_variables": []} if mode == "base" else {})
+    values = [{"user_input_text": "第一轮", "menuId": "TRANSLATE", "form": {"items": [0, False, None]}},
+              {"user_input_text": "第二轮", "lang_tar": "fr_FR"}]
+    if mode == "claw":
+        values = [{"txt": "第一轮", "appHistory": [{"role": "user", "content": "历史"}],
+                   "custID": "hk_yat", "config_variables": variables},
+                  {"txt": "第二轮"}]
+    with TestClient(app) as client:
+        response = client.post("/api/datasets", json={"name": "ChatABC input acceptance"})
+        assert response.status_code == 201, response.text
+        dataset_id = response.json()["data"]["dataset"]["id"]
+        case_ids = []
+        for index, (inputs, expected) in enumerate([(values, "customer answer"), (values[:1], "wrong")]):
+            case = Case(name=f"Case {index}", initial_state=initial, turns=[
+                CaseTurn(input=value, expectations=[{"kind": "output", "path": "output",
+                    "condition": {"kind": "equals", "expected": expected}}]) for value in inputs
+            ])
+            case_ids.append(case.id)
+            saved = client.post(f"/api/datasets/{dataset_id}/drafts/cases", json=case.model_dump(mode="json"))
+            assert saved.status_code == 201, saved.text
+        published = client.post(f"/api/datasets/{dataset_id}/drafts/publish")
+        assert published.status_code == 200, published.text
+        body = {**submission(dataset_id, mode), "max_parallel_cases": 1}
+        if mode == "claw":
+            body["target"]["branch_id"] = "customer-branch"
+        submitted = client.post("/api/agent-platform/evaluations", json=body,
+                                headers={"X-Agent-Platform-Token": "workflow-test-token"})
+        assert submitted.status_code == 202, submitted.text
+        task = submitted.json()["data"]
+        source_id = task["run_ids"][0]
+        snapshot = deps.repository.get_run(source_id).manifest
+        descriptor = deps.repository.get_target_descriptor(snapshot.target.descriptor_sha256)
+        validate(values[0], descriptor.input_schema.to_dict())
+        assert snapshot.dataset.cases[0].initial_state.to_dict() == initial
+        assert [turn.input.to_dict() for turn in snapshot.dataset.cases[0].turns] == values
+
+        def execute(run_id):
+            adapter_mode = "yunxia" if mode == "claw" else mode
+            adapter = _adapter(adapter_mode, _Transport(adapter_mode), _TraceServer())
+            try:
+                completed = deps.runs.execute_run(run_id, adapter,
+                    resolve_yunxia_trace if mode == "claw" else resolve_chatabc_trace)
+            finally:
+                adapter.close()
+            assert completed.status.value == "completed"
+            response = client.get(f"/api/runs/{run_id}")
+            assert response.status_code == 200, response.text
+            report = response.json()["data"]
+            assert sorted(
+                (result["case_id"], result["outcome"]) for result in report["results"]
+            ) == sorted(zip(case_ids, ["pass", "fail"]))
+            overall = next(metric for metric in report["metrics"] if metric["level"] == "overall")
+            assert overall["score"] == 0.5
+            assert overall["passed"] == overall["failed"] == 1
+            for case_id, expected_inputs in zip(case_ids, [values, values[:1]]):
+                trace = deps.repository.get_trace(run_id, case_id)
+                assert trace is not None
+                assert [trace.turn_outcomes[turn.id]["input"].to_dict()
+                        for turn in snapshot.dataset.cases[case_ids.index(case_id)].turns] == expected_inputs
+            return report
+
+        first_report = execute(source_id)
+        rerun = client.post(f"/api/evaluation-tasks/{task['id']}/rerun", json={"source_run_id": source_id})
+        assert rerun.status_code == 202, rerun.text
+        rerun_id = rerun.json()["data"]["run_ids"][0]
+        assert deps.repository.get_run(rerun_id).manifest == snapshot
+        execute(rerun_id)
+        assert client.get(f"/api/runs/{source_id}").json()["data"] == first_report
+
+
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+def test_mock_platform_still_rejects_business_json(mock_peer, monkeypatch, tmp_path, mode):
+    origin, _ = mock_peer
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", "mock")
+    monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_ORIGIN", origin)
+    app = create_app(tmp_path / "unsupported-input.db", RecordingDispatcher(), ApiKeyEncryptor(b"k" * 32))
+    deps = app.state.dependencies
+    dataset = deps.datasets.create_dataset("Unsupported business input")
+    deps.datasets.create_draft(dataset.id)
+    deps.datasets.save_case(dataset.id, Case(
+        name="Business JSON", turns=[CaseTurn(input={"user_input_text": "查询年休假政策"})]
+    ))
+    deps.datasets.publish_draft(dataset.id)
+    with TestClient(app) as client:
+        response = client.post("/api/agent-platform/evaluations", json=submission(dataset.id, mode),
+                               headers={"X-Agent-Platform-Token": "test-token"})
+        assert response.status_code == 422, response.text
+        assert not deps.repository.list_evaluation_tasks()
+        assert not deps.api_keys.list_api_keys()
 
 
 def test_invalid_selection_and_dispatch_failure_preserve_truth(mock_peer, monkeypatch, tmp_path):

@@ -712,10 +712,11 @@ class InbankChatABCTargetAdapter:
         project_id = request.target.ref.external_target_id
         for sequence, turn in enumerate(request.case.turns):
             turn_input = turn.input.to_dict()
+            question = _chatabc_question(turn_input, input_field)
             started_at = utcnow()
             answer, full_answer, error, _duration, _chat_events, request_id = client.chat_stream(
                 session_id,
-                turn_input[input_field],
+                question,
                 timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds),
             )
             if error:
@@ -945,24 +946,45 @@ class InbankChatABCTargetAdapter:
                 raise TargetExecutionError(
                     "invalid_request", f"initial_state {name} must be an array"
                 )
+        if arrange_type == "workflow":
+            names: set[str] = set()
+            for variable in initial.get("config_variables", []):
+                if (
+                    not isinstance(variable, dict)
+                    or not isinstance(variable.get("name"), str)
+                    or not variable["name"].strip()
+                    or "value" not in variable
+                ):
+                    raise TargetExecutionError(
+                        "invalid_request", "config_variables entries require name and value"
+                    )
+                if variable["name"] in names:
+                    raise TargetExecutionError(
+                        "invalid_request", "config_variables names must be unique"
+                    )
+                names.add(variable["name"])
         input_field = _input_field(request)
         for turn in request.case.turns:
-            value = turn.input.to_dict()
-            if set(value) - {input_field, "files"} or input_field not in value:
-                raise TargetExecutionError(
-                    "invalid_request",
-                    f"CaseTurn input supports only {input_field} and files",
-                )
-            if not isinstance(value[input_field], str) or not value[input_field].strip():
-                raise TargetExecutionError(
-                    "invalid_request",
-                    f"CaseTurn {input_field} must be nonblank text",
-                )
-            files = value.get("files", [])
-            if not isinstance(files, list):
-                raise TargetExecutionError("invalid_request", "CaseTurn files must be an array")
-            if files:
-                raise TargetExecutionError("invalid_request", "non-empty files are not supported")
+            _chatabc_question(turn.input.to_dict(), input_field)
+
+
+def _chatabc_question(value: dict[str, Any], input_field: str) -> str:
+    """Keep text envelopes unchanged; encode complete business objects only at transport."""
+    if not value:
+        raise TargetExecutionError("invalid_request", "ChatABC input must not be empty")
+    if set(value) <= {input_field, "files"}:
+        question = value.get(input_field)
+        if not isinstance(question, str) or not question.strip():
+            raise TargetExecutionError(
+                "invalid_request", f"CaseTurn {input_field} must be nonblank text"
+            )
+        files = value.get("files", [])
+        if not isinstance(files, list) or files:
+            raise TargetExecutionError(
+                "invalid_request", "ChatABC attachments are not supported"
+            )
+        return question
+    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
 
 
 def _input_field(request: CaseExecutionRequest) -> str:

@@ -594,7 +594,7 @@ const sampleCases = [
     turns: [{ input: { txt: '问题一' }, expectations: [{ kind: 'output' }] }],
   },
 ];
-async function openForm(page: Page, selected = false) {
+async function openForm(page: Page, selected = false, cases = sampleCases) {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
     [];
   await page.route('**/api/**', async (route) => {
@@ -628,11 +628,11 @@ async function openForm(page: Page, selected = false) {
     if (path.match(/\/datasets\/[^/]+$/))
       return reply(route, {
         versions: [
-          { version: 1, cases: sampleCases },
-          { version: 2, cases: sampleCases },
+          { version: 1, cases },
+          { version: 2, cases },
         ],
       });
-    if (path.includes('/datasets/')) return reply(route, { cases: sampleCases });
+    if (path.includes('/datasets/')) return reply(route, { cases });
     if (path === '/api/versions')
       return reply(route, [
         { id: 'old-1', label: '旧版一' },
@@ -669,6 +669,7 @@ async function openForm(page: Page, selected = false) {
         : path.endsWith('/agents')
           ? batch([
               { id: 'workflow', name: '工作流', agentType: 'workflow' },
+              { id: 'base', name: '基础编排', agentType: 'base' },
               { id: 'claw', name: '云虾', agentType: 'abcclaw2' },
             ])
           : path.endsWith('branchTree')
@@ -701,6 +702,176 @@ async function selectFormTarget(page: Page, claw = false) {
   await choose(page, '智能体版本', claw ? 'v2' : bankVersionOne);
 }
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
+
+test('bank workflow accepts business JSON while cloudshrimp retains its native input contract', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId', value: '810000' }] },
+    turns: [{ input: { user_input_text: '翻译', menuId: 'TRANSLATE', form: { enabled: false } }, expectations: [{ kind: 'output' }] },
+      { input: { user_input_text: '第二轮', lang_tar: 'fr_FR' }, expectations: [{ kind: 'output' }] }] }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('workflow');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+test('invalid workflow config is rejected before task submission', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId' }] } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base accepts both initialization arrays and retains initialization type isolation', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: {
+    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
+    tool_variables: [{ name: 'bankNo', value: '810000', type: 'str' }],
+  } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('base');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page);
+  await start(page).click();
+  await expect(page.getByText(/所选工作流.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+for (const initial of [
+  { config_variables: [{ name: 'centreId', value: '810000' }] },
+  { config_variables: [], prompt_variables: [{ name: 'userId', value: 'hk_yat' }] },
+  { prompt_variables: 'not-an-array' },
+]) test('bank base rejects incompatible initialization ' + JSON.stringify(initial), async ({ page }) => {
+  const requests = await openForm(page, false, [{ ...sampleCases[0], initial_state: initial }] as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank base accepts business JSON while cloudshrimp retains its native input contract', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { prompt_variables: [] },
+    turns: [
+      { input: { user_input_text: '业务 JSON', menuId: 'KNOWLEDGE_QUERY', form: { items: [0, false, null] } }, expectations: [{ kind: 'output' }] },
+      { input: { txt: '普通文本' }, expectations: [{ kind: 'output' }] },
+      { input: { user_input: '查询年休假政策' }, expectations: [{ kind: 'output' }] },
+    ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', bankVersionOne);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.arrange_type).toBe('base');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.filter(r => r.path === '/api/agent-platform/evaluations')).toHaveLength(1);
+});
+
+test('external base still rejects business JSON before task submission', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input: { user_input_text: '业务 JSON' }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await page.route('**/api/local-targets', (route) => reply(route, { targets: [], unavailable: [] }));
+  await page.evaluate(() =>
+    (window as any).setAuth({ loginMode: 'external', token: '', teamId: '', teamName: '' }),
+  );
+  await choose(page, '选择智能体', '基础编排 · base');
+  await choose(page, '智能体版本', 'v1');
+  await start(page).click();
+  await expect(page.getByText(/平台目标仅支持纯文本/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+for (const input of [
+  { txt: '只填文本' },
+  { txt: '{"user_input_text":"JSON 原文"}' },
+  { txt: '历史', appHistory: [{ role: 'user', content: '之前的问题' }] },
+  { txt: '客户', custID: 'hk_yat' },
+  { txt: '变量', config_variables: [{ name: 'centreId', value: '810000' }] },
+  { txt: '完整', appHistory: { role: 'user', content: '历史' }, custID: 'hk_yat',
+    sessionId: 'session-one', config_variables: [{ open: [0, false, null] }] },
+  { txt: '选填留空', appHistory: null, custID: null, sessionId: null, config_variables: null },
+]) test('bank cloudshrimp accepts optional native input ' + JSON.stringify(input), async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input, expectations: [{ kind: 'output' }] },
+    { input: { txt: '第二轮仅文本' }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
+  const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
+  expect(sent.body.target.type_group).toBe('abcclaw');
+  expect(sent.body.target.branch_id).toBe('branch/raw');
+  expect(sent.headers['x-agent-platform-token']).toBe('form-secret');
+});
+
+for (const inputs of [
+  [{ appHistory: [] }], [{ txt: ' ' }], [{ txt: 1 }], [{ txt: 'hello', app_history: [] }],
+  [{ txt: 'hello', custID: 123 }], [{ txt: 'hello', sessionId: [] }],
+  [{ txt: 'hello', config_variables: {} }], [{ txt: 'hello', files: ['unsupported'] }],
+  [{ txt: 'one', sessionId: 'one' }, { txt: 'two', sessionId: 'two' }],
+]) test('bank cloudshrimp rejects invalid native inputs ' + JSON.stringify(inputs), async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: inputs.map(input => ({ input, expectations: [{ kind: 'output' }] })) }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('bank cloudshrimp keeps request fields in input rather than Case initialization', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], initial_state: { config_variables: [] } }];
+  const requests = await openForm(page, false, cases as typeof sampleCases);
+  await selectFormTarget(page, true);
+  await start(page).click();
+  await expect(page.getByText(/所选云虾.*输入格式不正确/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+test('external cloudshrimp does not adopt inbank native request fields', async ({ page }) => {
+  const cases = [{ ...sampleCases[0], turns: [
+    { input: { txt: 'hello', appHistory: [] }, expectations: [{ kind: 'output' }] },
+  ] }];
+  const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+  await page.route('**/api/local-targets', (route) => reply(route, { targets: [], unavailable: [] }));
+  await page.evaluate(() =>
+    (window as any).setAuth({ loginMode: 'external', token: '', teamId: '', teamName: '' }),
+  );
+  await choose(page, '选择智能体', '云虾 · claw');
+  await choose(page, '分支地址', '分支 · branch/raw');
+  await choose(page, '智能体版本', 'v2');
+  await start(page).click();
+  await expect(page.getByText(/平台目标仅支持纯文本/)).toBeVisible();
+  expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+});
+
+for (const input of [{}, { txt: ' ' }, { txt: 'hello', files: ['unsupported'] }])
+  test('bank base rejects invalid text and attachments ' + JSON.stringify(input), async ({ page }) => {
+    const cases = [{ ...sampleCases[0], turns: [{ input, expectations: [{ kind: 'output' }] }] }];
+    const requests = await openForm(page, false, cases as unknown as typeof sampleCases);
+    await choose(page, '选择智能体', '基础编排 · base');
+    await choose(page, '智能体版本', bankVersionOne);
+    await start(page).click();
+    await expect(page.getByText(/所选基础编排.*初始化变量或输入格式不正确/)).toBeVisible();
+    expect(requests.some(r => r.path === '/api/agent-platform/evaluations')).toBe(false);
+  });
 
 test('form preserves dataset/execution choices through target changes and logout, without legacy catalogs', async ({
   page,

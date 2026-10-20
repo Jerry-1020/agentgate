@@ -62,12 +62,23 @@ def _build_inbank_descriptor(
         ),
         display_name=agent_id,
         metadata=metadata,
-        input_schema={
-            "type": "object",
-            "required": ["txt"],
-            "properties": {"txt": {"type": "string"}},
-            "additionalProperties": False,
-        },
+        input_schema=(
+            {"type": "object", "minProperties": 1}
+            if type_group == "base/workflow" and arrange_type in {"base", "workflow"}
+            else {
+                "type": "object",
+                "required": ["txt"],
+                "properties": {
+                    "txt": {"type": "string"},
+                    "appHistory": {},
+                    "custID": {"type": ["string", "null"]},
+                    "sessionId": {"type": ["string", "null"]},
+                    "config_variables": {"type": ["array", "null"]},
+                    "files": {"type": "array", "maxItems": 0},
+                },
+                "additionalProperties": False,
+            }
+        ),
     )
 
 

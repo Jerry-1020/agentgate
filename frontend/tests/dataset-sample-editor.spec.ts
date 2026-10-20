@@ -202,118 +202,368 @@ async function save(page: Page, datasetId: string, method = 'PUT') {
   return (await saved.json()).data.cases[0];
 }
 
-test('background persists without changing expectations, preserves other extensions and clears', async ({ page }) => {
-  const datasetId = await open(page, 'state');
-  const original = sample('state');
-  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
-    data: { ...original, turns: original.turns.map(turn => ({
-      ...turn, extensions: [{ key: 'custom', value: 'keep' }],
-    })) },
-  });
-  expect(seeded.ok()).toBeTruthy();
-  await page.reload();
-  const background = page.getByLabel('背景知识', { exact: true });
-  await expect(background).toHaveValue('');
-  await background.fill('客户已完成身份核验\n仅供记录');
-  await expect(page.getByTestId('dirty')).toHaveText('true');
-  const saved = await save(page, datasetId);
-  expect(saved.turns[0].extensions).toEqual([
-    { key: 'custom', value: 'keep' },
-    { key: 'background', value: '客户已完成身份核验\n仅供记录' },
-  ]);
-  expect(saved.turns[0].input).toEqual(original.turns[0].input);
-  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
-  await page.reload();
-  await expect(background).toHaveValue('客户已完成身份核验\n仅供记录');
-  await background.fill('');
-  const cleared = await save(page, datasetId);
-  expect(cleared.turns[0].extensions).toEqual([{ key: 'custom', value: 'keep' }]);
-  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
-  await page.reload();
-  await expect(background).toHaveValue('');
-});
+async function expandInitialization(page: Page) {
+  const section = page.locator('details.case-initialization');
+  await expect(section.locator('summary')).toHaveText('初始变量');
+  if (!(await section.evaluate(element => (element as HTMLDetailsElement).open))) {
+    await section.locator('summary').click();
+  }
+}
 
-test('background stays with each turn, survives publication and becomes read-only', async ({ page }) => {
+async function addInitializationVariable(page: Page, name: string, value: string) {
+  await expandInitialization(page);
+  const index = await page.getByLabel(/^初始化变量名 \d+$/).count() + 1;
+  await page.getByRole('button', { name: '添加变量', exact: true }).click();
+  await page.getByLabel(`初始化变量名 ${index}`, { exact: true }).fill(name);
+  await page.getByLabel(`初始化变量值 ${index}`, { exact: true }).fill(value);
+}
+
+test('workflow Case initialization and complete JSON turns persist and publish', async ({ page }) => {
   const datasetId = await open(page);
-  const background = page.getByLabel('背景知识', { exact: true });
-  await page.getByLabel('用户输入', { exact: true }).fill('第一轮输入');
-  await page.getByLabel('期望输出', { exact: true }).fill('第一轮输出');
-  await background.fill('第一轮背景');
+  const variables = [{ name: 'centreId', value: '810000' }, { name: 'userId', value: 'hk_yat' },
+    { name: 'bankNo', value: '810000' }];
+  const first = { user_input_text: '我们行的年休假政策是什么', menuId: 'KNOWLEDGE_QUERY' };
+  const second = { user_input_text: '第二轮', collected_data: {},
+    form: { values: [0, false, null, { amount: 12.5 }] } };
+  await expect(page.getByText('初始变量', { exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(0);
+  for (const variable of variables) {
+    await addInitializationVariable(page, variable.name, variable.value);
+  }
+  await expect(page.locator('details.case-initialization select')).toHaveCount(0);
+  await expect(page.getByTestId('dirty')).toHaveText('true');
+  await page.getByLabel('结构化 JSON 输入', { exact: true }).check();
+  await page.getByRole('textbox', { name: '用户输入 JSON', exact: true }).fill(JSON.stringify(first));
   await page.getByRole('button', { name: '添加新轮次' }).click();
-  await expect(background).toHaveValue('');
-  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
-  await page.getByLabel('期望输出', { exact: true }).fill('第二轮输出');
-  await background.fill('第二轮背景');
-  await page.getByRole('button', { name: /第 1 轮/ }).click();
-  await expect(background).toHaveValue('第一轮背景');
+  await page.getByLabel('结构化 JSON 输入', { exact: true }).check();
+  await page.getByRole('textbox', { name: '用户输入 JSON', exact: true }).fill(JSON.stringify(second));
   const saved = await save(page, datasetId, 'POST');
-  expect(saved.turns.map((turn: { extensions: unknown }) => turn.extensions)).toEqual([
-    [{ key: 'background', value: '第一轮背景' }],
-    [{ key: 'background', value: '第二轮背景' }],
-  ]);
+  expect(saved.initial_state).toEqual({ config_variables: variables });
+  expect(saved.turns.map((turn: any) => turn.input)).toEqual([first, second]);
   await page.reload();
-  await expect(background).toHaveValue('第一轮背景');
-  await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(background).toHaveValue('第二轮背景');
-  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await expandInitialization(page);
+  for (const [index, variable] of variables.entries()) {
+    await expect(page.getByLabel(`初始化变量名 ${index + 1}`, { exact: true })).toHaveValue(variable.name);
+    await expect(page.getByLabel(`初始化变量值 ${index + 1}`, { exact: true })).toHaveValue(variable.value);
+  }
+  await page.getByRole('button', { name: '对话预览', exact: true }).click();
+  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '添加变量', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^删除初始化变量 \d+$/ })).toHaveCount(0);
+  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeEnabled();
+  const published = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
-  expect((await publication).ok()).toBeTruthy();
-  await expect(background).toBeDisabled();
-  await page.reload();
-  await expect(background).toBeDisabled();
-  await expect(background).toHaveValue('第一轮背景');
-  await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(background).toHaveValue('第二轮背景');
-  await test.info().attach('background-description-published', {
+  expect((await published).ok()).toBeTruthy();
+  for (const index of variables.keys()) {
+    await expect(page.getByLabel(`初始化变量名 ${index + 1}`, { exact: true })).toBeDisabled();
+    await expect(page.getByLabel(`初始化变量值 ${index + 1}`, { exact: true })).toBeDisabled();
+  }
+  await expect(page.getByRole('button', { name: '添加变量', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^删除初始化变量 \d+$/ })).toHaveCount(0);
+  const response = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+  expect((await response.json()).data.cases[0].initial_state).toEqual({ config_variables: variables });
+  await test.info().attach('workflow-case-inputs', {
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
   });
 });
 
-test('custom variables persist per turn as strings, clear independently and become read-only', async ({ page }) => {
+test('workflow initialization starts collapsed and keeps values when collapsed and saved', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const section = page.locator('details.case-initialization');
+  const summary = section.locator('summary');
+  await expect(summary).toHaveText('初始变量');
+  await expect(section).toHaveJSProperty('open', false);
+  const summaryStyles = await page.locator('details.case-initialization > summary, details.advanced > summary')
+    .evaluateAll(elements => elements.map(element => {
+      const style = getComputedStyle(element);
+      return ['color', 'font-size', 'font-weight', 'display', 'list-style-type']
+        .map(property => style.getPropertyValue(property));
+    }));
+  expect(summaryStyles).toHaveLength(2);
+  expect(summaryStyles[0]).toEqual(summaryStyles[1]);
+  await summary.press('Enter');
+  await expect(section).toHaveJSProperty('open', true);
+  await addInitializationVariable(page, 'centreId', '810000');
+  await summary.click();
+  await expect(section).toHaveJSProperty('open', false);
+  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeHidden();
+  await test.info().attach('workflow-initialization-collapsed', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
+  expect((await save(page, datasetId)).initial_state).toEqual({
+    ...sample('state').initial_state, config_variables: [{ name: 'centreId', value: '810000' }],
+  });
+  await page.reload();
+  await expect(summary).toBeVisible();
+  await expect(section).toHaveJSProperty('open', false);
+  await summary.press('Enter');
+  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toHaveValue('centreId');
+  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('810000');
+  await test.info().attach('workflow-initialization-expanded', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
+});
+
+test('workflow initialization is optional and ignores completely blank rows', async ({ page }) => {
+  const datasetId = await open(page);
+  await page.getByLabel('用户输入', { exact: true }).fill('无需初始化变量的输入');
+  expect((await save(page, datasetId, 'POST')).initial_state).toEqual({});
+  await addInitializationVariable(page, '', '');
+  await addInitializationVariable(page, '  ', '');
+  expect((await save(page, datasetId)).initial_state).toEqual({});
+  await page.reload();
+  await expandInitialization(page);
+  await expect(page.getByRole('button', { name: '添加变量', exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(0);
+  await addInitializationVariable(page, 'optionalText', '');
+  expect((await save(page, datasetId)).initial_state).toEqual({
+    config_variables: [{ name: 'optionalText', value: '' }],
+  });
+});
+
+test('workflow initialization validates names and JSON values, and clears without losing other state', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  await addInitializationVariable(page, '', '810000');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role=alert]')).toContainText('初始化变量');
+  await page.getByLabel('初始化变量名 1', { exact: true }).fill('centreId');
+  await addInitializationVariable(page, 'centreId', 'false');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role=alert]')).toContainText('不能重复');
+  await page.getByRole('button', { name: '删除初始化变量 2', exact: true }).click();
+  await save(page, datasetId);
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state, config_variables: [
+      { name: 'centreId', value: '810000' }, { name: 'settings', value: { enabled: false } },
+    ] } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  await page.getByLabel('初始化变量值 2', { exact: true }).fill('{invalid');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role=alert]')).toContainText('JSON');
+  await page.getByRole('button', { name: '删除初始化变量 2', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual({ ticket: 'existing', attempts: 0,
+    config_variables: [{ name: 'centreId', value: '810000' }] });
+  await page.getByRole('button', { name: '删除初始化变量 1', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual(sample('state').initial_state);
+  await page.reload();
+  await expandInitialization(page);
+  await expect(page.getByRole('button', { name: '添加变量', exact: true })).toBeVisible();
+  await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(0);
+});
+
+test('workflow initialization keeps text and JSON value types after save and reload', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const textVariables = [
+    { name: 'centreId', value: '810000' },
+    { name: 'textFalse', value: 'false' },
+    { name: 'textObject', value: '{"enabled":false}' },
+    { name: 'emptyText', value: '' },
+  ];
+  const existingVariables = [
+    { name: 'count', value: 0 },
+    { name: 'enabled', value: false },
+    { name: 'optional', value: null },
+    { name: 'items', value: [0, false, null, '810000'] },
+    { name: 'settings', value: { nested: { active: false, count: 0 } } },
+  ];
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state, config_variables: existingVariables } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  for (const variable of textVariables) {
+    await addInitializationVariable(page, variable.name, variable.value);
+  }
+  await expect(page.locator('details.case-initialization select')).toHaveCount(0);
+  const variables = [...existingVariables, ...textVariables];
+  expect((await save(page, datasetId)).initial_state.config_variables).toEqual(variables);
+  await page.reload();
+  await expandInitialization(page);
+  for (const [index, variable] of variables.entries()) {
+    await expect(page.getByLabel(`初始化变量名 ${index + 1}`, { exact: true })).toHaveValue(variable.name);
+    const value = page.getByLabel(`初始化变量值 ${index + 1}`, { exact: true });
+    if (typeof variable.value === 'string') await expect(value).toHaveValue(variable.value);
+    else await expect.poll(async () => JSON.parse(await value.inputValue())).toEqual(variable.value);
+  }
+  await page.getByLabel('样本名称', { exact: true }).fill('Re-saved typed configuration');
+  expect((await save(page, datasetId)).initial_state.config_variables).toEqual(variables);
+});
+
+test('base initialization saves both variable groups and excludes workflow fields', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  await addInitializationVariable(page, 'centreId', '810000');
+  const types = page.getByRole('group', { name: '初始化类型', exact: true });
+  await types.getByRole('button', { name: '基础编排', exact: true }).click();
+  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toHaveCount(0);
+  for (const [label, name, value] of [['提示词变量', 'userId', 'hk_yat'], ['工具变量', 'bankNo', '810000']]) {
+    await page.getByRole('button', { name: `添加${label}`, exact: true }).click();
+    await page.getByLabel(`${label}名 1`, { exact: true }).fill(name);
+    await page.getByLabel(`${label}值 1`, { exact: true }).fill(value);
+  }
+  const initial = { ...sample('state').initial_state,
+    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
+    tool_variables: [{ name: 'bankNo', value: '810000' }] };
+  expect((await save(page, datasetId)).initial_state).toEqual(initial);
+  await page.reload();
+  await expandInitialization(page);
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toHaveValue('hk_yat');
+  await expect(page.getByLabel('工具变量值 1', { exact: true })).toHaveValue('810000');
+  await page.getByRole('button', { name: '对话预览', exact: true }).click();
+  await expect(types.getByRole('button', { name: '工作流', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('工具变量值 1', { exact: true })).toBeDisabled();
+  await test.info().attach('base-initialization', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+});
+
+test('switching initialization types only saves the selected fields without a confirmation dialog', async ({ page }) => {
   const datasetId = await open(page, 'state');
   const original = sample('state');
-  const background = page.getByLabel('背景知识', { exact: true });
-  const variables = page.getByLabel('自定义变量', { exact: true });
-  const firstValue = '{"cust_id":"001","amount":100}\n备注=保持原文';
-  await expect(variables).toHaveValue('');
-  await background.fill('保留背景');
-  await variables.fill(firstValue);
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state,
+      prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
+      tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  const types = page.getByRole('group', { name: '初始化类型', exact: true });
+  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const dialogs: string[] = [];
+  page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
+  await types.getByRole('button', { name: '工作流', exact: true }).click();
+  await addInitializationVariable(page, 'centreId', '810000');
+  await types.getByRole('button', { name: '基础编排', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
+    tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] });
+  await types.getByRole('button', { name: '工作流', exact: true }).click();
+  await addInitializationVariable(page, 'centreId', '810000');
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    config_variables: [{ name: 'centreId', value: '810000' }] });
+  expect(dialogs).toEqual([]);
+});
+
+test('mixed imported initialization is reduced to the selected type and inactive invalid values do not block saving', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state,
+      config_variables: 'invalid inactive configuration',
+      prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  await page.getByRole('group', { name: '初始化类型', exact: true })
+    .getByRole('button', { name: '基础编排', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+    prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] });
+});
+
+async function expectAnnotationInputsAbsent(page: Page) {
+  await expect(page.getByLabel('背景知识', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('自定义变量', { exact: true })).toHaveCount(0);
+}
+
+test('hidden annotations survive editing and reloading without changing other turn data', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const extensions = [
+    { key: 'custom', value: 'keep' },
+    { key: 'background', value: '客户已完成身份核验\n仅供记录' },
+    { key: 'custom_variables', value: '{"cust_id":"001","amount":100}\n备注=保持原文' },
+  ];
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: original.turns.map(turn => ({
+      ...turn, extensions,
+    })) },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(original.name);
+  await expectAnnotationInputsAbsent(page);
+  await page.getByLabel('样本名称', { exact: true }).fill('Edited sample with hidden annotations');
   await expect(page.getByTestId('dirty')).toHaveText('true');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].extensions).toEqual(extensions);
+  expect(saved.turns[0].input).toEqual(original.turns[0].input);
+  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  await page.reload();
+  await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(saved.name);
+  await expectAnnotationInputsAbsent(page);
+  await page.getByRole('button', { name: '对话预览', exact: true }).click();
+  await expectAnnotationInputsAbsent(page);
+  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  await page.getByLabel('样本分类', { exact: true }).selectOption('boundary');
+  expect((await save(page, datasetId)).turns[0].extensions).toEqual(extensions);
+});
+
+test('hidden annotations stay with each turn and survive publication', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const extensions = [
+    [{ key: 'background', value: '第一轮背景' }, { key: 'custom_variables', value: 'channel=web' },
+      { key: 'custom', value: 'first-only' }],
+    [{ key: 'background', value: '第二轮背景' }, { key: 'custom_variables', value: 'channel=mobile' },
+      { key: 'custom', value: 'second-only' }],
+  ];
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: [
+      { ...original.turns[0], extensions: extensions[0] },
+      { id: 'annotation-second-turn', input: { query: '第二轮输入' }, expectations: [], extensions: extensions[1] },
+    ] },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(original.name);
+  await expectAnnotationInputsAbsent(page);
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expectAnnotationInputsAbsent(page);
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮修改后的输入');
   await page.getByRole('button', { name: '添加新轮次' }).click();
-  await expect(variables).toHaveValue('');
-  await page.getByLabel('用户输入', { exact: true }).fill('第二轮输入');
-  await variables.fill('channel=mobile');
-  await page.getByRole('button', { name: /第 1 轮/ }).click();
-  await expect(variables).toHaveValue(firstValue);
+  await expectAnnotationInputsAbsent(page);
+  await page.getByLabel('用户输入', { exact: true }).fill('无历史附加信息的新轮次');
   const saved = await save(page, datasetId);
   expect(saved.turns[0].input).toEqual(original.turns[0].input);
   expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
-  expect(saved.turns[0].extensions).toEqual([
-    { key: 'background', value: '保留背景' },
-    { key: 'custom_variables', value: firstValue },
-  ]);
-  expect(saved.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=mobile' }]);
+  expect(saved.turns[1].input).toEqual({ query: '第二轮修改后的输入' });
+  expect(saved.turns).toHaveLength(3);
+  expect(saved.turns.slice(0, 2).map((turn: { extensions: unknown }) => turn.extensions)).toEqual(extensions);
+  expect(saved.turns[2]).not.toHaveProperty('extensions');
   await page.reload();
-  await expect(variables).toHaveValue(firstValue);
-  await variables.fill('');
-  const cleared = await save(page, datasetId);
-  expect(cleared.turns[0].extensions).toEqual([{ key: 'background', value: '保留背景' }]);
-  expect(cleared.turns[0].expectations).toEqual(original.turns[0].expectations);
+  await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(original.name);
   await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(variables).toHaveValue('channel=mobile');
-  await variables.fill('channel=web');
-  const edited = await save(page, datasetId);
-  expect(edited.turns[1].extensions).toEqual([{ key: 'custom_variables', value: 'channel=web' }]);
+  await page.getByRole('button', { name: '对话预览', exact: true }).click();
+  await expectAnnotationInputsAbsent(page);
   const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
   expect((await publication).ok()).toBeTruthy();
   await page.reload();
-  await expect(variables).toHaveValue('');
-  await expect(background).toHaveValue('保留背景');
-  await expect(variables).toBeDisabled();
+  await expect(page.getByLabel('样本名称', { exact: true })).toBeDisabled();
+  await expectAnnotationInputsAbsent(page);
   await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await expect(variables).toHaveValue('channel=web');
-  await expect(variables).toBeDisabled();
+  await expectAnnotationInputsAbsent(page);
+  const response = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+  const published = (await response.json()).data.cases[0];
+  expect(published.turns).toHaveLength(3);
+  expect(published.turns.slice(0, 2).map((turn: { extensions: unknown }) => turn.extensions)).toEqual(extensions);
+  expect(published.turns[2]).not.toHaveProperty('extensions');
+  await test.info().attach('annotations-hidden-published', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  });
 });
 
 test('classification saves negative, reopens, changes to boundary and becomes read-only when published', async ({ page }) => {

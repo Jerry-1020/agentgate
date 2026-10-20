@@ -605,11 +605,7 @@ class InbankYunxiaTargetAdapter:
     def _execute_case(self, request: CaseExecutionRequest) -> CaseExecutionResult:
         assert self._agent_name is not None
         assert self._run_customer_suffix is not None
-        initial = request.case.initial_state.to_dict()
-        session_id = request.case.id
-        customer_id = initial.get(
-            "customer_id", f"{self.settings.test_customer_prefix}-{request.case.id}"
-        )
+        session_id = _case_session_id(request)
         cfg = {**self._cfg, "_RUN_CUST_UUID": "-" + self._run_customer_suffix}
         input_field = _input_field(request)
         spans: list[TraceSpan] = []
@@ -618,13 +614,16 @@ class InbankYunxiaTargetAdapter:
 
         for sequence, turn in enumerate(request.case.turns):
             turn_input = turn.input.to_dict()
+            customer_id = (turn_input.get("custID") or "").strip() or (
+                f"{self.settings.test_customer_prefix}-{session_id}"
+            )
             request_id = str(uuid4())
             row = {
                 "questionId": session_id,
                 "custId": customer_id,
                 "user_input": turn_input[input_field],
-                "currentDisplay_1": turn_input.get("app_history", []),
-                "config_variables": initial.get("config_variables", []),
+                "currentDisplay_1": turn_input.get("appHistory", []),
+                "config_variables": turn_input.get("config_variables") or [],
             }
             started_at = utcnow()
             LOGGER.info(
@@ -859,42 +858,48 @@ class InbankYunxiaTargetAdapter:
         if target.adapter_version != self.adapter_version:
             raise TargetExecutionError("invalid_request", "adapter_version does not match")
         _branch_id(request)
-        initial = request.case.initial_state.to_dict()
-        if set(initial) - {"customer_id", "config_variables"}:
+        if request.case.initial_state:
             raise TargetExecutionError(
-                "invalid_request", "Case initial_state has unsupported fields"
-            )
-        customer_id = initial.get("customer_id", self.settings.test_customer_prefix)
-        if not isinstance(customer_id, str) or not customer_id.strip():
-            raise TargetExecutionError(
-                "invalid_request", "initial_state customer_id must be nonblank text"
-            )
-        if not customer_id.startswith(self.settings.test_customer_prefix):
-            raise TargetExecutionError(
-                "invalid_request", "customer_id must use the approved test prefix"
-            )
-        if not isinstance(initial.get("config_variables", []), list):
-            raise TargetExecutionError(
-                "invalid_request", "initial_state config_variables must be an array"
+                "invalid_request", "Yunxia request fields belong in each turn input, not initial_state"
             )
         input_field = _input_field(request)
+        allowed = {input_field, "appHistory", "custID", "sessionId", "config_variables", "files"}
         for turn in request.case.turns:
             value = turn.input.to_dict()
-            if set(value) - {input_field, "app_history", "files"} or input_field not in value:
+            if set(value) - allowed or input_field not in value:
                 raise TargetExecutionError(
                     "invalid_request",
-                    f"Yunxia CaseTurn input supports only {input_field}, app_history and files",
+                    f"Yunxia input requires {input_field}; optional fields are "
+                    "appHistory, custID, sessionId, config_variables and empty files",
                 )
             if not isinstance(value[input_field], str) or not value[input_field].strip():
                 raise TargetExecutionError(
                     "invalid_request",
                     f"CaseTurn {input_field} must be nonblank text",
                 )
+            for key in ("custID", "sessionId"):
+                if value.get(key) is not None and not isinstance(value[key], str):
+                    raise TargetExecutionError("invalid_request", f"Yunxia {key} must be text")
+            variables = value.get("config_variables")
+            if variables is not None and not isinstance(variables, list):
+                raise TargetExecutionError("invalid_request", "Yunxia config_variables must be an array")
             files = value.get("files", [])
             if not isinstance(files, list):
                 raise TargetExecutionError("invalid_request", "CaseTurn files must be an array")
             if files:
                 raise TargetExecutionError("invalid_request", "non-empty files are not supported")
+        _case_session_id(request)
+
+
+def _case_session_id(request: CaseExecutionRequest) -> str:
+    session_ids = {
+        value.strip()
+        for turn in request.case.turns
+        if isinstance(value := turn.input.to_dict().get("sessionId"), str) and value.strip()
+    }
+    if len(session_ids) > 1:
+        raise TargetExecutionError("invalid_request", "Yunxia sessionId must be consistent within a Case")
+    return next(iter(session_ids), request.case.id)
 
 
 def _input_field(request: CaseExecutionRequest) -> str:
