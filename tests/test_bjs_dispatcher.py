@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
+from socket import gaierror
 from typing import Self
 from urllib.error import HTTPError, URLError
 
@@ -96,6 +98,111 @@ def test_submit_rejects_http_errors() -> None:
 
     with pytest.raises(RuntimeError, match="acceptance is unconfirmed"):
         dispatcher.submit("run-123")
+
+
+def test_submit_logs_request_context_before_sending(caplog) -> None:
+    logs_before_request = []
+
+    def opener(request, *, timeout):
+        logs_before_request.extend(record.getMessage() for record in caplog.records)
+        assert request.method == "POST"
+        assert request.full_url == (
+            "https://bjs.example/submit?taskId=run-123&jobId=ai28"
+        )
+        assert timeout == 15
+        return Response({"code": "0", "message": "success", "data": ""})
+
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", " ai28 ", opener=opener, timeout_seconds=15
+    )
+    with caplog.at_level("INFO"):
+        dispatcher.submit("run-123")
+
+    started = next(log for log in logs_before_request if "BJS submission started" in log)
+    assert "run_id=run-123" in started
+    assert "job_id=ai28" in started
+    assert "method=POST" in started
+    assert "endpoint=https://bjs.example/submit" in started
+    assert "timeout_seconds=15" in started
+    assert "BJS submission accepted: run_id=run-123" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "status, reason",
+    [
+        (401, "Unauthorized"),
+        (403, "Forbidden"),
+        (404, "Not Found"),
+        (405, "Method Not Allowed"),
+        (500, "Internal Server Error"),
+        (502, "Bad Gateway"),
+        (503, "Service Unavailable"),
+        (599, "Unknown HTTP status"),
+    ],
+)
+def test_http_failure_logs_status_without_remote_secrets(caplog, status, reason) -> None:
+    body = BytesIO(b'{"message":"private-body-secret"}')
+    error = HTTPError(
+        "https://redirect.example/private-url-secret",
+        status,
+        "private-reason-secret\nforged-log",
+        {"Set-Cookie": "private-cookie-secret"},
+        body,
+    )
+    calls = []
+
+    def opener(*args, **kwargs):
+        calls.append(args)
+        raise error
+
+    dispatcher = BjsJobDispatcher("https://bjs.example/submit", "ai28", opener=opener)
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError) as caught:
+        dispatcher.submit("run-123")
+
+    assert str(caught.value) == "BJS submission transport failed; acceptance is unconfirmed"
+    assert caught.value.__suppress_context__
+    assert len(calls) == 1
+    assert body.tell() == 0
+    assert f"http_status={status}" in caplog.text
+    assert f"reason={reason}" in caplog.text
+    assert "error_type=HTTPError" in caplog.text
+    assert "run_id=run-123" in caplog.text
+    assert "job_id=ai28" in caplog.text
+    assert "endpoint=https://bjs.example/submit" in caplog.text
+    assert "private-" not in caplog.text
+    assert "forged-log" not in caplog.text
+    assert "BJS submission accepted" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "error, error_type, reason_type",
+    [
+        (URLError("private-token"), "URLError", "str"),
+        (URLError(gaierror(-2, "private-token")), "URLError", "gaierror"),
+        (TimeoutError("private-token"), "TimeoutError", "TimeoutError"),
+        (OSError("private-token"), "OSError", "OSError"),
+    ],
+    ids=["url-error", "dns-error", "timeout", "os-error"],
+)
+def test_transport_failure_logs_safe_context(caplog, error, error_type, reason_type) -> None:
+    def opener(*args, **kwargs):
+        raise error
+
+    dispatcher = BjsJobDispatcher("https://bjs.example/submit", "ai28", opener=opener)
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError) as caught:
+        dispatcher.submit("run-123")
+
+    assert str(caught.value) == "BJS submission transport failed; acceptance is unconfirmed"
+    assert caught.value.__suppress_context__
+    assert "BJS submission transport failed" in caplog.text
+    assert f"error_type={error_type}" in caplog.text
+    assert f"reason_type={reason_type}" in caplog.text
+    assert "job_id=ai28" in caplog.text
+    assert "endpoint=https://bjs.example/submit" in caplog.text
+    assert "http_status=" not in caplog.text
+    assert "private-token" not in caplog.text
+    assert "BJS submission accepted" not in caplog.text
 
 
 def test_submit_rejects_invalid_configuration_and_run_id() -> None:
