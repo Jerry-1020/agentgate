@@ -174,10 +174,15 @@ for (const status of ['pending', 'waiting', 'running', 'scheduled']) {
   });
 }
 
-test('A/B and stability rows have no single-run rerun action', async ({ page }) => {
-  await open(page, { grouped: true });
+test('A/B rerun is display-only and stability has no rerun action', async ({ page }) => {
+  const state = await open(page, { grouped: true });
   await expect(page.locator('.tasks-list tbody tr')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: '重跑', exact: true })).toHaveCount(0);
+  const abRow = page.locator('.tasks-list tbody tr').filter({ hasText: 'A/B试验' });
+  const stabilityRow = page.locator('.tasks-list tbody tr').filter({ hasText: '稳定性测试' });
+  await expect(stabilityRow.getByRole('button', { name: '重跑', exact: true })).toHaveCount(0);
+  await abRow.getByRole('button', { name: '重跑', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '重新运行当前任务' })).toHaveCount(0);
+  expect(state.writes).toEqual([]);
 });
 
 test('task rerun still honors locally disabled evaluators', async ({ page }) => {

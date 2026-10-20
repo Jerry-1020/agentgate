@@ -50,6 +50,9 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
         <option value="unpublished">未发布</option>
         <option value="changes">有待发布修改</option>
       </select>
+      <div v-if="$slots.actions" class="catalog-actions">
+        <slot name="actions" />
+      </div>
     </div>
     <div class="catalog-grid">
       <article
@@ -201,8 +204,14 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
 }
 .catalog-filters {
   display: flex;
+  align-items: center;
   gap: 16px;
   margin-bottom: 20px;
+}
+.catalog-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .catalog-filters .el-input {
   max-width: 420px;
@@ -239,6 +248,9 @@ td:last-child button + button {
 @media (max-width: 760px) {
   .catalog-filters {
     flex-wrap: wrap;
+  }
+  .catalog-actions {
+    margin-left: 0;
   }
 }
 </style>

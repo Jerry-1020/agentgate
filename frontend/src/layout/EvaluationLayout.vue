@@ -1,10 +1,10 @@
 <script setup lang="ts">
-defineProps<{ page: string; online: boolean | null; authLabel: string }>();
+defineProps<{ page: string; online: boolean | null }>();
 defineEmits<{ logout: [] }>();
 const navigation = [
   ['overview', '测评总览'],
-  ['datasets', '测评集'],
   ['evaluators', '评估器'],
+  ['datasets', '测评集'],
   ['tasks', '测评任务'],
   ['annotations', '标注'],
 ];
@@ -17,7 +17,6 @@ const navigation = [
     <header class="topbar">
       <div class="brand">智能体测评中心</div>
       <div class="topbar-right">
-        <span class="mode-chip">{{ authLabel }}</span>
         <button type="button" class="logout-btn" @click="$emit('logout')">登出 Logout</button>
       </div>
     </header>
@@ -48,14 +47,6 @@ const navigation = [
   display: flex;
   align-items: center;
   gap: 14px;
-}
-.mode-chip {
-  background: #ffffff2b;
-  border: 1px solid #ffffff55;
-  color: #fff;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
 }
 .logout-btn {
   background: #fff;

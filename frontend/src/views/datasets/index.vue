@@ -669,28 +669,23 @@ onMounted(async () => {
 </script>
 
 <template>
+  <div v-if="!showingDetail" class="page-head">
+    <h1 id="dataset-workspace-title" class="page-title">测评集</h1>
+  </div>
   <section class="dataset-workspace" aria-labelledby="dataset-workspace-title">
-    <div class="workspace-heading">
+    <div v-if="showingDetail" class="workspace-heading">
       <div class="workspace-title-block">
-        <button v-if="showingDetail" class="link" data-testid="back-datasets" @click="backToList">
+        <button class="link" data-testid="back-datasets" @click="backToList">
           ← 返回测评集列表
         </button>
         <div class="workspace-title-row">
-          <h1 id="dataset-workspace-title">{{ showingDetail ? activeDataset?.name : '测评集' }}</h1>
-          <p
-            v-if="showingDetail && activeDataset?.description?.trim()"
-            class="dataset-description"
-          >
+          <h1 id="dataset-workspace-title">{{ activeDataset?.name }}</h1>
+          <p v-if="activeDataset?.description?.trim()" class="dataset-description">
             {{ activeDataset.description }}
           </p>
         </div>
       </div>
-      <div v-if="!showingDetail" class="actions" style="margin-left: auto">
-        <button class="primary" data-testid="create-dataset" :disabled="busy" @click="openCreate">
-          ＋ 创建测评集
-        </button>
-      </div>
-      <div v-else-if="activeDataset" class="actions">
+      <div v-if="activeDataset" class="actions">
         <span v-if="activeDataset.archived">已归档 · 只读</span
         ><button
           v-if="activeDataset.archived"
@@ -718,7 +713,13 @@ onMounted(async () => {
       @select="openDataset($event, true)"
       @edit="openDataset($event, true)"
       @remove="openDelete"
-    />
+    >
+      <template #actions>
+        <button class="primary" data-testid="create-dataset" :disabled="busy" @click="openCreate">
+          ＋ 创建测评集
+        </button>
+      </template>
+    </DatasetCatalog>
     <DatasetCreateForm
       v-if="createV2Dialog"
       @close="createV2Dialog = false"

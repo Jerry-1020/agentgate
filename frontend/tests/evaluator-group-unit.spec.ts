@@ -1,12 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { reactive } from 'vue';
 import {
+  copyEvaluatorDefinition,
   emptyLLMGroup,
   equalLLMWeights,
   llmGroupError,
+  llmEvaluatorCardContent,
   llmGroupPayload,
   llmGroupTemplates,
   newLLMChild,
+  newLLMGroupFromEvaluator,
   newLLMGroupFromTemplate,
   readLLMGroup,
   type LLMGroupDetail,
@@ -144,6 +147,217 @@ function savedGroup(): LLMGroupDetail {
     })),
   };
 }
+
+test('custom group cards display the stored child names and percentage weights', () => {
+  const source = savedGroup();
+  const before = structuredClone(source);
+  expect(llmEvaluatorCardContent(source)).toEqual({
+    name: '历史名称',
+    description: '历史备注',
+    itemLabel: '子评估器',
+    children: [
+      { id: 'child-0', name: '相关性', weight: 40 },
+      { id: 'child-1', name: '准确性', weight: 40 },
+      { id: 'child-2', name: '合理性', weight: 20 },
+    ],
+  });
+  expect(source).toEqual(before);
+});
+
+test('single evaluator cards display their actual scoring dimensions and prefer saved drafts', () => {
+  const child = savedGroup().children[0];
+  const single = {
+    evaluator: child.evaluator,
+    latest: child.definition,
+    draft: null,
+  };
+  expect(llmEvaluatorCardContent(single)).toMatchObject({
+    itemLabel: '评分维度',
+    children: [{ id: child.evaluator.id, name: child.evaluator.name, weight: 100 }],
+  });
+  const dimensions = [
+    { id: 'accuracy', name: '准确性', prompt: '核对准确性', description: '', weight: 70 },
+    { id: 'relevance', name: '相关性', prompt: '核对相关性', description: '', weight: 30 },
+  ];
+  expect(
+    llmEvaluatorCardContent({
+      ...single,
+      draft: {
+        ...child.definition,
+        implementation_version: '2',
+        config: { ...child.definition.config, dimensions },
+      },
+    }).children,
+  ).toEqual([
+    { id: 'accuracy', name: '准确性', weight: 70 },
+    { id: 'relevance', name: '相关性', weight: 30 },
+  ]);
+  expect(() => llmEvaluatorCardContent({ ...single, latest: null })).toThrow(
+    '此评估器暂无可读取的配置',
+  );
+});
+
+test('copying an evaluator definition keeps execution fields and isolates nested values', () => {
+  const source = {
+    ...savedGroup().children[0].definition,
+    id: 'source-draft',
+    based_on_version: '2',
+    created_at: '2026-10-16T08:00:00Z',
+    updated_at: '2026-10-16T09:00:00Z',
+    content_sha256: 'source-hash',
+    config: {
+      model: { provider_id: 'official', model_id: 'source-model' },
+      rubric: { business: '保留原始标准' },
+      options: [{ label: '原始选项' }],
+    },
+    children: [{ evaluator_id: 'dependency', evaluator_version: '2', weight: 1 }],
+  };
+  const before = structuredClone(source);
+  const copied = copyEvaluatorDefinition(reactive(source));
+  expect(copied).toMatchObject({
+    kind: source.kind,
+    dimension: source.dimension,
+    metric: source.metric,
+    severity: source.severity,
+    implementation_id: source.implementation_id,
+    implementation_version: source.implementation_version,
+    config: source.config,
+    children: source.children,
+    combination: source.combination,
+  });
+  for (const field of [
+    'id',
+    'name',
+    'version',
+    'based_on_version',
+    'created_at',
+    'updated_at',
+    'content_sha256',
+  ]) {
+    expect(copied).not.toHaveProperty(field);
+  }
+  (copied.config.model as { model_id: string }).model_id = 'copied-model';
+  (copied.config.rubric as Record<string, string>).business = '副本标准';
+  (copied.config.options as { label: string }[])[0].label = '副本选项';
+  copied.children[0].evaluator_version = '3';
+  copied.children.splice(0, 1);
+  expect(source).toEqual(before);
+});
+
+for (const state of ['draft', 'published'] as const) {
+  test(`copying a ${state} group preserves configuration without source identities or revisions`, () => {
+    const source = savedGroup();
+    source.viewing_draft = state === 'draft';
+    source.has_draft = source.viewing_draft;
+    source.definition.id = state === 'draft' ? 'parent-draft' : 'parent';
+    source.definition.updated_at = '2026-10-16T08:00:00Z';
+    if (source.viewing_draft) delete source.definition.version;
+    source.children.forEach((child, index) => {
+      child.definition.id = `source-child-definition-${index}`;
+      child.definition.created_at = '2026-10-15T08:00:00Z';
+      child.definition.updated_at = '2026-10-16T08:00:00Z';
+      child.definition.content_sha256 = `source-child-hash-${index}`;
+      child.definition.config = {
+        ...child.definition.config,
+        model: {
+          provider_id: 'official',
+          model_id: `judge-${index}`,
+          credential_ref: 'env:TEST_JUDGE_REFERENCE',
+        },
+        user_prompt: '输入 {{input}}，回答 {{output}}',
+        rubric: { business: `业务标准 ${index}` },
+        input_selection: 'full_trajectory',
+        pass_threshold: 0.74,
+        min_confidence: 0.6,
+        timeout_seconds: 75,
+        max_output_tokens: 2200,
+        temperature: 0.2,
+        render_template: false,
+      };
+    });
+    const before = structuredClone(source);
+    const copied = newLLMGroupFromEvaluator(reactive(source), 'independent');
+    expect(copied).toMatchObject({
+      id: '',
+      name: '历史名称（副本）',
+      description: '历史备注',
+      threshold: 0.82,
+    });
+    expect(copied.children.map((child) => child.id)).toEqual(['', '', '']);
+    expect(new Set(copied.children.map((child) => child.key)).size).toBe(3);
+    expect(copied.children.map((child) => child.name)).toEqual(['相关性', '准确性', '合理性']);
+    expect(copied.children.map((child) => child.templateId)).toEqual([
+      'relevance',
+      'accuracy',
+      'reasonableness',
+    ]);
+    expect(copied.children.map((child) => child.weight)).toEqual([40, 40, 20]);
+    const payload = llmGroupPayload(copied, null);
+    expect(payload.children.map((child) => child.weight)).toEqual([0.4, 0.4, 0.2]);
+    for (const field of [
+      'id',
+      'based_on_version',
+      'expected_draft_id',
+      'expected_draft_updated_at',
+    ]) {
+      expect(payload).not.toHaveProperty(field);
+    }
+    for (const [index, child] of copied.children.entries()) {
+      const original = source.children[index];
+      expect(child.key).not.toBe(original.evaluator.id);
+      expect(child.description).toBe(original.description);
+      expect(JSON.parse(child.modelKey)).toEqual(original.definition.config.model);
+      expect(child.instruction).toBe(original.definition.config.instruction);
+      expect(child.userPrompt).toBe(original.definition.config.user_prompt);
+      expect(child.threshold).toBe(0.74);
+      expect(child.original?.config).toEqual(original.definition.config);
+      expect(payload.children[index]).not.toHaveProperty('id');
+      for (const field of ['id', 'name', 'version', 'content_sha256', 'created_at', 'updated_at']) {
+        expect(child.original).not.toHaveProperty(field);
+        expect(payload.children[index].definition).not.toHaveProperty(field);
+      }
+      expect(payload.children[index].definition.config).toEqual({
+        ...original.definition.config,
+        render_template: true,
+      });
+    }
+    expect(source).toEqual(before);
+  });
+}
+
+test('editing and removing copied group children leaves the source and another copy unchanged', () => {
+  const source = savedGroup();
+  source.definition.name = '长'.repeat(50);
+  source.children[0].definition.config.rubric = { business: '原始标准' };
+  const before = structuredClone(source);
+  const copied = newLLMGroupFromEvaluator(source, 'first');
+  const other = newLLMGroupFromEvaluator(source, 'second');
+  const otherBefore = structuredClone(other);
+  expect(copied.name).toBe('长'.repeat(46) + '（副本）');
+  expect(copied.name).toHaveLength(50);
+  expect(
+    copied.children.some((child) => other.children.some((item) => item.key === child.key)),
+  ).toBe(false);
+  copied.name = '副本名称';
+  copied.description = '副本备注';
+  copied.threshold = 0.7;
+  copied.children[0].name = '副本子项';
+  copied.children[0].instruction = '副本提示词 {{input}} {{output}}';
+  copied.children[0].modelKey = JSON.stringify({ provider_id: 'official', model_id: 'new-model' });
+  (copied.children[0].original!.config.rubric as Record<string, string>).business = '副本标准';
+  copied.children.splice(1, 1);
+  copied.children[0].weight = 80;
+  const payload = llmGroupPayload(copied, null);
+  expect(payload.children).toHaveLength(2);
+  expect(payload.children.map((child) => child.weight)).toEqual([0.8, 0.2]);
+  expect(payload.children[0].definition.config).toMatchObject({
+    instruction: '副本提示词 {{input}} {{output}}',
+    model: { provider_id: 'official', model_id: 'new-model' },
+    rubric: { business: '副本标准' },
+  });
+  expect(source).toEqual(before);
+  expect(other).toEqual(otherBefore);
+});
 
 test('group payload owns complete independent child definitions and normalizes percent weights', () => {
   const group = validGroup();

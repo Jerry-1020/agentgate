@@ -1,5 +1,5 @@
-import type { Definition, EvaluatorIdentity } from '../../../api/evaluations';
-import { weightError } from './evaluator-design';
+import type { Definition, EvaluatorDetail, EvaluatorIdentity } from '../../../api/evaluations';
+import { hasDimensionScoring, readEvaluatorDesign, weightError } from './evaluator-design';
 import {
   emptyPromptEvaluator,
   evaluatorTemplates,
@@ -41,6 +41,35 @@ export interface LLMGroupDesign {
   description: string;
   threshold: number;
   children: LLMChildDesign[];
+}
+export function llmEvaluatorCardContent(value: EvaluatorDetail | LLMGroupDetail) {
+  if ('definition' in value) {
+    const group = readLLMGroup(value);
+    return {
+      name: group.name,
+      description: group.description,
+      itemLabel: '子评估器',
+      children: group.children.map((child) => ({
+        id: child.key,
+        name: child.name,
+        weight: child.weight,
+      })),
+    };
+  }
+  const definition = value.draft ?? value.latest;
+  if (!definition) throw new Error('此评估器暂无可读取的配置。');
+  return {
+    name: value.evaluator.name,
+    description: value.evaluator.description,
+    itemLabel: '评分维度',
+    children: hasDimensionScoring(definition)
+      ? readEvaluatorDesign(value.evaluator, definition).dimensions.map((dimension) => ({
+          id: dimension.id,
+          name: dimension.name,
+          weight: dimension.weight,
+        }))
+      : [{ id: value.evaluator.id, name: value.evaluator.name, weight: 100 }],
+  };
 }
 export const llmGroupTemplates = [
   {
@@ -132,6 +161,40 @@ export function readLLMGroup(detail: LLMGroupDetail): LLMGroupDesign {
       templateId: child.template_id,
       weight: Number((child.weight * 100).toFixed(10)),
       original: JSON.parse(JSON.stringify(child.definition)) as GroupDefinition,
+    })),
+  };
+}
+
+export function copyEvaluatorDefinition(source: Definition): Definition {
+  return JSON.parse(
+    JSON.stringify({
+      kind: source.kind,
+      dimension: source.dimension,
+      metric: source.metric,
+      severity: source.severity,
+      implementation_id: source.implementation_id,
+      implementation_version: source.implementation_version,
+      config: source.config,
+      children: source.children,
+      combination: source.combination,
+    }),
+  ) as Definition;
+}
+
+export function newLLMGroupFromEvaluator(
+  detail: LLMGroupDetail,
+  keyPrefix: string,
+): LLMGroupDesign {
+  const group = readLLMGroup(detail);
+  return {
+    ...group,
+    id: '',
+    name: group.name.slice(0, 46) + '（副本）',
+    children: group.children.map((child, index) => ({
+      ...child,
+      id: '',
+      key: `${keyPrefix}:${index}`,
+      original: child.original ? copyEvaluatorDefinition(child.original) : null,
     })),
   };
 }

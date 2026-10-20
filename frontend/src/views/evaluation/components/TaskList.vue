@@ -417,6 +417,16 @@ onUnmounted(() => {
               >
                 重跑
               </button>
+              <button
+                v-if="
+                  link(r.id)?.kind === 'ab' &&
+                  ['completed', 'failed', 'cancelled'].includes(state(r))
+                "
+                type="button"
+                class="link"
+              >
+                重跑
+              </button>
               <button class="link danger" @click="deleteTask(link(r.id)?.id ?? r.id)">删除</button>
             </td>
           </tr>

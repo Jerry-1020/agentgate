@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { request } from '../../../api/evaluations';
-import { loadReviewAssets } from '../../../stores/review-assets';
+import { request, type EvaluatorDetail, type EvaluatorSummary } from '../../../api/evaluations';
+import { evaluatorCatalog, loadReviewAssets } from '../../../stores/review-assets';
 import { modelRefLabel, type EvaluatorModelRef } from '../utils/evaluator-model';
 import {
   evaluatorTemplates,
+  isPromptEvaluator,
   promptModelOptions,
   promptVariableNames,
 } from '../utils/evaluator-templates';
 import LLMGroupTemplateCard from './LLMGroupTemplateCard.vue';
+import { hasDimensionScoring } from '../utils/evaluator-design';
 import {
   emptyLLMGroup,
   equalLLMWeights,
@@ -18,6 +20,7 @@ import {
   llmGroupTemplates,
   newLLMChild,
   newLLMGroupFromTemplate,
+  newLLMGroupFromEvaluator,
   readLLMGroup,
   type GroupDefinition,
   type LLMGroupDetail,
@@ -31,6 +34,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   started: [];
+  useTemplate: [value: EvaluatorDetail];
   dirtyChange: [value: boolean];
   launch: [id: string];
 }>();
@@ -76,6 +80,21 @@ const visibleGroupTemplates = computed(() =>
   llmGroupTemplates.filter((template) =>
     (template.name + template.description).includes(templateQuery.value.trim()),
   ),
+);
+const visibleCustomTemplates = computed(() =>
+  evaluatorCatalog.value.filter(
+    (item) =>
+      item.source === 'user' &&
+      !item.owner_evaluator_id &&
+      ['llm_group', 'llm_judge'].includes(item.kind) &&
+      (item.has_draft || item.latest_version) &&
+      (item.name + item.description)
+        .toLowerCase()
+        .includes(templateQuery.value.trim().toLowerCase()),
+  ),
+);
+const templateCount = computed(
+  () => visibleGroupTemplates.value.length + visibleCustomTemplates.value.length,
 );
 const totalWeight = computed(() =>
   Number(
@@ -301,13 +320,41 @@ async function addCustomChild() {
   addChild();
 }
 function applyGroupTemplate(id: string) {
-  if (!choosingStart.value) return;
+  if (!choosingStart.value || busy.value) return;
+  error.value = '';
   form.value = newLLMGroupFromTemplate(id, crypto.randomUUID());
   selected.value = form.value.children[0].key;
   startForm();
 }
+async function applyCustomTemplate(template: EvaluatorSummary) {
+  if (!choosingStart.value || busy.value) return;
+  busy.value = true;
+  error.value = '';
+  try {
+    const path = '/evaluators/' + encodeURIComponent(template.id);
+    if (template.kind === 'llm_group') {
+      const source = await request<LLMGroupDetail>(path + '/llm-group');
+      form.value = newLLMGroupFromEvaluator(source, crypto.randomUUID());
+      detail.value = null;
+      selected.value = form.value.children[0]?.key ?? '';
+      startForm();
+    } else {
+      const source = await request<EvaluatorDetail>(path);
+      const definition = source.draft ?? source.latest;
+      if (!isPromptEvaluator(definition) && !hasDimensionScoring(definition))
+        throw new Error('此评估器暂无可使用的 LLM 配置。');
+      startForm();
+      emit('useTemplate', source);
+    }
+  } catch (cause) {
+    error.value = '无法读取自建模板：' + String(cause);
+  } finally {
+    busy.value = false;
+  }
+}
 function createCustom() {
-  if (!choosingStart.value) return;
+  if (!choosingStart.value || busy.value) return;
+  error.value = '';
   addChild();
   startForm();
 }
@@ -762,6 +809,8 @@ onUnmounted(() => {
     width="min(1180px,94vw)"
     class="llm-group-template-dialog llm-group-create-template-dialog"
     :close-on-click-modal="false"
+    :show-close="!busy"
+    :close-on-press-escape="!busy"
     @close="closeTemplates"
   >
     <div class="group-template-layout start-template-layout">
@@ -782,11 +831,15 @@ onUnmounted(() => {
             v-model="templateQuery"
             aria-label="搜索评估器模板"
             placeholder="搜索评估器模板"
-          /><button class="llm-template-create-button" @click="createCustom">
+          /><button class="llm-template-create-button" :disabled="busy" @click="createCustom">
             ＋ 自定义创建 LLM 评估器
           </button>
         </div>
-        <p class="template-help">选择综合评估器模板，应用后可配置、删除或新增其中的子评估器。</p>
+        <p class="template-help">
+          使用预置或自建评估器创建独立副本。综合评估器中的子评估器可配置、删除或新增。
+        </p>
+        <p v-if="error" class="error-message" role="alert">{{ error }}</p>
+        <p v-if="busy" class="help-text" role="status">正在读取模板配置…</p>
         <div class="template-cards">
           <LLMGroupTemplateCard
             v-for="template in visibleGroupTemplates"
@@ -795,10 +848,18 @@ onUnmounted(() => {
             :disabled="busy"
             @apply="applyGroupTemplate"
           />
+          <LLMGroupTemplateCard
+            v-for="template in visibleCustomTemplates"
+            :key="'custom:' + template.id"
+            class="asset-card custom-template-card"
+            :evaluator="template"
+            :disabled="busy"
+            @apply="applyCustomTemplate(template)"
+          />
         </div>
-        <p v-if="!visibleGroupTemplates.length" class="empty-state">没有匹配的模板，请调整搜索。</p>
+        <p v-if="!templateCount" class="empty-state">没有匹配的模板，请调整搜索。</p>
         <div class="template-bottom">
-          <span>共计 {{ visibleGroupTemplates.length }} 项</span>
+          <span>共计 {{ templateCount }} 项</span>
         </div>
       </div>
     </div>
@@ -1395,6 +1456,8 @@ h3 {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 320px));
   gap: 18px;
+  grid-auto-rows: 1fr;
+  align-items: stretch;
   align-content: start;
 }
 .template-bottom {

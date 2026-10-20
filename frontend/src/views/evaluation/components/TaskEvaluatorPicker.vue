@@ -75,13 +75,6 @@ function toggle(id: string, on: boolean) {
         <button
           type="button"
           class="secondary"
-          :disabled="!staticAvailable"
-          @click="emit('static')"
-        >
-          Skill 静态分析{{ staticEnabled ? ' · 已选' : '' }}</button
-        ><button
-          type="button"
-          class="secondary"
           :disabled="!recommended.length"
           @click="
             select(recommended);
@@ -89,8 +82,8 @@ function toggle(id: string, on: boolean) {
             active = recommended[0] ?? '';
           "
         >
-          推荐评估器</button
-        ><button type="button" class="secondary" @click="emit('cancelAnalysis')">取消分析</button>
+          推荐评估器
+        </button>
       </div>
     </header>
     <div class="picker-body" :class="{ 'with-reason': showReason }">
