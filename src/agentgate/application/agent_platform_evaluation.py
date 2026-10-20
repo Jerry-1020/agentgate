@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Literal
@@ -24,6 +25,27 @@ from agentgate.domain.evaluation_task import EvaluationTask
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.integrations.targets.agent_platform import PlatformClient, resolve_platform_target
 from agentgate.storage.repository import AgentGateRepository
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _log_inbank_run_saved(task: EvaluationTask, run: EvaluationRun, side: str) -> None:
+    target = run.manifest.target
+    LOGGER.info(
+        "inbank_run_saved task_id=%r task_kind=%s side=%s run_id=%r "
+        "agent_id=%r agent_version=%r invocation_agent_version=%r "
+        "adapter_type=%r adapter_version=%r credential_ref=%r",
+        task.id,
+        task.kind,
+        side,
+        run.id,
+        target.ref.external_target_id,
+        target.ref.external_version_id,
+        target.invocation_config.get("agent_version"),
+        target.adapter_type,
+        target.adapter_version,
+        target.credential_ref,
+    )
 
 
 def _build_inbank_descriptor(
@@ -261,6 +283,10 @@ def submit_platform_evaluation(
     except Exception:  # noqa: BLE001 -- Persistence outcome must never become a 4xx rejection.
         # A commit error may be ambiguous: retain the encrypted credential for reconciliation.
         raise RuntimeError("task persistence outcome is uncertain") from None
+    if platform_mode == "inbank":
+        # Stability repetitions share the single-target side.
+        for item in runs:
+            _log_inbank_run_saved(task, item, "single")
     for item in runs:
         if item.status == "scheduled":
             continue
@@ -415,6 +441,9 @@ def submit_platform_comparison(
         repository.save_task_runs(task, tuple(prepared))
     except Exception:  # noqa: BLE001 -- Persistence outcome must never become a 4xx rejection.
         raise RuntimeError("task persistence outcome is uncertain") from None
+    if platform_mode == "inbank":
+        for side, item in zip(("baseline", "candidate"), prepared):
+            _log_inbank_run_saved(task, item, side)
     for item in prepared:
         try:
             management.dispatch_run(item.id, dispatcher)

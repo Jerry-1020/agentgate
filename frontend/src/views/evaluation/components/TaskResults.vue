@@ -127,7 +127,10 @@ const sample = computed(() => cases.value.find((c: any) => c.id === sampleId.val
   results = computed(() => caseResults(sampleId.value));
 const isMultiTurn = computed(() => (sample.value?.turns.length ?? 0) > 1);
 const groupedResults = computed(() =>
-  groupEvaluatorResults(results.value, manifest.value?.evaluator_specs),
+  groupEvaluatorResults(results.value, manifest.value?.evaluator_specs).sort(
+    (a, b) =>
+      Number(b.result.evaluator_kind === 'rule') - Number(a.result.evaluator_kind === 'rule'),
+  ),
 );
 function childSnapshots(parent: any) {
   return (parent.children ?? []).flatMap((ref: any) => {
@@ -146,20 +149,8 @@ const stats = computed(() => {
   const summaries = cases.value.map((c: any) => summary(c.id));
   return {
     pass: summaries.filter((s: any) => s.outcome === 'pass').length,
-    failed: summaries.filter((s: any) => ['error', 'fail'].includes(s.outcome)).length,
-    pending: summaries.filter((s: any) => ['pending', 'review'].includes(s.outcome)).length,
   };
 });
-const durations = computed(() =>
-  Object.values(traces.value)
-    .map(traceSeconds)
-    .filter((n): n is number => n !== null),
-);
-const avgTime = computed(() =>
-  durations.value.length === cases.value.length && durations.value.length
-    ? durations.value.reduce((a, b) => a + b, 0) / durations.value.length
-    : null,
-);
 const overall = computed(
   () => report.value?.metrics.find((m) => m.level === 'overall')?.score ?? null,
 );
@@ -340,18 +331,9 @@ watch(sampleId, () => {
               <span>当前得分</span><b class="violet">{{ score(overall) }}</b>
             </article>
             <article>
-              <span>平均耗时</span><b>{{ formatTime(avgTime) }}</b>
-            </article>
-            <article>
               <span>样本通过率</span
               ><b class="green"
                 >{{ cases.length ? Math.round((stats.pass / cases.length) * 100) : 0 }}%</b
-              >
-            </article>
-            <article>
-              <span>失败 / 待评审</span
-              ><b class="failed-count"
-                >{{ stats.failed }} <small>/ {{ stats.pending }}</small></b
               >
             </article>
           </section>
@@ -644,27 +626,6 @@ watch(sampleId, () => {
           </section>
           <aside class="evaluation-panel">
             <h2>测评结果</h2>
-            <section class="score-box">
-              <span>综合得分</span
-              ><strong>{{ score(summary(sample.id).score) }}<small>/100</small></strong
-              ><span
-                class="badge"
-                :class="summary(sample.id).outcome === 'pass' ? 'success' : 'warn'"
-                >{{ statusLabel(summary(sample.id).outcome) }}</span
-              >
-            </section>
-            <section class="dimension-bars">
-              <h3>
-                评估器得分 <small>{{ columns.length }} 项</small>
-              </h3>
-              <div v-for="col in columns" :key="col.key">
-                <p>
-                  <span>{{ col.name }}</span
-                  ><b>{{ score(columnScore(results, col)) }}</b>
-                </p>
-                <progress :value="columnScore(results, col) ?? 0" max="1" />
-              </div>
-            </section>
             <details open>
               <summary>评估结论与依据</summary>
               <ResultEvaluationCard
@@ -779,7 +740,7 @@ watch(sampleId, () => {
 }
 .task-kpis {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   padding: 9px 10px;
   border: 1px solid #dfe8e5;
   border-radius: 14px;
@@ -809,29 +770,11 @@ watch(sampleId, () => {
   font-weight: 400;
   color: #8b9b92;
 }
-progress {
-  height: 7px;
-  border: 0;
-  border-radius: 6px;
-  overflow: hidden;
-  width: 100%;
-  accent-color: #00ad8b;
-}
-progress::-webkit-progress-bar {
-  background: #edf1ef;
-}
-progress::-webkit-progress-value {
-  background: #0ab292;
-  border-radius: 6px;
-}
 .green {
   color: #00a486;
 }
 .violet {
   color: #7b4cdc;
-}
-.failed-count {
-  color: #d74646;
 }
 .result-filters select {
   width: 160px;
@@ -1039,56 +982,6 @@ progress::-webkit-progress-value {
   max-height: calc(75vh + 80px);
   overflow: auto;
 }
-.score-box {
-  margin: 20px 0;
-  padding: 22px;
-  border: 1px solid #d9eae1;
-  border-radius: 12px;
-  background: #f4faf7;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 15px;
-}
-.score-box > span:first-child {
-  width: 100%;
-  font-size: 13px;
-  color: #738a7c;
-}
-.score-box strong {
-  font-size: 38px;
-  color: #00a489;
-}
-.score-box strong small {
-  font-size: 12px;
-  color: #879d90;
-  font-weight: 400;
-  margin-left: 8px;
-}
-.dimension-bars {
-  border: 1px solid #e0e8e4;
-  padding: 18px;
-  border-radius: 12px;
-  margin-bottom: 22px;
-}
-.dimension-bars h3 {
-  font-size: 15px;
-}
-.dimension-bars h3 small {
-  float: right;
-  font-weight: 400;
-  color: #8a9a91;
-}
-.dimension-bars p {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  margin: 18px 0 8px;
-}
-.dimension-bars b {
-  color: #00a489;
-}
 .sample-footer {
   display: flex;
   gap: 24px;
@@ -1110,8 +1003,11 @@ summary {
 }
 @media (max-width: 1100px) {
   .task-kpis {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
+  }
+  .task-kpis article:nth-child(2n) {
+    border-right: 0;
   }
   .conversation-layout {
     grid-template-columns: 1fr;

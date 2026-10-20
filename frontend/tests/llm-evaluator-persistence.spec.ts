@@ -8,6 +8,7 @@ import {
 } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { passAuthGate } from './auth-gate';
+import type { EvaluatorSummary } from '../src/api/evaluations';
 import {
   concisenessPrompt,
   emptyPromptEvaluator,
@@ -26,10 +27,12 @@ async function enterCatalog(page: Page) {
   await expect(
     page
       .getByRole('heading', { name: '欢迎页面', exact: true })
-      .or(page.getByRole('button', { name: /新建 LLM 评估器/ })),
+      .or(page.getByRole('button', { name: '规则评估', exact: true })),
   ).toBeVisible();
   await passAuthGate(page);
   await page.goto('/#/evaluators');
+  await expect(page.getByRole('button', { name: '规则评估', exact: true })).toHaveClass('active');
+  await page.getByRole('button', { name: 'LLM 评估', exact: true }).click();
   await expect(page.getByRole('button', { name: /新建 LLM 评估器/ })).toBeVisible();
 }
 async function fillDesign(page: Page, name: string, testInfo?: TestInfo) {
@@ -119,7 +122,15 @@ async function detail(
 async function catalog(request: APIRequestContext) {
   const response = await request.get('/api/evaluators?include_disabled=true');
   expect(response.ok()).toBeTruthy();
-  return (await response.json()).data as { id: string; name: string; kind: string }[];
+  return (await response.json()).data as EvaluatorSummary[];
+}
+async function openEvaluatorDeletion(page: Page, name: string) {
+  await page.getByRole('button', { name: name + '更多操作', exact: true }).click();
+  await page.getByRole('menuitem', { name: '删除', exact: true }).click();
+  const confirmation = page.getByRole('dialog', { name: '删除评估器', exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText(name);
+  return confirmation;
 }
 async function saveNew(page: Page, form: Locator) {
   const response = page.waitForResponse(
@@ -158,6 +169,7 @@ test('deleting six published single evaluators and one group leaves only the pre
   request,
 }, testInfo) => {
   const ids: string[] = [];
+  const names: string[] = [];
   const modelKey = JSON.stringify({ provider_id: 'browser-test', model_id: 'browser-test-judge' });
   for (let index = 1; index <= 6; index++) {
     const name = `待删除已发布单体 ${index}`;
@@ -176,6 +188,7 @@ test('deleting six published single evaluators and one group leaves only the pre
     expect(response.ok(), await response.text()).toBeTruthy();
     const id = (await response.json()).data.evaluator.id as string;
     ids.push(id);
+    names.push(name);
     const publication = await request.post(`/api/evaluators/${id}/drafts/publish`);
     expect(publication.ok(), await publication.text()).toBeTruthy();
     const enabled = await request.patch(`/api/evaluators/${id}`, { data: { enabled: true } });
@@ -193,6 +206,7 @@ test('deleting six published single evaluators and one group leaves only the pre
   const saved = (await creation.json()).data as LLMGroupDetail;
   const groupId = saved.evaluator.id;
   ids.push(groupId);
+  names.push(group.name);
   const publication = await request.post(`/api/evaluators/${groupId}/llm-group/publish`, {
     data: {
       expected_draft_id: saved.definition.id,
@@ -206,10 +220,57 @@ test('deleting six published single evaluators and one group leaves only the pre
   await page.goto('/#/evaluators/' + groupId);
   await expect(editor(page)).toBeVisible();
   await expect(editor(page).getByRole('heading', { name: group.name, exact: true })).toBeVisible();
+  await editor(page).getByRole('button', { name: '← 返回评估器列表', exact: true }).click();
 
-  for (const id of ids) {
-    const deletion = await request.delete(`/api/evaluators/${id}`);
-    expect(deletion.status(), await deletion.text()).toBe(204);
+  const deleteRequests: string[] = [];
+  page.on('request', (outgoing) => {
+    const path = new URL(outgoing.url()).pathname;
+    if (outgoing.method() === 'DELETE' && path.startsWith('/api/evaluators/'))
+      deleteRequests.push(path);
+  });
+  const firstCard = page.locator('.asset-card').filter({
+    has: page.getByRole('heading', { name: names[0], exact: true }),
+  });
+  const cancelled = await openEvaluatorDeletion(page, names[0]);
+  await cancelled.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(cancelled).toBeHidden();
+  await expect(firstCard.getByRole('button', { name: /更多操作$/ })).toBeEnabled();
+  expect(deleteRequests).toEqual([]);
+  await expect(firstCard).toBeVisible();
+
+  const failedPath = '**/api/evaluators/' + ids[0];
+  await page.route(failedPath, (route) =>
+    route.request().method() === 'DELETE'
+      ? route.fulfill({
+          status: 503,
+          json: { code: '1', message: '测试删除服务不可用', data: null },
+        })
+      : route.continue(),
+  );
+  const failed = await openEvaluatorDeletion(page, names[0]);
+  await failed.getByRole('button', { name: '删除', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: '删除失败' })).toContainText(
+    '测试删除服务不可用',
+  );
+  await expect(firstCard).toBeVisible();
+  expect((await catalog(request)).some((item) => item.id === ids[0])).toBe(true);
+  await page.unroute(failedPath);
+
+  for (const [index, id] of ids.entries()) {
+    const confirmation = await openEvaluatorDeletion(page, names[index]);
+    const deletion = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/evaluators/${id}` &&
+        response.request().method() === 'DELETE',
+    );
+    await confirmation.getByRole('button', { name: '删除', exact: true }).click();
+    const deleted = await deletion;
+    expect(deleted.status(), await deleted.text()).toBe(204);
+    await expect(
+      page.locator('.asset-card').filter({
+        has: page.getByRole('heading', { name: names[index], exact: true }),
+      }),
+    ).toHaveCount(0);
     const version = await request.get(`/api/evaluators/${id}/versions/1`);
     expect(version.ok(), await version.text()).toBeTruthy();
     expect((await version.json()).data).toMatchObject({ id, version: '1' });
@@ -223,12 +284,13 @@ test('deleting six published single evaluators and one group leaves only the pre
     await expect(
       page
         .getByRole('heading', { name: '欢迎页面', exact: true })
-        .or(page.getByRole('button', { name: /新建 LLM 评估器/ })),
+        .or(page.getByRole('button', { name: '规则评估', exact: true })),
     ).toBeVisible();
     await passAuthGate(page);
     await page.goto('/#/evaluators/' + groupId);
     expect((await refreshed).ok()).toBeTruthy();
     await expect(editor(page)).toBeHidden();
+    await page.getByRole('button', { name: 'LLM 评估', exact: true }).click();
     await expect(page.locator('.asset-card')).toHaveCount(0);
     const template = page.locator('.catalogue-template-card');
     await expect(template).toHaveCount(1);
@@ -243,6 +305,174 @@ test('deleting six published single evaluators and one group leaves only the pre
     path: testInfo.outputPath('catalog-after-deleting-seven-evaluators.png'),
     fullPage: true,
     animations: 'disabled',
+  });
+});
+
+test('catalog deletion removes unpublished single and group records with their owned children', async ({
+  page,
+  request,
+}) => {
+  const modelKey = JSON.stringify({ provider_id: 'browser-test', model_id: 'browser-test-judge' });
+  const name = '待删除未发布单体';
+  const single = await request.post('/api/evaluators', {
+    data: {
+      name,
+      draft: promptEvaluatorDefinition({
+        ...emptyPromptEvaluator(),
+        name,
+        instruction: concisenessPrompt,
+        modelKey,
+      }),
+    },
+  });
+  expect(single.ok(), await single.text()).toBeTruthy();
+  const singleId = (await single.json()).data.evaluator.id as string;
+  const group = newLLMGroupFromTemplate('answer-quality', 'draft-delete-test');
+  group.name = '待删除未发布综合评估器';
+  group.children.forEach((child) => {
+    child.modelKey = modelKey;
+  });
+  const creation = await request.post('/api/evaluators/llm-groups', {
+    data: llmGroupPayload(group, null),
+  });
+  expect(creation.ok(), await creation.text()).toBeTruthy();
+  const saved = (await creation.json()).data as LLMGroupDetail;
+  expect(saved.latest_version).toBeNull();
+  expect(saved.children).toHaveLength(4);
+
+  await enterCatalog(page);
+  await expect(
+    page.locator('.catalogue-template-card').getByRole('button', { name: /更多操作|删除/ }),
+  ).toHaveCount(0);
+  for (const item of [
+    { id: singleId, name, suffix: '' },
+    { id: saved.evaluator.id, name: group.name, suffix: '/llm-group/draft' },
+  ]) {
+    const confirmation = await openEvaluatorDeletion(page, item.name);
+    const deletion = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/evaluators/${item.id}${item.suffix}` &&
+        response.request().method() === 'DELETE',
+    );
+    await confirmation.getByRole('button', { name: '删除', exact: true }).click();
+    const deleted = await deletion;
+    expect(deleted.status(), await deleted.text()).toBe(204);
+    if (item.suffix) {
+      expect(deleted.request().postDataJSON()).toEqual({
+        expected_draft_id: saved.definition.id,
+        expected_draft_updated_at: saved.definition.updated_at,
+      });
+    }
+    await expect(page.getByRole('heading', { name: item.name, exact: true })).toHaveCount(0);
+    expect((await request.get(`/api/evaluators/${item.id}`)).status()).toBe(404);
+  }
+  for (const child of saved.children) {
+    expect((await request.get(`/api/evaluators/${child.evaluator.id}`)).status()).toBe(404);
+  }
+  const removedIds = [
+    singleId,
+    saved.evaluator.id,
+    ...saved.children.map((child) => child.evaluator.id),
+  ];
+  expect((await catalog(request)).filter((item) => removedIds.includes(item.id))).toEqual([]);
+  await page.getByRole('button', { name: '规则评估', exact: true }).click();
+  const presetRules = page.locator('.asset-card').filter({
+    has: page.locator('.asset-chip').filter({ hasText: /^预置/ }),
+  });
+  await expect(presetRules).toHaveCount(6);
+  await expect(presetRules.getByRole('button', { name: /更多操作|删除/ })).toHaveCount(0);
+});
+
+test('rule catalog uses Chinese preset names and hides Policy without changing API identities or custom names', async ({
+  page,
+  request,
+}) => {
+  const rules = [
+    ['skill_routing', 'Skill Routing', '技能路由'],
+    ['required_tool', 'Required Tool', '必需工具调用'],
+    ['forbidden_tool', 'Forbidden Tool', '禁止工具调用'],
+    ['tool_arguments', 'Tool Arguments', '工具参数'],
+    ['final_state', 'Final State', '最终状态'],
+    ['final_output', 'Final Output', '最终输出'],
+  ];
+  const before = await catalog(request);
+  const builtin = before.filter((item) => item.source === 'builtin');
+  const policy = builtin.find((item) => item.implementation_id === 'policy_compliance');
+  expect(policy).toMatchObject({ name: 'Policy Compliance' });
+  const base = await request.get('/api/evaluators/final-output');
+  expect(base.ok(), await base.text()).toBeTruthy();
+  const {
+    kind,
+    dimension,
+    metric,
+    severity,
+    implementation_id,
+    implementation_version,
+    config,
+    children,
+    combination,
+  } = (await base.json()).data.latest;
+  const creation = await request.post('/api/evaluators', {
+    data: {
+      name: 'Final Output',
+      description: '自建规则名称保持原文',
+      draft: {
+        kind,
+        dimension,
+        metric,
+        severity,
+        implementation_id,
+        implementation_version,
+        config,
+        children,
+        combination,
+      },
+    },
+  });
+  expect(creation.ok(), await creation.text()).toBeTruthy();
+  const customId = (await creation.json()).data.evaluator.id as string;
+  const publication = await request.post(`/api/evaluators/${customId}/drafts/publish`);
+  expect(publication.ok(), await publication.text()).toBeTruthy();
+
+  await enterCatalog(page);
+  await page.getByRole('button', { name: '规则评估', exact: true }).click();
+  for (const [implementationId, english, chinese] of rules) {
+    expect(builtin.find((item) => item.implementation_id === implementationId)).toMatchObject({
+      name: english,
+    });
+    await expect(page.getByRole('heading', { name: chinese, exact: true })).toBeVisible();
+  }
+  await expect(page.getByRole('heading', { name: 'Policy Compliance', exact: true })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('heading', { name: 'Final Output', exact: true })).toBeVisible();
+  const search = page.getByLabel('搜索评估器', { exact: true });
+  for (const [implementationId, english, chinese] of rules) {
+    for (const term of [chinese, english.toLowerCase()]) {
+      await search.fill(term);
+      await expect(page.getByRole('heading', { name: chinese, exact: true })).toBeVisible();
+    }
+    const card = page.locator('.asset-card').filter({
+      has: page.getByRole('heading', { name: chinese, exact: true }),
+    });
+    await card.getByRole('button', { name: '查看详情', exact: true }).click();
+    const details = page.getByRole('dialog', { name: '规则评估器详情', exact: true });
+    await expect(details.getByRole('heading', { name: chinese, exact: true })).toBeVisible();
+    await expect(details).toContainText(implementationId);
+    await details.getByRole('button', { name: '关闭', exact: true }).click();
+  }
+  await search.fill('Policy');
+  await expect(page.locator('.asset-card')).toHaveCount(0);
+  await search.fill('Final Output');
+  await expect(page.getByRole('heading', { name: '最终输出', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final Output', exact: true })).toBeVisible();
+  await search.fill('');
+  const after = await catalog(request);
+  expect(after.filter((item) => item.source === 'builtin')).toEqual(builtin);
+  expect(after.find((item) => item.id === policy!.id)).toEqual(policy);
+  expect(after.find((item) => item.id === customId)).toMatchObject({
+    source: 'user',
+    name: 'Final Output',
   });
 });
 
@@ -593,6 +823,7 @@ test('multiple children retain independent configuration, reject invalid weights
   await page.reload();
   await passAuthGate(page);
   await page.goto('/#/evaluators');
+  await page.getByRole('button', { name: 'LLM 评估', exact: true }).click();
   await page
     .locator('.asset-card')
     .filter({ has: page.getByText(name, { exact: true }) })
@@ -897,6 +1128,61 @@ test('recorded official-model report displays one parent score and version-pinne
   const children = manifest.evaluator_specs.filter(
     (spec: { kind: string }) => spec.kind === 'llm_judge',
   );
+  const rule = {
+    id: 'browser-evidence-rule',
+    name: '期望输出',
+    version: '1',
+    kind: 'rule',
+    dimension: 'answer',
+    metric: 'final_output_match',
+    severity: 'standard',
+    implementation_id: 'final_output',
+    implementation_version: '1',
+    config: {},
+    children: [],
+    combination: null,
+    content_sha256: 'd38af903c0ca3d57fb4c41dbd33390b480564cfaab5b46cb12b8457b8578d719',
+  };
+  const parentResult = report.results.find(
+    (result: { evaluator_id: string }) => result.evaluator_id === parent.id,
+  );
+  const finalOutput = fixture.traces[parentResult.case_id].final_output;
+  manifest.evaluator_specs.push(rule);
+  manifest.primary_evaluator_ids.push(rule.id);
+  report.results.push({
+    ...structuredClone(parentResult),
+    id: 'browser-evidence-rule-result',
+    evaluator_id: rule.id,
+    evaluator_name: rule.name,
+    evaluator_version: rule.version,
+    evaluator_content_sha256: rule.content_sha256,
+    evaluator_kind: rule.kind,
+    dimension: rule.dimension,
+    metric: rule.metric,
+    severity: rule.severity,
+    outcome: 'pass',
+    score: 1,
+    reason: '最终输出符合预期。',
+    checks: [
+      {
+        id: 'browser-evidence-rule-check',
+        name: '最终输出',
+        turn_id: null,
+        expectation_id: null,
+        outcome: 'pass',
+        score: 1,
+        reason: '最终输出符合预期。',
+        expected: { kind: 'equals', expected: finalOutput },
+        actual: finalOutput,
+        actual_missing: false,
+        methods: [],
+        span_ids: [],
+      },
+    ],
+    judge_record: null,
+    error_detail: null,
+    primary_failure_stage: null,
+  });
   const pageErrors: string[] = [],
     consoleErrors: string[] = [];
   let optimizationCalls = 0;
@@ -949,7 +1235,13 @@ test('recorded official-model report displays one parent score and version-pinne
   const childSection = parentCard.getByRole('region', { name: '子评估器结果', exact: true });
   await expect(childSection).toBeVisible();
   await expect(childSection.locator(':scope > .evaluation-result')).toHaveCount(3);
-  await expect(page.locator('.dimension-bars > div')).toHaveCount(1);
+  const evaluationPanel = page.locator('.evaluation-panel');
+  await expect(evaluationPanel.locator('.score-box')).toHaveCount(0);
+  await expect(evaluationPanel.locator('.dimension-bars')).toHaveCount(0);
+  const evidenceCards = evaluationPanel.locator(':scope > details > .evaluation-result');
+  await expect(evidenceCards).toHaveCount(2);
+  await expect(evidenceCards.nth(0)).toHaveAttribute('data-evaluator', rule.id);
+  await expect(evidenceCards.nth(1)).toHaveAttribute('data-evaluator', parent.id);
   for (const child of children) {
     const card = childSection.locator('.evaluation-result[data-evaluator="' + child.id + '"]');
     const weight = parent.children.find(

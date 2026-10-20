@@ -393,13 +393,74 @@ def test_worker_credential_failure_is_sanitized_before_pod_creation(
         monkeypatch.setenv(
             "AGENTGATE_API_KEY_ENCRYPTION_KEY", base64.urlsafe_b64encode(b"x" * 32).decode(),
         )
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.INFO):
         assert execution.execute_persisted_run(run.id) == "failed"
     failed = context.repository.get_run(run.id)
     assert failed.error == "In-bank execution configuration or credential is unavailable"
     assert context.transport.created == context.transport.deleted == 0
     context.trace_client_factory.assert_not_called()
     assert "bank-task-secret" not in caplog.text + failed.model_dump_json()
+
+    stage, reason, error_type = {
+        "missing-ref": ("credential_reference", "credential_reference_missing", "ValueError"),
+        "deleted-key": ("credential_resolve", "credential_not_found", "LookupError"),
+        "missing-key": ("encryption_key", "encryption_key_unavailable", "ValueError"),
+        "wrong-key": (
+            "credential_resolve", "credential_decryption_failed", "ApiKeyEncryptionError",
+        ),
+    }[problem]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("inbank_execution_init_started" in message for message in messages)
+    failure = next(message for message in messages if "inbank_execution_init_failed" in message)
+    assert f"run_id={run.id!r}" in failure
+    assert f"agent_id={run.manifest.target.ref.external_target_id!r}" in failure
+    assert f"agent_version={run.manifest.target.ref.external_version_id!r}" in failure
+    assert f"credential_ref={run.manifest.target.credential_ref!r}" in failure
+    assert f"stage={stage}" in failure
+    assert f"reason_code={reason}" in failure
+    assert f"error_type={error_type}" in failure
+    assert "hostname=" in failure and "pid=" in failure
+    assert not any("inbank_execution_init_ready" in message for message in messages)
+    assert all(record.exc_info is None for record in caplog.records)
+    assert base64.urlsafe_b64encode(b"k" * 32).decode() not in caplog.text
+
+
+def test_worker_configuration_failure_logs_initialization_stage(
+    persisted_target, monkeypatch, caplog,
+):
+    context = persisted_target
+    monkeypatch.delenv("AGENTGATE_TRACE_SERVER_URL")
+    with caplog.at_level(logging.INFO):
+        assert execute_evaluation_run.run(context.run.id) == "failed"
+
+    assert context.repository.get_run(context.run.id).error == (
+        "In-bank execution configuration or credential is unavailable"
+    )
+    assert context.transport.created == 0
+    assert "inbank_execution_init_failed" in caplog.text
+    assert "stage=adapter_configuration" in caplog.text
+    assert "reason_code=adapter_configuration_unavailable" in caplog.text
+    assert "error_type=ValueError" in caplog.text
+    assert "inbank_execution_init_ready" not in caplog.text
+    assert "bank-task-secret" not in caplog.text
+
+
+def test_worker_ready_log_keeps_identity_without_secrets(persisted_target, caplog):
+    context = persisted_target
+    with caplog.at_level(logging.INFO):
+        assert execute_evaluation_run.run(context.run.id) == "completed"
+
+    message = next(
+        record.getMessage() for record in caplog.records
+        if "inbank_execution_init_ready" in record.getMessage()
+    )
+    assert f"run_id={context.run.id!r}" in message
+    assert f"adapter_type={context.run.manifest.target.adapter_type!r}" in message
+    assert "adapter_version='1'" in message
+    assert "invocation_agent_version=None" in message
+    assert "hostname=" in message and "pid=" in message
+    assert "bank-task-secret" not in message
+    assert context.transport.created == context.transport.deleted == 1
 
 
 @pytest.mark.parametrize("mode", ["base", "workflow", "claw"])

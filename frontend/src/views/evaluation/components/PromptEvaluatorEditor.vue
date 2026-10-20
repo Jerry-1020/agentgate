@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { request, type Definition, type EvaluatorDetail } from '../../../api/evaluations';
 import { loadReviewAssets } from '../../../stores/review-assets';
 import { modelRefLabel, type EvaluatorModelRef } from '../utils/evaluator-model';
+import { copyEvaluatorDefinition } from '../utils/evaluator-group';
 import {
   emptyPromptEvaluator,
   promptEvaluatorDefinition,
@@ -15,6 +16,7 @@ import {
 
 const props = defineProps<{
   initialDetail: EvaluatorDetail | null;
+  templateDetail?: EvaluatorDetail | null;
   models: [string, EvaluatorModelRef][];
 }>();
 const emit = defineEmits<{
@@ -23,12 +25,22 @@ const emit = defineEmits<{
   launch: [id: string];
 }>();
 const detail = ref<EvaluatorDetail | null>(props.initialDetail);
-const definition = ref<Definition | null>(detail.value?.draft ?? detail.value?.latest ?? null);
+const template = detail.value ? null : props.templateDetail;
+const sourceDefinition =
+  detail.value?.draft ?? detail.value?.latest ?? template?.draft ?? template?.latest ?? null;
+const definition = ref<Definition | null>(
+  template && sourceDefinition ? copyEvaluatorDefinition(sourceDefinition) : sourceDefinition,
+);
+const initialEvaluator = detail.value?.evaluator ?? template?.evaluator;
 const form = ref(
-  detail.value && definition.value
-    ? readPromptEvaluator(detail.value.evaluator, definition.value)
+  initialEvaluator && definition.value
+    ? readPromptEvaluator(initialEvaluator, definition.value)
     : emptyPromptEvaluator(),
 );
+if (template && definition.value) {
+  form.value.id = '';
+  form.value.name = form.value.name.slice(0, 46) + '（副本）';
+}
 const editing = ref(!detail.value);
 const viewingDraft = ref(!detail.value || !!detail.value.draft);
 const baseline = ref(JSON.stringify(form.value));
