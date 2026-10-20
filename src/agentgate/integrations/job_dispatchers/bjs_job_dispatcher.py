@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from collections.abc import Callable
+from http.client import responses
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -57,13 +58,37 @@ class BjsJobDispatcher:
             method="POST",
             headers={"Accept": "application/json"},
         )
+        LOGGER.info(
+            "BJS submission started: run_id=%s job_id=%s method=POST "
+            "endpoint=%s timeout_seconds=%s",
+            run_id, job_id.strip(), submit_url, self._timeout_seconds,
+        )
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
                 response_body = response.read()
-        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        except HTTPError as exc:
+            # Use a standard reason, never the remote reason, headers, body, or redirect URL.
+            LOGGER.warning(
+                "BJS submission HTTP failed: run_id=%s job_id=%s endpoint=%s "
+                "http_status=%s reason=%s error_type=HTTPError",
+                run_id, job_id.strip(), submit_url,
+                exc.code, responses.get(exc.code, "Unknown HTTP status"),
+            )
+            raise RuntimeError(
+                "BJS submission transport failed; acceptance is unconfirmed"
+            ) from None
+        except (URLError, TimeoutError, OSError) as exc:
             # A timeout may follow acceptance; only the owning scheduler decides retries.
-            LOGGER.warning("BJS submission transport failed: run_id=%s error_type=%s", run_id, type(exc).__name__)
-            raise RuntimeError("BJS submission transport failed; acceptance is unconfirmed") from None
+            reason = exc.reason if isinstance(exc, URLError) else exc
+            LOGGER.warning(
+                "BJS submission transport failed: run_id=%s job_id=%s endpoint=%s "
+                "error_type=%s reason_type=%s",
+                run_id, job_id.strip(), submit_url,
+                type(exc).__name__, type(reason).__name__,
+            )
+            raise RuntimeError(
+                "BJS submission transport failed; acceptance is unconfirmed"
+            ) from None
 
         try:
             payload = json.loads(response_body)
