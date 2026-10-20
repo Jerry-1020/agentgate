@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
   await passAuthGate(page);
 });
 
-test('September 15 UI: menu, version deletion boundaries, graph and evaluator copy',async({page})=>{
+test('September 15 UI: menu, version deletion boundaries and evaluator copy',async({page})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
  await page.goto('/#datasets')
  await expect(page.getByRole('button',{name:'按 ID 打开',exact:true})).toHaveCount(0)
@@ -25,10 +25,7 @@ test('September 15 UI: menu, version deletion boundaries, graph and evaluator co
  await page.getByTestId('run-dataset-version').click()
  const dialog=page.getByRole('dialog',{name:'新建测评任务'})
  await expect(dialog.getByRole('button',{name:'推荐评估器',exact:true})).toBeVisible()
- await dialog.locator('summary').filter({hasText:'查看所选智能体'}).click()
- await expect(dialog.getByLabel('Agent 与 Skill 关联图')).toBeVisible()
- await expect(dialog.getByLabel('Agent 与 Skill 关联图').getByText('Loan Approval',{exact:true})).toBeVisible()
- await page.screenshot({path:'../runtime/ux-0915-agent-graph.png'})
+ await expect(dialog.getByRole('region',{name:'测评对象来源与图谱'})).toHaveCount(0)
  await dialog.getByRole('button',{name:'取消',exact:true}).click()
  await page.goto('/#evaluators/skill-routing')
  await expect(page.getByRole('button',{name:'复制为自定义草稿',exact:true})).toBeVisible()

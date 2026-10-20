@@ -1,0 +1,31 @@
+{
+  "name": "简洁性",
+  "description": "评估输出是否只包含必要信息，表达完整且无冗余内容。",
+  "draft": {
+    "kind": "llm_judge",
+    "dimension": "answer",
+    "metric": "answer_quality",
+    "severity": "standard",
+    "implementation_id": "answer_quality",
+    "implementation_version": "1",
+    "config": {
+      "input_selection": "final_output",
+      "instruction": "您是一位专业的数据标注员，负责评估模型输出的简洁性。您的任务是根据以下评分标准给出评分：\n<评分标准>\n  完美简洁的答案应当：\n  - 仅包含被请求的确切信息。\n  - 使用最少的词汇来传达完整的答案。\n  - 省略客套话、模棱两可的表述和不必要的背景信息。\n  - 不包含关于答案或模型能力的元评论。\n  - 避免冗余信息或重复表述。\n  - 除非明确要求，否则不包含解释内容。\n\n  在打分时，您应该扣除分数的情况有：\n  - 诸如“我认为”“我觉得”或“答案是”之类的引导性短语。\n  - 像“可能”“大概”或“据我所知”这样的模糊表述。\n  - 不必要的背景或上下文信息。\n  - 未被要求的解释内容。\n  - 跟进问题或提供更多信息的提议。\n  - 冗余信息或重复表述。\n  - 像“希望这有帮助”或“如果您还需要其他信息请告诉我”这样的礼貌用语。\n</评分标准>\n\n<指导说明>\n  - 仔细阅读输入的问题和模型的输出。\n  - 全面检查输出中是否存在任何不必要的元素，尤其是上述<评分标准>中提到的那些。\n  - 分数应反映输出在多大程度上遵循了评分标准，即仅包含所请求的必要信息。\n</指导说明>\n\n<提醒>\n  目标是奖励那些提供完整答案且无任何多余信息的回复。\n</提醒>\n\n<输入>\n{{input}}\n</输入>\n\n<输出>\n{{output}}\n</输出>",
+      "max_output_tokens": 6000,
+      "min_confidence": 0,
+      "model": {
+        "credential_ref": "env:AGENTGATE_JUDGE_API_KEY",
+        "model_id": "deepseek-v4-pro",
+        "provider_id": "openai-compatible"
+      },
+      "pass_threshold": 0.8,
+      "render_template": true,
+      "rubric": {
+        "overall": "按照提示词中的评分标准评估。"
+      },
+      "timeout_seconds": 660
+    },
+    "children": [],
+    "combination": null
+  }
+}

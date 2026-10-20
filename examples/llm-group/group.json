@@ -1,0 +1,106 @@
+{
+  "name": "回答质量 · 子评估器端到端示例",
+  "description": "使用相关性、准确性和合理性三个独立 DeepSeek 评估器，权重 40%、40%、20%。",
+  "pass_threshold": 0.8,
+  "children": [
+    {
+      "name": "相关性",
+      "description": "评估回答是否紧扣用户问题，覆盖请求重点，避免偏题与无关内容。",
+      "template_id": "relevance",
+      "weight": 0.4,
+      "definition": {
+        "kind": "llm_judge",
+        "dimension": "answer",
+        "metric": "answer_quality",
+        "severity": "standard",
+        "implementation_id": "answer_quality",
+        "implementation_version": "1",
+        "config": {
+          "model": {
+            "provider_id": "openai-compatible",
+            "model_id": "deepseek-v4-pro"
+          },
+          "instruction": "您是一位专业的数据标注员，负责评估模型输出与用户输入的相关性。\n<评分标准>\n- 回答应直接回应用户的问题、目标和明确约束。\n- 覆盖用户请求的关键内容，不用无关信息替代所需答案。\n- 对偏离主题、答非所问、遗漏核心请求或过多无关扩展扣分。\n- 本项仅评价相关性，不因措辞风格或回答长度本身扣分。\n</评分标准>\n<指导说明>\n仔细阅读输入和输出，给出 0.0 到 1.0 的分数及具体依据。完全切题为 1.0，完全无关为 0.0；部分相关按覆盖程度评分。\n</指导说明>\n<输入>\n{{input}}\n</输入>\n<输出>\n{{output}}\n</输出>",
+          "rubric": {
+            "overall": "按照提示词中的评分标准评估。"
+          },
+          "render_template": true,
+          "input_selection": "final_output",
+          "pass_threshold": 0.8,
+          "min_confidence": 0,
+          "temperature": 0,
+          "max_output_tokens": 6000,
+          "timeout_seconds": 180
+        },
+        "children": [],
+        "combination": null
+      }
+    },
+    {
+      "name": "准确性",
+      "description": "评估回答中的事实、数字与结论是否准确，是否符合输入提供的信息。",
+      "template_id": "accuracy",
+      "weight": 0.4,
+      "definition": {
+        "kind": "llm_judge",
+        "dimension": "answer",
+        "metric": "answer_quality",
+        "severity": "standard",
+        "implementation_id": "answer_quality",
+        "implementation_version": "1",
+        "config": {
+          "model": {
+            "provider_id": "openai-compatible",
+            "model_id": "deepseek-v4-pro"
+          },
+          "instruction": "您是一位专业的数据标注员，负责评估模型输出的准确性。\n<评分标准>\n- 回答中的事实、数字、计算及引用应准确，并与输入信息一致。\n- 结论应有可核对的依据，不应编造事实、来源或未提供的业务信息。\n- 对事实错误、计算错误、自相矛盾及将推测说成确定事实扣分。\n- 无法仅根据输入和可确认知识验证的内容应说明不确定性，不得凭空认定正确。\n</评分标准>\n<指导说明>\n逐项核对关键断言，给出 0.0 到 1.0 的分数及具体依据。完全准确为 1.0，核心结论错误为 0.0；依据错误的重要性和覆盖范围评分。\n</指导说明>\n<输入>\n{{input}}\n</输入>\n<输出>\n{{output}}\n</输出>",
+          "rubric": {
+            "overall": "按照提示词中的评分标准评估。"
+          },
+          "render_template": true,
+          "input_selection": "final_output",
+          "pass_threshold": 0.8,
+          "min_confidence": 0,
+          "temperature": 0,
+          "max_output_tokens": 6000,
+          "timeout_seconds": 180
+        },
+        "children": [],
+        "combination": null
+      }
+    },
+    {
+      "name": "合理性",
+      "description": "评估推理与建议是否连贯、符合条件且可行，结论是否与依据一致。",
+      "template_id": "reasonableness",
+      "weight": 0.2,
+      "definition": {
+        "kind": "llm_judge",
+        "dimension": "answer",
+        "metric": "answer_quality",
+        "severity": "standard",
+        "implementation_id": "answer_quality",
+        "implementation_version": "1",
+        "config": {
+          "model": {
+            "provider_id": "openai-compatible",
+            "model_id": "deepseek-v4-pro"
+          },
+          "instruction": "您是一位专业的数据标注员，负责评估模型输出的合理性。\n<评分标准>\n- 推理过程应连贯，结论应由给定条件和已说明的依据支持。\n- 建议应符合用户场景、限制和常识，并具有实际可行性。\n- 对逻辑跳跃、前后矛盾、忽略关键约束及无法执行的建议扣分。\n- 不要求用户未请求的解释；简短且合理的直接回答可以得满分。\n</评分标准>\n<指导说明>\n检查输出的假设、推理和结论是否一致，给出 0.0 到 1.0 的分数及具体依据。完全合理为 1.0，存在根本逻辑问题为 0.0。\n</指导说明>\n<输入>\n{{input}}\n</输入>\n<输出>\n{{output}}\n</输出>",
+          "rubric": {
+            "overall": "按照提示词中的评分标准评估。"
+          },
+          "render_template": true,
+          "input_selection": "final_output",
+          "pass_threshold": 0.8,
+          "min_confidence": 0,
+          "temperature": 0,
+          "max_output_tokens": 6000,
+          "timeout_seconds": 180
+        },
+        "children": [],
+        "combination": null
+      }
+    }
+  ]
+}

@@ -10,12 +10,12 @@ const props = defineProps<{
   editable: boolean;
   saving?: boolean;
   persisted?: boolean;
+  hideSaveButton?: boolean;
   validationIssues?: ValidationIssue[];
 }>();
 const emit = defineEmits<{ save: [item: EvaluationCase]; dirtyChange: [dirty: boolean] }>();
 const form = ref<EvaluationCase | null>(null),
   index = ref(0),
-  preview = ref(false),
   error = ref(''),
   query = ref('');
 const requiredTools = ref<string[]>([]),
@@ -52,11 +52,28 @@ const configVariablesRaw = ref<Record<InitializationField, string | null>>({
   tool_variables: null,
 });
 type OutputRule = Extract<Expectation, { kind: 'output' }>;
-const outputRules = ref<OutputRule[][]>([]);
+const outputRules = ref<OutputRule[]>([]);
 const originalOutputs = ref<{ text: string; json: boolean }[]>([]);
+const ruleEditor = ref<{ validate: () => void } | null>(null);
+const ruleDraftDirty = ref(false);
+const editorRevision = ref(0);
 const baseline = ref(''),
   inputField = ref<'query' | 'txt'>('txt');
 const turn = computed(() => form.value?.turns[index.value]);
+const basicOutput = computed({
+  get: () => outputs.value[index.value],
+  set: (value: string) => {
+    outputs.value[index.value] = value;
+    syncBasicOutput();
+  },
+});
+const basicOutputJson = computed({
+  get: () => outputJson.value[index.value],
+  set: (value: boolean) => {
+    outputJson.value[index.value] = value;
+    syncBasicOutput();
+  },
+});
 function snapshot() {
   return JSON.stringify([
     form.value,
@@ -73,11 +90,12 @@ function snapshot() {
     configVariablesRaw.value,
   ]);
 }
-const dirty = computed(() => snapshot() !== baseline.value);
+const dirty = computed(() => ruleDraftDirty.value || snapshot() !== baseline.value);
 watch(dirty, (v) => emit('dirtyChange', v));
 watch(
   () => props.item,
   (item) => {
+    editorRevision.value++;
     inputField.value = item?.turns.some((t) => 'txt' in t.input)
       ? 'txt'
       : item?.turns.some((t) => String(t.input.query ?? '').trim())
@@ -96,6 +114,7 @@ watch(
       loadConfigVariables(key, initial[key]);
     index.value = 0;
     error.value = '';
+    ruleDraftDirty.value = false;
     inputJson.value =
       item?.turns.map(
         (t) =>
@@ -111,12 +130,13 @@ watch(
       ) ?? [];
     outputRules.value =
       form.value?.turns.map((t) => {
-        const rules = t.expectations.filter((e): e is OutputRule => e.kind === 'output');
-        const primary = rules.findIndex((e) => e.path === null && e.condition.kind === 'equals');
-        if (primary > 0) rules.unshift(...rules.splice(primary, 1));
-        return rules.length ? rules : [emptyOutputRule()];
+        const primary = t.expectations.find(
+          (e): e is OutputRule =>
+            e.kind === 'output' && e.path === null && e.condition.kind === 'equals',
+        );
+        return primary ? JSON.parse(JSON.stringify(primary)) : emptyOutputRule();
       }) ?? [];
-    const values = outputRules.value.map((r) => outputEditorValue(r[0].condition));
+    const values = outputRules.value.map((r) => outputEditorValue(r.condition));
     originalOutputs.value = values.map((v) => ({ ...v }));
     outputs.value = values.map((v) => v.text);
     outputJson.value = values.map((v) => v.json);
@@ -170,20 +190,54 @@ function emptyOutputRule(): Extract<Expectation, { kind: 'output' }> {
     condition: { kind: 'equals', expected: '' },
   };
 }
+function syncBasicOutput() {
+  if (!turn.value) return;
+  const i = index.value;
+  try {
+    const rule = outputRules.value[i];
+    const condition = outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
+    const position = turn.value.expectations.findIndex((e) => e.id === rule.id);
+    if (condition) {
+      const updated = { ...rule, condition };
+      if (position < 0) turn.value.expectations.push(updated);
+      else turn.value.expectations.splice(position, 1, updated);
+      outputRules.value[i] = JSON.parse(JSON.stringify(updated));
+    } else if (position >= 0) turn.value.expectations.splice(position, 1);
+    originalOutputs.value[i] = { text: outputs.value[i], json: outputJson.value[i] };
+  } catch {
+    // Keep the basic field's invalid JSON draft visible; save reports its parse error.
+  }
+}
+function validateRules() {
+  try {
+    ruleEditor.value?.validate();
+    error.value = '';
+    return true;
+  } catch (e) {
+    error.value = String(e);
+    return false;
+  }
+}
+function selectTurn(nextIndex: number) {
+  if (nextIndex === index.value || !validateRules()) return;
+  index.value = nextIndex;
+}
 function add() {
+  if (!validateRules()) return;
   form.value!.turns.push(blankSample().turns[0]);
   inputs.value.push('');
   inputJson.value.push(false);
   outputs.value.push('');
   outputJson.value.push(false);
   const rule = emptyOutputRule();
-  outputRules.value.push([rule]);
+  outputRules.value.push(rule);
   originalOutputs.value.push({ text: '', json: false });
   requiredTools.value.push('');
   forbiddenTools.value.push('');
   index.value = form.value!.turns.length - 1;
 }
 function remove() {
+  if (!validateRules()) return;
   if (!form.value || form.value.turns.length < 2) return;
   form.value.turns.splice(index.value, 1);
   for (const list of [
@@ -201,6 +255,7 @@ function remove() {
 }
 function save() {
   error.value = '';
+  if (!validateRules()) return;
   if (!form.value?.name.trim()) {
     error.value = '请输入样本名称';
     return;
@@ -266,19 +321,19 @@ function save() {
         .split(/[,，]/)
         .map((s) => s.trim())
         .filter(Boolean);
-      const original = t.expectations;
-      t.expectations = original.filter((e) => e.kind !== 'output');
-      for (const rule of outputRules.value[i]) {
-        const previous = original.find((e) => e.id === rule.id);
-        const unchanged =
-          outputs.value[i] === originalOutputs.value[i].text &&
-          outputJson.value[i] === originalOutputs.value[i].json;
-        const condition =
-          unchanged && previous?.condition.kind === rule.condition.kind
-            ? rule.condition
-            : outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
-        if (condition) t.expectations.push({ ...rule, path: rule.path?.trim() || null, condition });
-      }
+      const rule = outputRules.value[i];
+      const unchanged =
+        outputs.value[i] === originalOutputs.value[i].text &&
+        outputJson.value[i] === originalOutputs.value[i].json;
+      const position = t.expectations.findIndex((e) => e.id === rule.id);
+      const condition =
+        unchanged && position >= 0
+          ? rule.condition
+          : outputCondition(outputs.value[i], outputJson.value[i], rule.condition);
+      if (condition) {
+        if (position >= 0) t.expectations.splice(position, 1, { ...rule, condition });
+        else t.expectations.push({ ...rule, condition });
+      } else if (position >= 0) t.expectations.splice(position, 1);
     });
     emit('save', item);
   } catch (e) {
@@ -287,10 +342,24 @@ function save() {
 }
 function updateExpectations(values: Expectation[]) {
   if (!turn.value) return;
-  turn.value.expectations = [
-    ...turn.value.expectations.filter((e) => e.kind === 'output'),
-    ...values,
-  ];
+  turn.value.expectations = values;
+  const i = index.value;
+  const previous = outputRules.value[i];
+  const candidates = values.filter(
+    (e): e is OutputRule => e.kind === 'output' && e.path === null && e.condition.kind === 'equals',
+  );
+  const primary =
+    candidates.find((e) => e.id === previous.id) ?? candidates[0] ?? emptyOutputRule();
+  if (
+    primary.id !== previous.id ||
+    JSON.stringify(primary.condition) !== JSON.stringify(previous.condition)
+  ) {
+    const value = outputEditorValue(primary.condition);
+    outputs.value[i] = value.text;
+    outputJson.value[i] = value.json;
+    originalOutputs.value[i] = value;
+  }
+  outputRules.value[i] = JSON.parse(JSON.stringify(primary));
 }
 defineExpose({ save });
 </script>
@@ -318,7 +387,7 @@ defineExpose({ save });
           <button
             type="button"
             :aria-pressed="initializationType === 'workflow'"
-            :disabled="!editable || preview"
+            :disabled="!editable"
             @click="initializationType = 'workflow'"
           >
             工作流
@@ -326,7 +395,7 @@ defineExpose({ save });
           <button
             type="button"
             :aria-pressed="initializationType === 'base'"
-            :disabled="!editable || preview"
+            :disabled="!editable"
             @click="initializationType = 'base'"
           >
             基础编排
@@ -336,7 +405,7 @@ defineExpose({ save });
           <div class="initialization-heading">
             <span v-if="initializationType === 'base'">{{ group.label }}</span>
             <button
-              v-if="editable && !preview && configVariablesRaw[group.key] === null"
+              v-if="editable && configVariablesRaw[group.key] === null"
               class="add-variable"
               type="button"
               @click="addConfigVariable(group.key)"
@@ -349,7 +418,7 @@ defineExpose({ save });
             <p class="initialization-warning">已有初始化配置格式不正确，请修正后保存。</p>
             <JsonCodeEditor
               :model-value="configVariablesRaw[group.key]!"
-              :disabled="!editable || preview"
+              :disabled="!editable"
               :label="`${group.label}原始 JSON`"
               @update:model-value="configVariablesRaw[group.key] = $event"
             />
@@ -365,7 +434,7 @@ defineExpose({ save });
             >
               <input
                 v-model="variable.name"
-                :disabled="!editable || preview"
+                :disabled="!editable"
                 :aria-label="`${group.label}名 ${i + 1}`"
                 :placeholder="initializationType === 'workflow' ? '如 centreId' : '填写变量名'"
                 autocomplete="off"
@@ -375,7 +444,7 @@ defineExpose({ save });
                 <textarea
                   v-if="variable.format === 'json'"
                   v-model="variable.value"
-                  :disabled="!editable || preview"
+                  :disabled="!editable"
                   :aria-label="`${group.label}值 ${i + 1}`"
                   rows="2"
                   placeholder="填写 JSON 值"
@@ -384,14 +453,14 @@ defineExpose({ save });
                 <input
                   v-else
                   v-model="variable.value"
-                  :disabled="!editable || preview"
+                  :disabled="!editable"
                   :aria-label="`${group.label}值 ${i + 1}`"
                   placeholder="填写变量值"
                   autocomplete="off"
                 />
               </div>
               <button
-                v-if="editable && !preview"
+                v-if="editable"
                 class="remove-variable"
                 type="button"
                 :aria-label="`删除${group.label} ${i + 1}`"
@@ -410,8 +479,7 @@ defineExpose({ save });
       <div class="conversation-layout">
         <aside>
           <div class="round-title">
-            <b>轮次列表（{{ form.turns.length }}）</b
-            ><button @click="preview = !preview">{{ preview ? '编辑' : '对话预览' }}</button>
+            <b>轮次列表（{{ form.turns.length }}）</b>
           </div>
           <input v-model="query" aria-label="搜索轮次内容" placeholder="搜索轮次内容" /><button
             v-for="(t, i) in form.turns"
@@ -419,7 +487,7 @@ defineExpose({ save });
             :key="t.id"
             class="round"
             :class="{ active: index === i }"
-            @click="index = i"
+            @click="selectTurn(i)"
           >
             <b>第 {{ i + 1 }} 轮</b><small>{{ inputs[i] || '未填写内容' }}</small></button
           ><button v-if="editable" class="add-round" @click="add">＋ 添加新轮次</button>
@@ -430,76 +498,59 @@ defineExpose({ save });
             <div class="basic-messages">
               <div class="message-card user">
                 <header>
-                  <b>用户 · 用户输入</b><span>{{ inputs[index].length }} 字</span>
+                  <b>用户输入 <em class="required">*</em></b
+                  ><span>{{ inputs[index].length }} 字</span>
                 </header>
-                <pre v-if="preview">{{ inputs[index] }}</pre>
-                <template v-else
-                  ><label
-                    ><input
-                      type="checkbox"
-                      v-model="inputJson[index]"
-                      :disabled="!editable"
-                    />结构化 JSON 输入</label
-                  >
-                  <JsonCodeEditor
-                    v-if="inputJson[index]"
-                    :key="turn.id + 'input'"
-                    :model-value="inputs[index]"
-                    :disabled="!editable"
-                    label="用户输入 JSON"
-                    @update:model-value="inputs[index] = $event"
-                  /><textarea
-                    v-else
-                    v-model="inputs[index]"
-                    :disabled="!editable"
-                    rows="5"
-                    aria-label="用户输入"
-                    placeholder="请输入用户提问内容"
-                  />
-                </template>
+                <label
+                  ><input type="checkbox" v-model="inputJson[index]" :disabled="!editable" />结构化
+                  JSON 输入</label
+                ><JsonCodeEditor
+                  v-if="inputJson[index]"
+                  :key="turn.id + 'input'"
+                  :model-value="inputs[index]"
+                  :disabled="!editable"
+                  label="用户输入 JSON"
+                  @update:model-value="inputs[index] = $event"
+                /><textarea
+                  v-else
+                  v-model="inputs[index]"
+                  :disabled="!editable"
+                  rows="5"
+                  aria-label="用户输入"
+                  aria-required="true"
+                  required
+                  placeholder="请输入用户提问内容"
+                />
               </div>
               <div class="message-card expected">
                 <header>
-                  <b>System· 期望输出</b><span>{{ outputs[index].length }} 字</span>
+                  <b>期望输出</b><span>{{ outputs[index].length }} 字</span>
                 </header>
-                <pre v-if="preview">{{ outputs[index] || '未设置人工期望' }}</pre>
-                <template v-else
-                  ><label
-                    ><input
-                      type="checkbox"
-                      v-model="outputJson[index]"
-                      :disabled="!editable"
-                    />结构化 JSON 期望</label
-                  ><JsonCodeEditor
-                    v-if="outputJson[index]"
-                    :key="turn.id + 'output'"
-                    :model-value="outputs[index]"
-                    :disabled="!editable"
-                    label="期望输出 JSON"
-                    @update:model-value="outputs[index] = $event"
-                  /><textarea
-                    v-else
-                    v-model="outputs[index]"
-                    :disabled="!editable"
-                    rows="5"
-                    aria-label="期望输出"
-                    placeholder="人工确认的期望输出，不自动复制实际回答"
-                  />
-                </template>
+                <label
+                  ><input type="checkbox" v-model="basicOutputJson" :disabled="!editable" />结构化
+                  JSON 期望</label
+                ><JsonCodeEditor
+                  v-if="outputJson[index]"
+                  :key="turn.id + 'output'"
+                  :model-value="basicOutput"
+                  :disabled="!editable"
+                  label="期望输出 JSON"
+                  @update:model-value="basicOutput = $event"
+                /><textarea
+                  v-else
+                  v-model="basicOutput"
+                  :disabled="!editable"
+                  rows="5"
+                  aria-label="期望输出"
+                  placeholder="人工确认的期望输出，不自动复制实际回答"
+                />
               </div>
             </div>
-            <ExpectationEditor
-              :model-value="outputRules[index]"
-              :kinds="['output']"
-              compact-output
-              :disabled="!editable"
-              @update:model-value="outputRules[index] = $event as OutputRule[]"
-            />
           </section>
           <section class="evaluation-section" aria-label="高级测评项">
             <h3>高级测评项</h3>
             <div class="message-card tools">
-              <header><b>工具 · 期望工具调用</b></header>
+              <header><b>期望工具调用</b></header>
               <label
                 >必需工具（逗号分隔）<input
                   v-model="requiredTools[index]"
@@ -510,13 +561,19 @@ defineExpose({ save });
             </div>
             <div class="message-card tools">
               <header><b>期望 Skill 调用</b></header>
-              <label>期望 Skill<input v-model="turn.expected_skill" :disabled="!editable" /></label>
+              <label
+                >期望 Skill<input
+                  class="skill-input"
+                  v-model="turn.expected_skill"
+                  :disabled="!editable"
+              /></label>
             </div>
-            <details class="advanced">
-              <summary>其他规则条件与备注</summary>
+            <div class="advanced">
               <ExpectationEditor
-                :model-value="turn.expectations.filter((e) => e.kind !== 'output')"
-                :kinds="['state', 'tool_argument']"
+                :key="`${editorRevision}:${turn.id}`"
+                ref="ruleEditor"
+                @draft-change="ruleDraftDirty = $event"
+                :model-value="turn.expectations"
                 :disabled="!editable"
                 @update:model-value="updateExpectations($event)"
               />
@@ -530,8 +587,7 @@ defineExpose({ save });
                   )
                 }}</pre>
               </details>
-              <label>轮次备注<textarea v-model="turn.notes" :disabled="!editable" /></label>
-            </details>
+            </div>
           </section>
           <button v-if="editable && form.turns.length > 1" class="remove-round" @click="remove">
             删除当前轮次（保存后生效）
@@ -546,7 +602,12 @@ defineExpose({ save });
               : '已保存到数据库草稿'
             : '已发布版本 · 只读'
         }}</span
-        ><button v-if="editable" class="primary" :disabled="saving" @click="save">
+        ><button
+          v-if="editable && !hideSaveButton"
+          class="primary"
+          :disabled="saving"
+          @click="save"
+        >
           {{ saving ? '保存中…' : '保存样本' }}
         </button>
       </div>
@@ -724,6 +785,15 @@ defineExpose({ save });
   color: #34435a;
   font: inherit;
 }
+.sample-meta input,
+.sample-meta select,
+.sample-editor .skill-input {
+  height: 40px;
+}
+.required {
+  color: var(--el-color-danger);
+  font-style: normal;
+}
 .sample-editor textarea:disabled {
   background: #f8fafc;
 }
@@ -740,11 +810,6 @@ aside {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-}
-.round-title button {
-  border: 0;
-  background: white;
-  color: #008b76;
 }
 .round {
   display: block;
@@ -830,7 +895,6 @@ aside {
 .advanced,
 .case-initialization {
   font-size: 12px;
-  padding: 12px;
   color: #70829a;
 }
 .editor-footer {
@@ -857,6 +921,9 @@ aside {
   color: #93a0b3;
 }
 @media (max-width: 760px) {
+  .basic-messages {
+    grid-template-columns: 1fr;
+  }
   .conversation-layout {
     grid-template-columns: 1fr;
   }

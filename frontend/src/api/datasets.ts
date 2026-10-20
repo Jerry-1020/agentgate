@@ -220,6 +220,8 @@ export const datasetApi = {
     request<void>(`/api/datasets/${id(datasetId)}/drafts/current`, {
       method: 'DELETE',
     }),
+  deleteVersion: (datasetId: string, version: number) =>
+    request<void>(`/api/datasets/${id(datasetId)}/versions/${version}`, { method: 'DELETE' }),
   deleteRecord: (datasetId: string) =>
     request<{ deleted: string }>(`/api/datasets/${id(datasetId)}/record`, {
       method: 'DELETE',

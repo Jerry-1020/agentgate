@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { useRoute, useRouter, onBeforeRouteUpdate } from 'vue-router';
+import {
+  useRoute,
+  useRouter,
+  onBeforeRouteUpdate,
+  onBeforeRouteLeave,
+  type NavigationGuard,
+} from 'vue-router';
 import EvaluationLayout from '../../layout/EvaluationLayout.vue';
 import TaskStaticAnalysis from './components/TaskStaticAnalysis.vue';
 import TaskTuning from './components/TaskTuning.vue';
@@ -23,7 +29,6 @@ import OverviewMetrics from './components/OverviewMetrics.vue';
 import DatasetMerge from './components/DatasetMerge.vue';
 import RerunDialog from './components/RerunDialog.vue';
 import DatasetWorkspace from '../datasets/index.vue';
-import AnnotationAssets from './components/AnnotationAssets.vue';
 import ScoringTemplates from './components/ScoringTemplates.vue';
 import JudgeSystem from './components/JudgeSystem.vue';
 import ModelSettings from './components/ModelSettings.vue';
@@ -122,17 +127,25 @@ function go(value: string) {
       (value.startsWith('tasks/') && linkFor(id)?.kind === 'stability' ? 'stability/' + id : value),
   );
 }
-onBeforeRouteUpdate((to, from) => {
-  if (
-    (datasetDirty.value || evaluatorDirty.value || settingsDirty.value) &&
-    to.fullPath !== from.fullPath &&
-    !window.confirm('当前页面有未保存的修改，确定离开并放弃修改？')
-  )
-    return false;
+const hasUnsavedChanges = computed(
+  () => datasetDirty.value || evaluatorDirty.value || settingsDirty.value,
+);
+function clearDirtyState() {
   datasetDirty.value = false;
   evaluatorDirty.value = false;
   settingsDirty.value = false;
-});
+}
+const confirmNavigation: NavigationGuard = (to, from) => {
+  if (to.fullPath === from.fullPath) return;
+  if (
+    hasUnsavedChanges.value &&
+    !window.confirm('当前页面有未保存的修改，确定离开并放弃修改？')
+  )
+    return false;
+  clearDirtyState();
+};
+onBeforeRouteUpdate(confirmNavigation);
+onBeforeRouteLeave(confirmNavigation);
 const runs = shallowRef<EvaluationRun[]>([]),
   overview = ref<Overview | null>(null);
 const latestRuns = computed(() => {
@@ -146,13 +159,15 @@ async function confirmLogout() {
   if (auth.isIntegrated) return;
   try {
     await ElMessageBox.confirm(
-      '将清空登陆用户信息（token、团队选择），页面将返回欢迎页面。',
+      (hasUnsavedChanges.value ? '当前页面有未保存的修改，登出将放弃这些修改。' : '') +
+        '将清空登陆用户信息（token、团队选择），页面将返回欢迎页面。',
       '登出确认',
       { confirmButtonText: '确认登出', cancelButtonText: '取消' },
     );
   } catch {
     return;
   }
+  clearDirtyState();
   auth.logout();
   void router.push('/welcome');
 }
@@ -405,14 +420,13 @@ async function taskRerunCreated(taskId: string) {
     <section v-else-if="page === 'dataset-merge'" class="card">
       多 Skill 合并需求已挂起，当前不提供创建入口。<a href="#datasets">返回测评集</a>
     </section>
-    <AnnotationAssets
+    <section
       v-else-if="page === 'annotations' || page === 'annotation-templates'"
-      :key="route.split('/')[0]"
-      :templates="route.split('/')[0] === 'annotation-templates'"
-      :task-id="runId"
-      @navigate="go"
-      @dirty-change="evaluatorDirty = $event"
-    />
+      class="card"
+    >
+      <h1 class="page-title">标注</h1>
+      <p class="empty">待实现</p>
+    </section>
     <ScoringTemplates
       v-else-if="page === 'scoring-templates'"
       :key="route"

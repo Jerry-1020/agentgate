@@ -154,6 +154,7 @@ class PlatformComparisonInput(BaseModel):
     evaluator_ids: list[Identifier] | None = Field(default=None, min_length=1, strict=True)
     evaluator_refs: list[EvaluatorRef] | None = Field(default=None, min_length=1, strict=True)
     case_ids: list[Identifier] | None = Field(default=None, min_length=1, strict=True)
+    max_parallel_cases: int = Field(default=1, strict=True, ge=1, le=30)
     timeout_seconds: int = Field(strict=True, ge=1, le=3600)
 
     @model_validator(mode="after")
@@ -340,6 +341,7 @@ async def launch_platform_comparison(request: Request) -> JSONResponse:
             case_ids=tuple(inputs.case_ids) if inputs.case_ids is not None else None,
             evaluator_ids=tuple(inputs.evaluator_ids) if inputs.evaluator_ids is not None else None,
             evaluator_refs=tuple(inputs.evaluator_refs) if inputs.evaluator_refs is not None else None,
+            max_parallel_cases=inputs.max_parallel_cases,
             timeout_seconds=inputs.timeout_seconds,
             token=token,
             user_team_id=caller.user_team_id if caller else "",

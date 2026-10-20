@@ -11,7 +11,7 @@ export type DatasetOption = DatasetSummary;
 export interface EvaluatorOption {
   id: string;
   name: string;
-  kind: 'rule' | 'llm_judge' | 'hybrid';
+  kind: 'rule' | 'llm_judge' | 'hybrid' | 'llm_group';
   version: string;
   dimension: string;
   metric: string;

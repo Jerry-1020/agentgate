@@ -13,6 +13,7 @@ from agentgate.domain import (
     WithinRange,
     WithinTolerance,
 )
+from agentgate.domain.base import FrozenJsonObject
 
 
 def test_condition_values_are_recursively_immutable():
@@ -22,6 +23,42 @@ def test_condition_values_are_recursively_immutable():
     assert condition.expected["nested"][0]["value"] == 1
     with pytest.raises(TypeError):
         condition.expected["nested"][0]["value"] = 3
+
+
+@pytest.mark.parametrize("condition_type, field", [(Equals, "expected"), (OneOf, "allowed")])
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"nested": [{"enabled": True, "score": 1, "value": None}]},
+        [{"items": [False, 2, None, "text"]}],
+    ],
+)
+def test_json_conditions_round_trip_nested_objects_without_thawing_model(
+    condition_type, field, value
+):
+    original = value if field == "expected" else [value]
+    condition = condition_type(**{field: original})
+
+    assert condition.model_dump(mode="json")[field] == original
+    restored = condition_type.model_validate_json(condition.model_dump_json())
+    assert restored == condition
+
+    frozen = getattr(restored, field)
+    if field == "allowed":
+        frozen = frozen[0]
+    if isinstance(frozen, tuple):
+        frozen = frozen[0]
+    assert isinstance(frozen, FrozenJsonObject)
+    with pytest.raises(TypeError):
+        frozen["changed"] = True
+
+    serialized = restored.model_dump(mode="json")[field]
+    if field == "allowed":
+        serialized = serialized[0]
+    if isinstance(serialized, list):
+        serialized = serialized[0]
+    serialized["changed"] = True
+    assert "changed" not in frozen
 
 
 def test_condition_construction_rejects_invalid_rules():

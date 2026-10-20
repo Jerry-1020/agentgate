@@ -1,0 +1,410 @@
+{
+  "pass": {
+    "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "run_id": "expectation-rules-pass",
+    "case_id": "expectation-rules-case",
+    "spans": [
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000001",
+        "parent_span_id": null,
+        "name": "review",
+        "operation_type": "turn",
+        "sequence": 0,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "agentgate.turn.id": "review-turn"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000002",
+        "parent_span_id": "0000000000000001",
+        "name": "lookup_customer",
+        "operation_type": "tool",
+        "sequence": 1,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "customer": {
+              "id": "C-000"
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000003",
+        "parent_span_id": "0000000000000001",
+        "name": "lookup_customer",
+        "operation_type": "tool",
+        "sequence": 2,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "customer": {
+              "id": "C-100"
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000004",
+        "parent_span_id": "0000000000000001",
+        "name": "review-state",
+        "operation_type": "state",
+        "sequence": 3,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {},
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000005",
+        "parent_span_id": null,
+        "name": "approve",
+        "operation_type": "turn",
+        "sequence": 4,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "agentgate.turn.id": "approve-turn"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000006",
+        "parent_span_id": "0000000000000005",
+        "name": "approve_loan",
+        "operation_type": "tool",
+        "sequence": 5,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "request": {
+              "limit": 120000
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000007",
+        "parent_span_id": "0000000000000005",
+        "name": "approve_loan",
+        "operation_type": "tool",
+        "sequence": 6,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "request": {
+              "limit": 130000
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "span_id": "0000000000000008",
+        "parent_span_id": "0000000000000005",
+        "name": "approve-state",
+        "operation_type": "state",
+        "sequence": 7,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {},
+        "events": []
+      }
+    ],
+    "turn_outcomes": {
+      "review-turn": {
+        "state": {
+          "decision": {
+            "status": "review",
+            "history": [
+              {
+                "approved": false
+              }
+            ]
+          }
+        },
+        "output": {
+          "answer": "已提交复核"
+        }
+      },
+      "approve-turn": {
+        "state": {
+          "decision": {
+            "details": {
+              "approved": true,
+              "limit": 120000,
+              "reasons": [
+                {
+                  "code": "verified",
+                  "sources": [
+                    "manual"
+                  ]
+                }
+              ],
+              "reviewer": null
+            }
+          }
+        },
+        "output": {
+          "answer": "审核完成",
+          "decision": {
+            "approved": true
+          }
+        }
+      }
+    },
+    "final_output": {
+      "answer": "审核完成",
+      "decision": {
+        "approved": true
+      }
+    },
+    "final_state": {
+      "decision": {
+        "details": {
+          "approved": true,
+          "limit": 120000,
+          "reasons": [
+            {
+              "code": "verified",
+              "sources": [
+                "manual"
+              ]
+            }
+          ],
+          "reviewer": null
+        }
+      }
+    }
+  },
+  "fail": {
+    "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "run_id": "expectation-rules-fail",
+    "case_id": "expectation-rules-case",
+    "spans": [
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000001",
+        "parent_span_id": null,
+        "name": "review",
+        "operation_type": "turn",
+        "sequence": 0,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "agentgate.turn.id": "review-turn"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000002",
+        "parent_span_id": "0000000000000001",
+        "name": "lookup_customer",
+        "operation_type": "tool",
+        "sequence": 1,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "customer": {
+              "id": "C-000"
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000003",
+        "parent_span_id": "0000000000000001",
+        "name": "lookup_customer",
+        "operation_type": "tool",
+        "sequence": 2,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "customer": {
+              "id": "C-999"
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000004",
+        "parent_span_id": "0000000000000001",
+        "name": "review-state",
+        "operation_type": "state",
+        "sequence": 3,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {},
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000005",
+        "parent_span_id": null,
+        "name": "approve",
+        "operation_type": "turn",
+        "sequence": 4,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "agentgate.turn.id": "approve-turn"
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000006",
+        "parent_span_id": "0000000000000005",
+        "name": "approve_loan",
+        "operation_type": "tool",
+        "sequence": 5,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "request": {
+              "limit": 120000
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000007",
+        "parent_span_id": "0000000000000005",
+        "name": "approve_loan",
+        "operation_type": "tool",
+        "sequence": 6,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {
+          "arguments": {
+            "request": {
+              "limit": 90000
+            }
+          }
+        },
+        "events": []
+      },
+      {
+        "trace_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "span_id": "0000000000000008",
+        "parent_span_id": "0000000000000005",
+        "name": "approve-state",
+        "operation_type": "state",
+        "sequence": 7,
+        "started_at": "2026-10-19T00:00:00Z",
+        "ended_at": "2026-10-19T00:00:00Z",
+        "status": "ok",
+        "attributes": {},
+        "events": []
+      }
+    ],
+    "turn_outcomes": {
+      "review-turn": {
+        "state": {
+          "decision": {
+            "status": "rejected",
+            "history": [
+              {
+                "approved": false
+              }
+            ]
+          }
+        },
+        "output": {
+          "answer": "待补充信息"
+        }
+      },
+      "approve-turn": {
+        "state": {
+          "decision": {
+            "details": {
+              "approved": "true",
+              "limit": 120000,
+              "reasons": [
+                {
+                  "code": "verified",
+                  "sources": [
+                    "manual"
+                  ]
+                }
+              ],
+              "reviewer": null
+            }
+          }
+        },
+        "output": {
+          "answer": "审核完成",
+          "decision": {
+            "approved": false
+          }
+        }
+      }
+    },
+    "final_output": {
+      "answer": "审核完成",
+      "decision": {
+        "approved": false
+      }
+    },
+    "final_state": {
+      "decision": {
+        "details": {
+          "approved": "true",
+          "limit": 120000,
+          "reasons": [
+            {
+              "code": "verified",
+              "sources": [
+                "manual"
+              ]
+            }
+          ],
+          "reviewer": null
+        }
+      }
+    }
+  }
+}

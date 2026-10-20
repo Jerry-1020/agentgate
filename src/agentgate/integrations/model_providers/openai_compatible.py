@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from collections.abc import Mapping
@@ -56,6 +57,7 @@ class OpenAICompatibleModelClient:
         max_attempts: int = 3,
         backoff_seconds: float = 0.5,
         output_token_field: OutputTokenField = "max_completion_tokens",
+        thinking: Literal["enabled", "disabled"] | None = None,
         allow_insecure_http: bool = False,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -82,12 +84,15 @@ class OpenAICompatibleModelClient:
             raise ValueError(
                 "output_token_field must be max_completion_tokens or max_tokens"
             )
+        if thinking not in {None, "enabled", "disabled"}:
+            raise ValueError("thinking must be enabled, disabled, or None")
         if http_client is not None and not isinstance(http_client, httpx.Client):
             raise TypeError("http_client must be an httpx.Client")
 
         self.max_attempts = max_attempts
         self.backoff_seconds = float(backoff_seconds)
         self.output_token_field = output_token_field
+        self.thinking = thinking
         self._api_key = api_key
         self._owns_http_client = http_client is None
         self._http_client = http_client or httpx.Client()
@@ -111,7 +116,11 @@ class OpenAICompatibleModelClient:
             self._http_client.close()
 
     def complete(self, request: JudgeRequest) -> JudgeResponse:
-        """Execute one bounded Judge completion request."""
+        """Share a time budget across retries and streamed response chunks.
+
+        An in-flight socket read may finish after the budget; its timeout is
+        bounded when that request/body starts. Heartbeats cannot reset the budget.
+        """
 
         payload = self._request_payload(request)
         headers = {"Content-Type": "application/json"}
@@ -119,47 +128,68 @@ class OpenAICompatibleModelClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         started = time.monotonic()
+        deadline = started + request.timeout_seconds
+
+        def remaining_seconds() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise JudgeModelTimeout(
+                    f"Judge provider exceeded {request.timeout_seconds:g} seconds"
+                )
+            return remaining
+
         last_error: JudgeModelTimeout | JudgeModelUnavailable | None = None
         for attempt in range(1, self.max_attempts + 1):
             try:
-                response = self._http_client.post(
+                with self._http_client.stream(
+                    "POST",
                     f"{self.base_url}/chat/completions",
                     json=payload,
                     headers=headers,
-                    timeout=request.timeout_seconds,
-                )
+                    timeout=remaining_seconds(),
+                ) as response:
+                    remaining = remaining_seconds()
+                    if response.status_code in RETRYABLE_STATUSES:
+                        last_error = JudgeModelUnavailable(
+                            f"Judge provider returned HTTP {response.status_code}"
+                        )
+                    elif response.is_error:
+                        raise JudgeModelUnavailable(
+                            f"Judge provider returned HTTP {response.status_code}"
+                        ) from None
+                    else:
+                        response.request.extensions["timeout"]["read"] = min(
+                            remaining, request.timeout_seconds
+                        )
+                        chunks = []
+                        for chunk in response.iter_bytes():
+                            remaining_seconds()
+                            chunks.append(chunk)
+                        remaining_seconds()
+                        try:
+                            response_payload = json.loads(b"".join(chunks))
+                        except ValueError:
+                            raise JudgeModelInvalidResponse(
+                                "Judge provider returned a non-JSON body"
+                            ) from None
+                        remaining_seconds()
+                        latency_ms = (time.monotonic() - started) * 1000
+                        return self._parse_response(
+                            response_payload,
+                            request,
+                            latency_ms,
+                            attempt,
+                        )
             except httpx.TimeoutException:
                 last_error = JudgeModelTimeout(
                     f"Judge provider exceeded {request.timeout_seconds:g} seconds"
                 )
             except httpx.TransportError:
                 last_error = JudgeModelUnavailable("Judge provider is unreachable")
-            else:
-                if response.status_code in RETRYABLE_STATUSES:
-                    last_error = JudgeModelUnavailable(
-                        f"Judge provider returned HTTP {response.status_code}"
-                    )
-                elif response.is_error:
-                    raise JudgeModelUnavailable(
-                        f"Judge provider returned HTTP {response.status_code}"
-                    ) from None
-                else:
-                    try:
-                        response_payload = response.json()
-                    except ValueError:
-                        raise JudgeModelInvalidResponse(
-                            "Judge provider returned a non-JSON body"
-                        ) from None
-                    latency_ms = (time.monotonic() - started) * 1000
-                    return self._parse_response(
-                        response_payload,
-                        request,
-                        latency_ms,
-                        attempt,
-                    )
 
+            remaining_seconds()
             if attempt < self.max_attempts and self.backoff_seconds:
-                time.sleep(self.backoff_seconds * attempt)
+                time.sleep(min(self.backoff_seconds * attempt, remaining_seconds()))
 
         if last_error is None:
             raise JudgeModelUnavailable("Judge provider failed")
@@ -177,6 +207,8 @@ class OpenAICompatibleModelClient:
         }
         if request.seed is not None:
             payload["seed"] = request.seed
+        if self.thinking is not None:
+            payload["thinking"] = {"type": self.thinking}
         if request.max_output_tokens is not None:
             payload[self.output_token_field] = request.max_output_tokens
         if request.response_format == "json_object":

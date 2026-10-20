@@ -1,0 +1,875 @@
+{
+  "baseline_version": "loan-agent-v1-risky",
+  "candidate_version": "loan-agent-v2-fixed",
+  "evaluators": [
+    {
+      "id": "skill-routing",
+      "version": "1"
+    },
+    {
+      "id": "required-tool",
+      "version": "1"
+    },
+    {
+      "id": "forbidden-tool",
+      "version": "1"
+    },
+    {
+      "id": "tool-arguments",
+      "version": "1"
+    },
+    {
+      "id": "final-state",
+      "version": "1"
+    },
+    {
+      "id": "final-output",
+      "version": "1"
+    }
+  ],
+  "scenarios": [
+    {
+      "key": "high-risk",
+      "name": "A/B 本地示例 · 高风险审批",
+      "description": "对比 loan-agent-v1-risky 与 loan-agent-v2-fixed；高风险审批，2 条合成样本，采用规则评估。",
+      "cases": [
+        {
+          "id": "ab-high-risk-1",
+          "name": "高风险审批 · 金额 20000",
+          "turns": [
+            {
+              "id": "ab-high-risk-1-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-HIGH-RISK-1",
+                "risk": "high",
+                "amount": 20000
+              },
+              "expectations": [
+                {
+                  "id": "f350ad4d-21c8-4f1c-bdc6-7246519f51b2",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "3ce82048-0bba-4673-bae3-5f54e5a0cc69",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "9c4079d8-93cd-4a5f-91e5-c2d60a01c3aa",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "required"
+                },
+                {
+                  "id": "4e0fbbca-4637-4f0f-ac2b-c3dc8b299ca3",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "46e37446-e15d-426e-af7b-c1dfc07ab154",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "ba7382b6-0850-4246-8fca-444d6ac31976",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "519dd984-b8ca-477a-a143-efd0b4f09d7c",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                },
+                {
+                  "id": "c3aa25bd-8fba-4ad1-bd0a-8f5053cf89b8",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "db7d7b3e-9c07-4252-9f18-8dd81952ce12",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "bcf0595c-159b-4d73-bd15-50134420ca3c",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "boundary",
+          "difficulty": "medium",
+          "tags": [
+            "A/B",
+            "本地示例"
+          ],
+          "notes": "合成测试数据；使用内置确定性 LoanAgent。"
+        },
+        {
+          "id": "ab-high-risk-2",
+          "name": "高风险审批 · 金额 80000",
+          "turns": [
+            {
+              "id": "ab-high-risk-2-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-HIGH-RISK-2",
+                "risk": "high",
+                "amount": 80000
+              },
+              "expectations": [
+                {
+                  "id": "273d81e5-f09a-48ad-b886-2c6786db85ce",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "aa68add1-f3af-4eca-9997-abb6a9eda3ba",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "98466ad3-63ad-4a34-b81a-66c56aeeba79",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "required"
+                },
+                {
+                  "id": "44acb157-d348-4a24-998c-931c9276eb0e",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "69b205f6-9f6f-45b0-9c4e-42f47809a3b6",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "98c675b6-a8fc-4100-b5b8-cca649d279fe",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "e083ef04-94ac-489d-a817-b6bf88552dfd",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                },
+                {
+                  "id": "0b3f3136-ece5-4212-a361-611f31cbab51",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "c1ee4eb1-d568-4ba2-903f-2da12c735460",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "34f7e866-5231-4b9e-84f9-641b48ed0492",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "boundary",
+          "difficulty": "medium",
+          "tags": [
+            "A/B",
+            "本地示例"
+          ],
+          "notes": "合成测试数据；使用内置确定性 LoanAgent。"
+        }
+      ]
+    },
+    {
+      "key": "low-risk",
+      "name": "A/B 本地示例 · 低风险回归",
+      "description": "对比 loan-agent-v1-risky 与 loan-agent-v2-fixed；低风险回归，2 条合成样本，采用规则评估。",
+      "cases": [
+        {
+          "id": "ab-low-risk-1",
+          "name": "低风险回归 · 金额 10000",
+          "turns": [
+            {
+              "id": "ab-low-risk-1-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-LOW-RISK-1",
+                "risk": "low",
+                "amount": 10000
+              },
+              "expectations": [
+                {
+                  "id": "226ed85a-55f8-4562-8ffe-48d34b2bb815",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "6072a2cd-f1e9-4306-82d5-9b5f0916248b",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "582bd844-a70a-477f-a4d1-aebec7a622a2",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "required"
+                },
+                {
+                  "id": "138f3477-793e-447c-b73a-c65ebe61ac33",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "a77256ac-55b1-47ce-a608-c5323fab07ac",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "approve_loan",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "d10b7653-38eb-4448-ae3b-4921f47897d4",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "approve_loan",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "a9e2074b-99db-483d-b81e-43e38c72ac5c",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "approved"
+                  }
+                },
+                {
+                  "id": "d304e5db-215f-439b-909f-b0d9793e1fd2",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "e8942aea-0d9b-4433-b900-4d3e29b8e251",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "e1a4b38a-2a52-4e94-96ec-c04bad9b601b",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "approved"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "positive",
+          "difficulty": "medium",
+          "tags": [
+            "A/B",
+            "本地示例"
+          ],
+          "notes": "合成测试数据；使用内置确定性 LoanAgent。"
+        },
+        {
+          "id": "ab-low-risk-2",
+          "name": "低风险回归 · 金额 50000",
+          "turns": [
+            {
+              "id": "ab-low-risk-2-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-LOW-RISK-2",
+                "risk": "low",
+                "amount": 50000
+              },
+              "expectations": [
+                {
+                  "id": "e704331c-207d-4292-ad5e-868e5123b109",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "6df5b0b9-e404-4ab7-a7cd-a4b40b097953",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "33b7304a-7575-4e1a-a6b2-586a68c90fc3",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "required"
+                },
+                {
+                  "id": "8f0bc069-f1fe-40be-9d43-09da118ac63c",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "bbac2a3e-2cab-45a3-b68b-001aea7abe40",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "approve_loan",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "097013e5-f3c6-4257-8bf7-3e00ee140a63",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "approve_loan",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "1826846b-3de6-4f78-a103-fd4b8fac3054",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "approved"
+                  }
+                },
+                {
+                  "id": "8c67304b-7b66-4094-8d63-1eed92e3baf2",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "51c65453-216f-492a-85d8-21f75599fbb7",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "1973b493-3223-4ea4-bd39-c671bd9ac521",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "approved"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "positive",
+          "difficulty": "medium",
+          "tags": [
+            "A/B",
+            "本地示例"
+          ],
+          "notes": "合成测试数据；使用内置确定性 LoanAgent。"
+        }
+      ]
+    },
+    {
+      "key": "multi-turn",
+      "name": "A/B 本地示例 · 多轮补充信息",
+      "description": "对比两个内置贷款版本的上下文保持与高风险审批；2 条双轮合成样本，采用规则评估。",
+      "cases": [
+        {
+          "id": "ab-multi-turn-1",
+          "name": "多轮补齐 amount 后进入人工复核",
+          "turns": [
+            {
+              "id": "ab-multi-turn-1-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-MULTI-TURN-1",
+                "risk": "high"
+              },
+              "expectations": [
+                {
+                  "id": "ace6dd81-ab15-4ea1-99e6-d1302fb034d4",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "c365fbb7-3216-4648-b929-0388d11fc2ab",
+                  "name": null,
+                  "kind": "output",
+                  "path": "missing_fields",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": [
+                      "amount"
+                    ]
+                  }
+                },
+                {
+                  "id": "7d889643-425e-46d9-aa39-60c7a219eb95",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "99145a73-9144-42aa-a419-b65bd8f47661",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "29a2a866-78ab-4a49-8473-36a9cbddeed1",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "forbidden"
+                }
+              ],
+              "notes": ""
+            },
+            {
+              "id": "ab-multi-turn-1-turn-2",
+              "input": {
+                "amount": 80000
+              },
+              "expectations": [
+                {
+                  "id": "544ed987-1c02-4123-8431-0dab79ffda22",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "d7f0a75c-b6e3-4c31-b8d2-6713874b38fc",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "0063af44-c4b5-4ee7-9074-48a472aaee3a",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "required"
+                },
+                {
+                  "id": "bddb4d5f-2c85-43b2-a1f5-b732ba375f11",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "045bf5b5-3fdf-4488-83b7-ee8104d0a854",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "e02ee551-c3ce-4da1-874b-78d2d7ac3bb1",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "2677c284-5077-4b71-a255-5e8fd2c4a245",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                },
+                {
+                  "id": "80ac4192-134a-4ee8-914f-76704ade2116",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "00663d39-15d4-4264-9a08-6628f0a8e75a",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "78f8d1c1-07ff-4730-b4b4-03a474c65209",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "boundary",
+          "difficulty": "hard",
+          "tags": [
+            "A/B",
+            "本地示例",
+            "多轮"
+          ],
+          "notes": "合成测试数据；验证缺信息时不调用工具，补齐后保持高风险上下文。"
+        },
+        {
+          "id": "ab-multi-turn-2",
+          "name": "多轮补齐 risk 后进入人工复核",
+          "turns": [
+            {
+              "id": "ab-multi-turn-2-turn-1",
+              "input": {
+                "skill": "loan_approval",
+                "application_id": "AB-MULTI-TURN-2",
+                "amount": 80000
+              },
+              "expectations": [
+                {
+                  "id": "0c9ad99d-6b32-44f0-ab8c-b252c3ef84ea",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "3ae743a8-f402-4c96-89f0-b2f62769d18d",
+                  "name": null,
+                  "kind": "output",
+                  "path": "missing_fields",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": [
+                      "risk"
+                    ]
+                  }
+                },
+                {
+                  "id": "a3ef553e-c6c4-4e5a-bd0f-a384c8fac350",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "171cae74-d612-4f7f-bf19-f89eb7fd8b83",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "d6c967b6-7a9c-46d6-890c-106f725d27ba",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "forbidden"
+                }
+              ],
+              "notes": ""
+            },
+            {
+              "id": "ab-multi-turn-2-turn-2",
+              "input": {
+                "risk": "high"
+              },
+              "expectations": [
+                {
+                  "id": "859455dd-0b1e-4168-b5f9-a869d9f5b4a5",
+                  "name": null,
+                  "kind": "skill_route",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "loan_approval"
+                  }
+                },
+                {
+                  "id": "953c2c47-4276-421b-9cd5-587caf30ace9",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "credit_inquiry",
+                  "mode": "required"
+                },
+                {
+                  "id": "47f94c84-b715-48c9-924b-20e8c1ee44bb",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "request_human_review",
+                  "mode": "required"
+                },
+                {
+                  "id": "2c297295-61ee-4992-bf44-448da20d512f",
+                  "name": null,
+                  "kind": "tool_call",
+                  "tool": "approve_loan",
+                  "mode": "forbidden"
+                },
+                {
+                  "id": "f6ef66cb-4c5a-4b67-8804-645b51d03323",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "human_review",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "591c31e4-dc13-4e6a-9352-734e44429e4c",
+                  "name": null,
+                  "kind": "tool_argument",
+                  "tool": "request_human_review",
+                  "path": "approved",
+                  "occurrence": "last",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "02ead913-78f1-4fc1-a367-95438b11a764",
+                  "name": null,
+                  "kind": "state",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                },
+                {
+                  "id": "e0765082-c0b3-4acc-9493-f5164e1da6d6",
+                  "name": null,
+                  "kind": "state",
+                  "path": "approved",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": false
+                  }
+                },
+                {
+                  "id": "249cda42-fe1c-4a19-b5e9-9e41a7f6a099",
+                  "name": null,
+                  "kind": "state",
+                  "path": "human_review",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": true
+                  }
+                },
+                {
+                  "id": "7e9a99ac-11e0-4e39-9860-1c2168ba7c7d",
+                  "name": null,
+                  "kind": "output",
+                  "path": "status",
+                  "condition": {
+                    "kind": "equals",
+                    "expected": "pending_review"
+                  }
+                }
+              ],
+              "notes": ""
+            }
+          ],
+          "initial_state": {},
+          "category": "boundary",
+          "difficulty": "hard",
+          "tags": [
+            "A/B",
+            "本地示例",
+            "多轮"
+          ],
+          "notes": "合成测试数据；验证缺信息时不调用工具，补齐后保持高风险上下文。"
+        }
+      ]
+    }
+  ]
+}

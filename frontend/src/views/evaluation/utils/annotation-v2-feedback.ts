@@ -37,13 +37,13 @@ export function annotatedV2Case(
       turn.expectations.push({
         id: 'human-v2-output-' + turn.id,
         kind: 'output',
-        name: 'V2人工标注输出期望',
+        name: 'V2标注输出期望',
         path,
         condition: { kind: 'equals', expected },
       });
     }
-    const marker = '\n【V2人工标注 ' + task.template.id + '】';
-    const endMarker = '\n【V2人工标注结束】';
+    const marker = '\n【V2标注 ' + task.template.id + '】';
+    const endMarker = '\n【V2标注结束】';
     const start = turn.notes.indexOf(marker);
     const end = start < 0 ? -1 : turn.notes.indexOf(endMarker, start);
     if (end >= 0)

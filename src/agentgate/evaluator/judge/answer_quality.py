@@ -32,7 +32,7 @@ from .model_protocol import (
     JudgeResponse,
     request_fingerprint,
 )
-from .prompt import JudgeInputSelection, build_judge_request
+from .prompt import JudgeInputSelection, build_judge_request, validate_prompt_template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,10 +46,12 @@ _CONFIG_FIELDS = frozenset(
         "min_confidence",
         "model",
         "pass_threshold",
+        "render_template",
         "rubric",
         "seed",
         "temperature",
         "timeout_seconds",
+        "user_prompt",
     }
 )
 _MODEL_FIELDS = frozenset({"credential_ref", "model_id", "provider_id"})
@@ -113,6 +115,8 @@ class _AnswerQualityConfig:
     provider_id: str
     model_id: str
     instruction: str
+    user_prompt: str | None
+    render_template: bool
     rubric: Mapping[str, Any]
     input_selection: JudgeInputSelection
     pass_threshold: float
@@ -151,6 +155,16 @@ class _AnswerQualityConfig:
             config.get("instruction"),
             "answer-quality config instruction",
         )
+        render_template = config.get("render_template", False)
+        if not isinstance(render_template, bool):
+            raise ValueError("answer-quality config render_template must be a boolean")  # noqa: TRY004
+        if render_template:
+            validate_prompt_template(instruction)
+        user_prompt = config.get("user_prompt")
+        if user_prompt is not None:
+            _required_text(user_prompt, "answer-quality config user_prompt")
+            if render_template:
+                validate_prompt_template(user_prompt)
         rubric = config.get("rubric")
         if not isinstance(rubric, Mapping) or not rubric:
             raise ValueError("answer-quality config rubric must be a non-empty object")
@@ -184,6 +198,8 @@ class _AnswerQualityConfig:
             provider_id=provider_id,
             model_id=model_id,
             instruction=instruction,
+            user_prompt=user_prompt,
+            render_template=render_template,
             rubric=rubric,
             input_selection=input_selection,
             pass_threshold=pass_threshold,
@@ -424,6 +440,8 @@ def build_answer_quality_request(spec: EvaluatorSpec, case: Case, trace: Trace) 
     return build_judge_request(
         model_id=config.model_id,
         instruction=config.instruction,
+        user_prompt=config.user_prompt,
+        render_template=config.render_template,
         rubric=config.rubric,
         case=case,
         trace=trace,

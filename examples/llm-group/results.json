@@ -1,0 +1,57 @@
+{
+  "end_to_end_verified": true,
+  "login_mode": "external",
+  "target": "local mock Agent",
+  "evaluator_id": "e9d657db-d59c-4c00-b742-8dcdbcce706b",
+  "run_id": "7a9d8589-80b0-471d-9fc4-da540c8f96ad",
+  "status": "completed",
+  "result": {
+    "score": 0.0,
+    "outcome": "fail",
+    "children": [
+      {
+        "id": "3c059b76-e6cc-4021-9920-9b57767eaa51",
+        "name": "相关性",
+        "version": "1",
+        "weight": 0.4,
+        "score": 0.0,
+        "outcome": "fail",
+        "reason": "输出没有回答用户的问题，而是重复了用户的问题，并附加了模拟回复的标记，完全未提供所要求的数字答案。",
+        "provider": "openai-compatible",
+        "requested_model": "deepseek-v4-pro",
+        "resolved_model": "deepseek-v4-pro",
+        "request_id": "8a898e26-8eba-4a50-9909-a3ad795750f2",
+        "request_sha256": "db1180e9882280b34a35e9323cbba6ab84ac26b6306394d58ddb4d1296087048"
+      },
+      {
+        "id": "13867599-baa8-41e0-aafe-159175c834c1",
+        "name": "准确性",
+        "version": "1",
+        "weight": 0.4,
+        "score": 0.0,
+        "outcome": "fail",
+        "reason": "模型输出未回答用户问题，而是重复了用户的问题并附加了模拟回复标记，未提供数字答案。",
+        "provider": "openai-compatible",
+        "requested_model": "deepseek-v4-pro",
+        "resolved_model": "deepseek-v4-pro",
+        "request_id": "143774af-ffbf-4596-a694-a716079117b9",
+        "request_sha256": "7ea4a8af68e88fa0250f7f43df12fcd00580d5efac1cdc3b834c755102bdfdb0"
+      },
+      {
+        "id": "0ce73bc9-a5e0-426b-b323-4b4b35f96132",
+        "name": "合理性",
+        "version": "1",
+        "weight": 0.2,
+        "score": 0.0,
+        "outcome": "fail",
+        "reason": "模型输出未回答用户问题，而是重复了用户输入并附加了模拟回复标记，完全未提供数字答案。",
+        "provider": "openai-compatible",
+        "requested_model": "deepseek-v4-pro",
+        "resolved_model": "deepseek-v4-pro",
+        "request_id": "2bee8e6d-4ecf-4e50-b0b6-82ca8514c7e5",
+        "request_sha256": "3db17b6ea7535273837b4b9398f2829946034a05da396ed9a4915f522a50cec5"
+      }
+    ]
+  },
+  "verified_at": "2026-10-16T03:09:34.604752+00:00"
+}

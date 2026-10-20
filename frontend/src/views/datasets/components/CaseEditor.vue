@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import type { EvaluationCase, ValidationIssue } from '../types/index';
+import type { EvaluationCase, Expectation, ValidationIssue } from '../types/index';
 import ExpectationEditor from './ExpectationEditor.vue';
 
 const props = defineProps<{
@@ -16,19 +16,28 @@ const inputs = ref<string[]>([]);
 const outputs = ref<string[]>([]);
 const outputIds = ref<(string | null)[]>([]);
 const originalOutputs = ref<any[]>([]);
+const ruleEditors = ref<InstanceType<typeof ExpectationEditor>[]>([]);
+const invalidRuleDrafts = ref(new Set<string>());
+const editorRevision = ref(0);
 const baseline = ref('');
 function snapshot() {
   return JSON.stringify([form.value, inputs.value, outputs.value]);
 }
-watch([form, inputs, outputs], () => emit('dirtyChange', snapshot() !== baseline.value), {
-  deep: true,
-});
+watch(
+  [form, inputs, outputs, invalidRuleDrafts],
+  () => emit('dirtyChange', invalidRuleDrafts.value.size > 0 || snapshot() !== baseline.value),
+  {
+    deep: true,
+  },
+);
 const cloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 watch(
   () => props.item,
   (item) => {
+    editorRevision.value += 1;
     form.value = item ? cloneJson(item) : null;
+    invalidRuleDrafts.value.clear();
     inputs.value = item?.turns.map((turn) => JSON.stringify(turn.input, null, 2)) ?? [];
     outputIds.value =
       item?.turns.map(
@@ -46,14 +55,79 @@ watch(
         const e = turn.expectations.find((e) => e.id === outputIds.value[index]);
         return e?.condition.kind === 'equals' ? JSON.stringify(e.condition.expected, null, 2) : '';
       }) ?? [];
-    form.value?.turns.forEach((turn: any, index: number) => {
-      turn.expectations = turn.expectations.filter((e: any) => e.id !== outputIds.value[index]);
-    });
     baseline.value = snapshot();
     emit('dirtyChange', false);
   },
   { immediate: true, deep: true },
 );
+
+type OutputRule = Extract<Expectation, { kind: 'output' }>;
+function isBasicOutput(rule: Expectation): rule is OutputRule {
+  return rule.kind === 'output' && !rule.path && rule.condition.kind === 'equals';
+}
+function syncOutput(index: number, preserveText = false) {
+  const rules: Expectation[] = form.value.turns[index].expectations;
+  const rule =
+    rules.find((entry) => entry.id === outputIds.value[index] && isBasicOutput(entry)) ??
+    rules.find(isBasicOutput);
+  const previous = originalOutputs.value[index];
+  if (
+    !preserveText &&
+    (previous?.id !== rule?.id ||
+      JSON.stringify(previous?.condition) !== JSON.stringify(rule?.condition))
+  )
+    outputs.value[index] =
+      rule?.condition.kind === 'equals' ? JSON.stringify(rule.condition.expected, null, 2) : '';
+  outputIds.value[index] = rule?.id ?? null;
+  originalOutputs.value[index] = cloneJson(rule ?? null);
+}
+function applyOutput(index: number) {
+  const turn = form.value.turns[index];
+  const text = outputs.value[index];
+  if (!text.trim()) {
+    turn.expectations = turn.expectations.filter(
+      (entry: Expectation) => entry.id !== outputIds.value[index],
+    );
+    syncOutput(index);
+    return;
+  }
+  const expected = JSON.parse(text, (_key, value) => {
+    if (typeof value === 'number' && !Number.isFinite(value))
+      throw Error('JSON 数字必须为有限数值');
+    return value;
+  });
+  const existing = turn.expectations.find(
+    (entry: Expectation) => entry.id === outputIds.value[index] && isBasicOutput(entry),
+  );
+  const rule: OutputRule = {
+    ...(existing ?? {
+      id: crypto.randomUUID(),
+      kind: 'output',
+      name: '期望输出',
+      path: null,
+    }),
+    condition: { kind: 'equals', expected },
+  };
+  turn.expectations = existing
+    ? turn.expectations.map((entry: Expectation) => (entry.id === rule.id ? rule : entry))
+    : [...turn.expectations, rule];
+  outputIds.value[index] = rule.id;
+  syncOutput(index, true);
+}
+function updateOutput(index: number, text: string) {
+  outputs.value[index] = text;
+  // Keep unfinished rule JSON intact while the other output field is edited.
+  if (invalidRuleDrafts.value.has(form.value.turns[index].id)) return;
+  try {
+    applyOutput(index);
+  } catch {
+    // An incomplete JSON value remains editable and is rejected on save.
+  }
+}
+function updateExpectations(index: number, values: Expectation[]) {
+  form.value.turns[index].expectations = values;
+  syncOutput(index);
+}
 
 function addTurn() {
   form.value.turns.push({
@@ -74,6 +148,7 @@ function addTurn() {
 
 function removeTurn(index: number) {
   if (form.value.turns.length === 1) return ElMessage.warning('用例至少需要一轮输入');
+  invalidRuleDrafts.value.delete(form.value.turns[index].id);
   form.value.turns.splice(index, 1);
   inputs.value.splice(index, 1);
   outputs.value.splice(index, 1);
@@ -84,30 +159,23 @@ function removeTurn(index: number) {
 function save() {
   if (!form.value?.name.trim()) return ElMessage.warning('请输入用例名称');
   try {
+    ruleEditors.value.forEach((editor) => editor.validate());
+  } catch (error) {
+    return ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+  try {
     form.value.turns.forEach((turn: any, index: number) => {
       turn.input = JSON.parse(inputs.value[index] || '{}');
     });
   } catch {
     return ElMessage.error('输入必须是有效 JSON');
   }
-  const saved = cloneJson(form.value);
   try {
-    saved.turns.forEach((turn: any, index: number) => {
-      if (outputs.value[index]?.trim())
-        turn.expectations.push({
-          ...(originalOutputs.value[index] ?? {
-            id: outputIds.value[index] ?? crypto.randomUUID(),
-            kind: 'output',
-            name: '期望输出',
-            path: null,
-          }),
-          condition: { kind: 'equals', expected: JSON.parse(outputs.value[index]) },
-        });
-    });
+    form.value.turns.forEach((_turn: unknown, index: number) => applyOutput(index));
   } catch {
     return ElMessage.error('期望输出必须为有效 JSON；文本请用双引号包围');
   }
-  emit('save', saved);
+  emit('save', cloneJson(form.value));
 }
 defineExpose({ save });
 </script>
@@ -224,7 +292,8 @@ defineExpose({ save });
             </el-form-item>
             <el-form-item label="期望输出（JSON）">
               <el-input
-                v-model="outputs[Number(index)]"
+                :model-value="outputs[Number(index)]"
+                @update:model-value="updateOutput(Number(index), $event)"
                 type="textarea"
                 :rows="4"
                 :data-testid="`turn-output-${index}`"
@@ -295,7 +364,16 @@ defineExpose({ save });
               <el-form-item label="本轮备注">
                 <el-input v-model="turn.notes" />
               </el-form-item>
-              <ExpectationEditor v-model="turn.expectations" :disabled="!editable" />
+              <ExpectationEditor
+                :key="`${editorRevision}-${turn.id}`"
+                ref="ruleEditors"
+                :model-value="turn.expectations"
+                :disabled="!editable"
+                @update:model-value="updateExpectations(Number(index), $event)"
+                @draft-change="
+                  $event ? invalidRuleDrafts.add(turn.id) : invalidRuleDrafts.delete(turn.id)
+                "
+              />
             </details>
           </div>
         </el-collapse-item>

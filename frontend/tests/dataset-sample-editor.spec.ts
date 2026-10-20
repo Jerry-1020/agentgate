@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Real components/API converters with private SQLite persistence; the object contract test aborts its write.
+// Real components/API converters with private SQLite persistence.
 let server: ViteDevServer;
 let backend: ChildProcess;
 let temporaryDirectory: string;
@@ -29,12 +29,14 @@ const fixture = `<!doctype html><html><head><title>Sample editor acceptance</tit
 import { createApp, h, ref, onMounted } from 'vue';
 import ElementPlus from 'element-plus';
 import SampleEditor from '/src/views/datasets/components/SampleEditor.vue';
+import SampleImportWizard from '/src/views/datasets/components/SampleImportWizard.vue';
 import { datasetApi } from '/src/api/datasets.ts';
 import { blankSample } from '/src/views/datasets/utils/sample-import.ts';
 import '/node_modules/element-plus/dist/index.css';
+import '/src/styles/revision.scss';
 const datasetId = new URLSearchParams(location.search).get('dataset');
 createApp({ setup() {
-  const item = ref(null), draft = ref(null), editable = ref(true), error = ref(''), dirty = ref(false);
+  const item = ref(null), draft = ref(null), editable = ref(true), error = ref(''), dirty = ref(false), wizardOpen = ref(false);
   async function load() {
     draft.value = new URLSearchParams(location.search).has('published')
       ? (await datasetApi.versions(datasetId)).find(version => version.status === 'published')
@@ -57,14 +59,17 @@ createApp({ setup() {
     } catch (e) { error.value = String(e); }
   }
   onMounted(() => load().catch(e => error.value = String(e)));
-  return () => h('main', [
+  return () => h('main', { class: 'revision-app' }, [
     h('h1', 'Sample editor acceptance'),
     h('span', { 'data-testid': 'dirty' }, String(dirty.value)),
     h('p', { role: 'alert' }, error.value),
     h('button', { onClick: load }, 'Reload server sample'),
+    h('button', { onClick: () => wizardOpen.value = true }, 'Open manual sample wizard'),
     h(SampleEditor, { item: item.value, editable: editable.value, persisted: !!draft.value?.cases.length,
       onSave: save, onDirtyChange: value => dirty.value = value }),
     h('button', { onClick: publish }, 'Publish acceptance draft'),
+    wizardOpen.value ? h(SampleImportWizard, { datasetId, datasetName: 'Acceptance dataset',
+      onClose: () => wizardOpen.value = false, onImported: load }) : null,
   ]);
 } }).use(ElementPlus).mount('#app');
 </script></body></html>`;
@@ -173,10 +178,45 @@ async function open(page: Page, kind?: Kind) {
   return datasetId;
 }
 
-async function valueInput(page: Page) {
-  const advanced = page.locator('details.advanced');
-  if (!(await advanced.evaluate(element => (element as HTMLDetailsElement).open))) await advanced.locator('summary').first().click();
-  return advanced.getByPlaceholder('期望值，支持 JSON', { exact: true });
+function expectationRow(page: Page, index = 0) {
+  return page.getByTestId(`expectation-${index}`);
+}
+
+async function namedExpectation(page: Page, name: string) {
+  const rows = page.locator('.expectation-row');
+  const names = await rows.getByPlaceholder('检查名称（可选）').evaluateAll(
+    inputs => inputs.map(input => (input as HTMLInputElement).value),
+  );
+  const index = names.indexOf(name);
+  expect(index, `Expected a visible rule named ${name}`).toBeGreaterThanOrEqual(0);
+  return rows.nth(index);
+}
+
+function expectationInput(page: Page, field: 'value' | 'path' | 'tool' | 'allowed' | 'schema', index = 0) {
+  return page.getByTestId(`expectation-${field}-${index}`);
+}
+
+function valueInput(page: Page, _kind: Kind) {
+  return expectationInput(page, 'value');
+}
+
+function editorText(_kind: Kind, expected: unknown) {
+  return JSON.stringify(expected);
+}
+
+async function addExpectation(page: Page, kind: Kind | 'output') {
+  const index = await page.locator('.expectation-row').count();
+  await page.getByTestId('add-expectation').click();
+  await page.getByRole('menuitem', {
+    name: { state: '最终状态', tool_argument: '工具参数', output: '最终输出' }[kind], exact: true,
+  }).click();
+  await expect(page.locator('.expectation-row')).toHaveCount(index + 1);
+  return index;
+}
+
+async function selectCondition(page: Page, index: number, label: string) {
+  await expectationRow(page, index).locator('.expectation-fields .el-select').last().click();
+  await page.getByRole('option', { name: label, exact: true }).click();
 }
 
 async function typeRaw(input: Locator, text: string) {
@@ -246,12 +286,7 @@ test('workflow Case initialization and complete JSON turns persist and publish',
     await expect(page.getByLabel(`初始化变量名 ${index + 1}`, { exact: true })).toHaveValue(variable.name);
     await expect(page.getByLabel(`初始化变量值 ${index + 1}`, { exact: true })).toHaveValue(variable.value);
   }
-  await page.getByRole('button', { name: '对话预览', exact: true }).click();
-  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toBeDisabled();
-  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeDisabled();
-  await expect(page.getByRole('button', { name: '添加变量', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /^删除初始化变量 \d+$/ })).toHaveCount(0);
-  await page.getByRole('button', { name: '编辑', exact: true }).click();
+  await expect(page.getByRole('button', { name: '对话预览', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeEnabled();
   const published = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
@@ -275,14 +310,11 @@ test('workflow initialization starts collapsed and keeps values when collapsed a
   const summary = section.locator('summary');
   await expect(summary).toHaveText('初始变量');
   await expect(section).toHaveJSProperty('open', false);
-  const summaryStyles = await page.locator('details.case-initialization > summary, details.advanced > summary')
-    .evaluateAll(elements => elements.map(element => {
-      const style = getComputedStyle(element);
-      return ['color', 'font-size', 'font-weight', 'display', 'list-style-type']
-        .map(property => style.getPropertyValue(property));
-    }));
-  expect(summaryStyles).toHaveLength(2);
-  expect(summaryStyles[0]).toEqual(summaryStyles[1]);
+  await expect(summary).toHaveCSS('color', 'rgb(0, 127, 105)');
+  await expect(summary).toHaveCSS('font-size', '12px');
+  await expect(summary).toHaveCSS('font-weight', '400');
+  await expect(summary).toHaveCSS('display', 'list-item');
+  await expect(summary).toHaveCSS('list-style-type', 'disclosure-closed');
   await summary.press('Enter');
   await expect(section).toHaveJSProperty('open', true);
   await addInitializationVariable(page, 'centreId', '810000');
@@ -416,10 +448,6 @@ test('base initialization saves both variable groups and excludes workflow field
   await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('提示词变量值 1', { exact: true })).toHaveValue('hk_yat');
   await expect(page.getByLabel('工具变量值 1', { exact: true })).toHaveValue('810000');
-  await page.getByRole('button', { name: '对话预览', exact: true }).click();
-  await expect(types.getByRole('button', { name: '工作流', exact: true })).toBeDisabled();
-  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: '编辑', exact: true }).click();
   const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
   expect((await publication).ok()).toBeTruthy();
@@ -504,9 +532,6 @@ test('hidden annotations survive editing and reloading without changing other tu
   await page.reload();
   await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(saved.name);
   await expectAnnotationInputsAbsent(page);
-  await page.getByRole('button', { name: '对话预览', exact: true }).click();
-  await expectAnnotationInputsAbsent(page);
-  await page.getByRole('button', { name: '编辑', exact: true }).click();
   await page.getByLabel('样本分类', { exact: true }).selectOption('boundary');
   expect((await save(page, datasetId)).turns[0].extensions).toEqual(extensions);
 });
@@ -546,7 +571,6 @@ test('hidden annotations stay with each turn and survive publication', async ({ 
   await page.reload();
   await expect(page.getByLabel('样本名称', { exact: true })).toHaveValue(original.name);
   await page.getByRole('button', { name: /第 2 轮/ }).click();
-  await page.getByRole('button', { name: '对话预览', exact: true }).click();
   await expectAnnotationInputsAbsent(page);
   const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
   await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
@@ -564,6 +588,102 @@ test('hidden annotations stay with each turn and survive publication', async ({ 
   await test.info().attach('annotations-hidden-published', {
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
   });
+});
+
+test('removed extension controls remain absent while each turn retains its stored data', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const extensions = [
+    { key: 'background', value: '第一轮背景' },
+    { key: 'custom_variables', value: '{"cust_id":"001"}\n保持原文' },
+    { key: 'custom', value: 'keep' },
+  ];
+  const seeded = {
+    ...original,
+    turns: [
+      { ...original.turns[0], extensions },
+      { id: 'second-turn', input: { query: '第二轮输入' }, notes: '', expectations: [],
+        extensions: [{ key: 'background', value: '第二轮背景' },
+          { key: 'custom_variables', value: 'channel=mobile' }] },
+    ],
+  };
+  expect((await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: seeded,
+  })).ok()).toBeTruthy();
+  await page.reload();
+  for (const label of ['背景知识', '自定义变量'])
+    await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '对话预览', exact: true })).toHaveCount(0);
+  await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
+  await page.getByLabel('样本名称', { exact: true }).fill('Renamed sample');
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮修改');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  const saved = await save(page, datasetId);
+  expect(saved.turns.map((turn: any) => turn.extensions)).toEqual(seeded.turns.map(turn => turn.extensions));
+  expect(saved.turns[0].expectations).toEqual(original.turns[0].expectations);
+  expect(saved.turns[1].input).toEqual({ query: '第二轮修改' });
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await page.reload();
+  for (const label of ['背景知识', '自定义变量'])
+    await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('用户输入', { exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '保存样本', exact: true })).toHaveCount(0);
+  const published = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+  expect(published.ok()).toBeTruthy();
+  expect((await published.json()).data.cases[0].turns.map((turn: any) => turn.extensions))
+    .toEqual(seeded.turns.map(turn => turn.extensions));
+});
+
+test('editing the primary expected output preserves every visible secondary condition', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const secondary = [
+    { id: 'regex-output', name: '保留正则', kind: 'output', path: 'answer',
+      condition: { kind: 'matches_pattern', pattern: '^old$' } },
+    { id: 'range-output', name: '保留区间', kind: 'output', path: 'score',
+      condition: { kind: 'within_range', minimum: 0, maximum: 1 } },
+    { id: 'missing-output', name: '保留缺失', kind: 'output', path: 'secret',
+      condition: { kind: 'must_be_missing' } },
+  ];
+  const primary = { id: 'primary-output', name: '完整输出', kind: 'output', path: null,
+    condition: { kind: 'equals', expected: 'old answer' } };
+  const rules = [...original.turns[0].expectations, ...secondary, primary];
+  expect((await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: [{ ...original.turns[0], expectations: rules }] },
+  })).ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('old answer');
+  await expect(page.locator('.expectation-row')).toHaveCount(5);
+  await expect((await namedExpectation(page, '完整输出')).getByTestId(/^expectation-value-/)).toHaveValue('"old answer"');
+  await expect(expectationInput(page, 'path', 1)).toHaveValue('answer');
+  await expect(expectationRow(page, 1).getByPlaceholder('正则表达式')).toHaveValue('^old$');
+  await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
+  await page.getByLabel('期望输出', { exact: true }).fill('new answer');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([
+    ...rules.slice(0, -1), { ...primary, condition: { kind: 'equals', expected: 'new answer' } },
+  ]);
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('new answer');
+});
+
+test('user input is required and expected output stays optional', async ({ page }) => {
+  const datasetId = await open(page);
+  const input = page.getByLabel('用户输入', { exact: true });
+  await expect(input).toHaveAttribute('aria-required', 'true');
+  await expect(page.locator('.message-card.user header')).toContainText('用户输入 *');
+  await expect(page.locator('.message-card.expected header')).toContainText('期望输出');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role="alert"]')).toContainText('用户输入不能为空');
+  expect((await (await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`)).json()).data.cases)
+    .toHaveLength(0);
+  await input.fill('只提供用户输入');
+  const saved = await save(page, datasetId, 'POST');
+  expect(saved.turns[0].input).toEqual({ txt: '只提供用户输入' });
+  expect(saved.turns[0].expectations).toEqual([]);
 });
 
 test('classification saves negative, reopens, changes to boundary and becomes read-only when published', async ({ page }) => {
@@ -594,55 +714,80 @@ test('classification saves negative, reopens, changes to boundary and becomes re
 
 for (const kind of ['state', 'tool_argument'] as const) {
   for (const action of ['Backspace', 'Delete', 'clear'] as const) {
-    test(`${kind} permits ${action} without reinserting JSON quotes`, async ({ page }) => {
+    test(`${kind} permits ${action} without reformatting incomplete JSON`, async ({ page }) => {
       const datasetId = await open(page, kind);
-      const input = await valueInput(page);
-      await expect(input).toHaveValue('"abcd"');
+      const input = valueInput(page, kind);
+      const original = editorText(kind, 'abcd');
+      await expect(input).toHaveValue(original);
       if (action === 'clear') {
         await input.press('ControlOrMeta+A');
         await input.press('Backspace');
         await expect(input).toHaveValue('');
       } else {
-        await input.press(action === 'Backspace' ? 'End' : 'Home');
+        await input.press('ControlOrMeta+A');
+        await input.press(action === 'Backspace' ? 'ArrowRight' : 'ArrowLeft');
         await input.press(action);
-        await expect(input).toHaveValue(action === 'Backspace' ? '"abcd' : 'abcd"');
+        await expect(input).toHaveValue(action === 'Backspace' ? original.slice(0, -1) : original.slice(1));
       }
-      const text = '拒绝 C:\\path "quoted"';
-      await typeRaw(input, text);
+      const expected = '拒绝 C:\\path "quoted"';
+      const raw = editorText(kind, expected);
+      await typeRaw(input, raw);
       const saved = await save(page, datasetId);
-      expect(saved.turns[0].expectations.find((rule: any) => rule.id === 'editable-rule').condition.expected).toBe(text);
+      expect(saved.turns[0].expectations.find((rule: any) => rule.id === 'editable-rule'))
+        .toEqual({ ...sample(kind).turns[0].expectations[0], condition: { kind: 'equals', expected } });
       await page.reload();
-      await expect(await valueInput(page)).toHaveValue(JSON.stringify(text));
+      await expect(valueInput(page, kind)).toHaveValue(raw);
     });
   }
 
-  test(`${kind} incrementally types JSON and persists its actual types across reloads`, async ({ page }) => {
+  test(`${kind} persists typed values while retaining field metadata`, async ({ page }) => {
     test.setTimeout(90000);
     const datasetId = await open(page, kind);
-    const values = [
-      { text: '"quoted string"', expected: 'quoted string' },
-      { text: String.raw`"C:\\temp\\file"`, expected: 'C:\\temp\\file' },
-      { text: '0', expected: 0 },
-      { text: '12.5', expected: 12.5 },
-      { text: 'true', expected: true },
-      { text: 'false', expected: false },
-      { text: 'null', expected: null },
-      { text: '[0,true,null,["x",[false,2]]]', expected: [0, true, null, ['x', [false, 2]]] },
-      { text: '{"unfinished":', expected: '{"unfinished":' },
-    ];
+    const values = ['quoted string', 'C:\\temp\\file', 0, 12.5, true, false, null,
+      [0, true, null, ['x', [false, 2]]]];
     for (const value of values) {
-      await typeRaw(await valueInput(page), value.text);
+      const raw = editorText(kind, value);
+      await typeRaw(valueInput(page, kind), raw);
       await expect(page.getByTestId('dirty')).toHaveText('true');
-      if (value.text === '{"unfinished":') {
-        await page.screenshot({ path: test.info().outputPath(kind + '-incomplete-json.png'), fullPage: true });
-      }
       const saved = await save(page, datasetId);
       const expected = sample(kind);
-      expected.turns[0].expectations[0].condition.expected = value.expected as any;
+      expected.turns[0].expectations[0].condition.expected = value as any;
       expect(saved).toEqual(expected);
       await page.reload();
-      await expect(await valueInput(page)).toHaveValue(JSON.stringify(value.expected));
+      await expect(valueInput(page, kind)).toHaveValue(raw);
     }
+  });
+
+  test(`${kind} blocks invalid JSON from saving or abandoning the current turn`, async ({ page }) => {
+    const datasetId = await open(page, kind);
+    const raw = '{"unfinished":';
+    await typeRaw(valueInput(page, kind), raw);
+    await page.getByLabel('样本名称', { exact: true }).fill('Unsaved name');
+    await expect(valueInput(page, kind)).toHaveValue(raw);
+    await expect(page.getByTestId('dirty')).toHaveText('true');
+    await page.getByRole('button', { name: '保存样本', exact: true }).click();
+    await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('JSON');
+    await page.getByRole('button', { name: '添加新轮次' }).click();
+    await expect(page.locator('.round')).toHaveCount(1);
+    await expect(valueInput(page, kind)).toHaveValue(raw);
+    const persisted = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
+    expect((await persisted.json()).data.cases[0]).toEqual(sample(kind));
+  });
+
+  test(`${kind} is read-only with matching fields after publication`, async ({ page }) => {
+    await open(page, kind);
+    const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+    await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+    expect((await publication).ok()).toBeTruthy();
+    await page.reload();
+    await expect(valueInput(page, kind)).toHaveValue(editorText(kind, 'abcd'));
+    await expect(valueInput(page, kind)).toBeDisabled();
+    await expect(expectationInput(page, 'path')).toBeDisabled();
+    if (kind === 'tool_argument') await expect(expectationInput(page, 'tool')).toBeDisabled();
+    await expect(page.getByRole('button', { name: '保存样本', exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('add-expectation')).toHaveCount(0);
+    await expect(expectationRow(page).getByRole('button', { name: '删除', exact: true })).toHaveCount(0);
+    await expect(page.getByText('期望评估方式', { exact: true })).toHaveCount(0);
   });
 }
 
@@ -651,51 +796,477 @@ test('saving untouched state and tool rules preserves metadata and all other exp
     const datasetId = await open(page, kind);
     expect(await save(page, datasetId)).toEqual(sample(kind));
     await page.reload();
-    await expect(await valueInput(page)).toHaveValue('"abcd"');
+    await expect(valueInput(page, kind)).toHaveValue(editorText(kind, 'abcd'));
   }
 });
 
-test('cleared expected value remains blank through unrelated edits and persists an empty string', async ({ page }) => {
+test('deleting a final state rule preserves other checks across unrelated edits', async ({ page }) => {
   const datasetId = await open(page, 'state');
-  const input = await valueInput(page);
-  await typeRaw(input, '');
+  await expectationRow(page).getByRole('button', { name: '删除', exact: true }).click();
   await page.getByLabel('样本名称', { exact: true }).fill('Renamed sample');
-  await expect(input).toHaveValue('');
+  await expect(page.locator('.expectation-row')).toHaveCount(0);
   const saved = await save(page, datasetId);
   expect(saved.name).toBe('Renamed sample');
-  expect(saved.turns[0].expectations[0].condition.expected).toBe('');
+  expect(saved.turns[0].expectations).toEqual([sample('state').turns[0].expectations[1]]);
   await page.reload();
-  await expect(await valueInput(page)).toHaveValue('""');
+  await expect(page.locator('.expectation-row')).toHaveCount(0);
+  await expect(page.getByText('暂无字段、状态或输出期望')).toBeVisible();
+});
+
+test('tool argument rules require a tool and path and can be explicitly removed', async ({ page }) => {
+  const datasetId = await open(page, 'tool_argument');
+  await expectationInput(page, 'tool').fill('');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('工具名');
+  await expectationInput(page, 'tool').fill('lookup');
+  await expectationInput(page, 'path').fill('');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('路径');
+  await expectationRow(page).getByRole('button', { name: '删除', exact: true }).click();
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([sample('tool_argument').turns[0].expectations[1]]);
+  await page.reload();
+  await expect(page.locator('.expectation-row')).toHaveCount(0);
 });
 
 test('server replacement of the same expectation ID refreshes its raw editor value', async ({ page }) => {
   const datasetId = await open(page, 'tool_argument');
-  await typeRaw(await valueInput(page), '{"local":');
+  await typeRaw(valueInput(page, 'tool_argument'), '{"local":');
   const replacement = sample('tool_argument');
   replacement.turns[0].expectations[0].condition.expected = 'server replacement';
   const updated = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/acceptance-case`, { data: replacement });
   expect(updated.ok()).toBeTruthy();
   await page.getByRole('button', { name: 'Reload server sample', exact: true }).click();
-  await expect(await valueInput(page)).toHaveValue('"server replacement"');
+  await expect(valueInput(page, 'tool_argument')).toHaveValue(editorText('tool_argument', 'server replacement'));
   expect(await save(page, datasetId)).toEqual(replacement);
 });
 
-test('nested JSON objects remain raw while editing and reach the API as typed objects', async ({ page }) => {
-  // Object persistence has a separate existing backend serializer bug. Abort only this
-  // request after observing the real editor/API conversion; never simulate a saved object.
+test('nested JSON objects remain raw while editing and persist as typed objects', async ({ page }) => {
   for (const kind of ['state', 'tool_argument'] as const) {
     const datasetId = await open(page, kind);
-    const input = await valueInput(page);
-    const raw = '{"items":[0,true,null,{"name":"x"}]}';
+    const input = valueInput(page, kind);
+    const expected = { items: [0, true, null, { name: 'x' }] };
+    const raw = editorText(kind, expected);
     await typeRaw(input, raw);
-    const path = `/api/datasets/${datasetId}/drafts/cases/acceptance-case`;
-    await page.route('**' + path, route => route.abort('aborted'));
-    const submitted = page.waitForRequest(request => request.method() === 'PUT' && request.url().endsWith(path));
-    await page.getByRole('button', { name: '保存样本', exact: true }).click();
-    const body = (await submitted).postDataJSON();
-    expect(body.turns[0].expectations[0].condition.expected).toEqual({ items: [0, true, null, { name: 'x' }] });
+    const saved = await save(page, datasetId);
+    expect(saved.turns[0].expectations[0].condition.expected).toEqual(expected);
     await expect(input).toHaveValue(raw);
-    const persisted = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
-    expect((await persisted.json()).data.cases[0]).toEqual(sample(kind));
+    await page.reload();
+    await expect(valueInput(page, kind)).toHaveValue(raw);
+    expect(await save(page, datasetId)).toEqual(saved);
   }
+});
+
+test('all three expectation kinds are created through the editor, reloaded and published with other sample fields', async ({ page }) => {
+  const datasetId = await open(page);
+  await page.getByLabel('样本名称', { exact: true }).fill('完整期望手动创建');
+  await page.getByLabel('样本分类', { exact: true }).selectOption('boundary');
+  await page.getByLabel('用户输入', { exact: true }).fill('检查完整期望');
+  await page.getByLabel('期望输出', { exact: true }).fill('基本完整输出');
+  await addInitializationVariable(page, 'centreId', '810000');
+  await page.getByLabel('必需工具（逗号分隔）').fill('lookup');
+  await page.getByLabel('禁止工具（逗号分隔）').fill('erase');
+  await page.getByLabel('期望 Skill', { exact: true }).fill('review');
+  await expect(page.getByText('期望结果', { exact: true })).toBeVisible();
+  await expect(page.locator('.simple-expectations')).toHaveCount(0);
+
+  const stateIndex = await addExpectation(page, 'state');
+  await expectationRow(page, stateIndex).getByPlaceholder('检查名称（可选）').fill('状态确认');
+  await expectationInput(page, 'path', stateIndex).fill('status');
+  await expectationInput(page, 'value', stateIndex).fill('"done"');
+  const toolIndex = await addExpectation(page, 'tool_argument');
+  await expectationRow(page, toolIndex).getByPlaceholder('检查名称（可选）').fill('工具参数确认');
+  await expectationInput(page, 'tool', toolIndex).fill('lookup');
+  await expectationInput(page, 'path', toolIndex).fill('arguments.limit');
+  await expectationInput(page, 'value', toolIndex).fill('10');
+  const outputIndex = await addExpectation(page, 'output');
+  await expectationRow(page, outputIndex).getByPlaceholder('检查名称（可选）').fill('输出字段确认');
+  await expectationInput(page, 'path', outputIndex).fill('answer');
+  await expectationInput(page, 'value', outputIndex).fill('"通过"');
+
+  const saved = await save(page, datasetId, 'POST');
+  expect(saved.name).toBe('完整期望手动创建');
+  expect(saved.category).toBe('boundary');
+  expect(saved.initial_state).toEqual({ config_variables: [{ name: 'centreId', value: '810000' }] });
+  expect(saved.turns[0].input).toEqual({ txt: '检查完整期望' });
+  expect(saved.turns[0].expectations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'state', name: '状态确认', path: 'status', condition: { kind: 'equals', expected: 'done' } }),
+    expect.objectContaining({ kind: 'tool_argument', name: '工具参数确认', tool: 'lookup', path: 'arguments.limit', occurrence: 'last', condition: { kind: 'equals', expected: 10 } }),
+    expect.objectContaining({ kind: 'output', name: '输出字段确认', path: 'answer', condition: { kind: 'equals', expected: '通过' } }),
+    expect.objectContaining({ kind: 'output', path: null, condition: { kind: 'equals', expected: '基本完整输出' } }),
+    expect.objectContaining({ kind: 'skill_route', condition: { kind: 'equals', expected: 'review' } }),
+    expect.objectContaining({ kind: 'tool_call', tool: 'lookup', mode: 'required' }),
+    expect.objectContaining({ kind: 'tool_call', tool: 'erase', mode: 'forbidden' }),
+  ]));
+  expect(saved.turns[0].expectations).toHaveLength(7);
+  await page.reload();
+  await expect(page.locator('.expectation-row')).toHaveCount(4);
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('基本完整输出');
+  await expect((await namedExpectation(page, '状态确认')).getByTestId(/^expectation-value-/)).toHaveValue('"done"');
+  await expect((await namedExpectation(page, '工具参数确认')).getByTestId(/^expectation-value-/)).toHaveValue('10');
+  await expect((await namedExpectation(page, '输出字段确认')).getByTestId(/^expectation-value-/)).toHaveValue('"通过"');
+  expect(await save(page, datasetId)).toEqual(saved);
+  await expect(page.getByTestId('add-expectation')).toHaveCSS('color', 'rgb(7, 172, 142)');
+  const screenshots = await mkdtemp(join(tmpdir(), 'agentgate-expectations-review-'));
+  await page.screenshot({ path: join(screenshots, 'expectations-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 720, height: 1000 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({ path: join(screenshots, 'expectations-narrow.png'), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  console.log('Expectation review screenshots: ' + screenshots);
+
+  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+  expect((await publication).ok()).toBeTruthy();
+  await page.reload();
+  for (let index = 0; index < 4; index++) {
+    await expect(expectationInput(page, 'path', index)).toBeDisabled();
+    await expect(expectationInput(page, 'value', index)).toBeDisabled();
+  }
+  await expect(page.getByTestId('add-expectation')).toHaveCount(0);
+  const published = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+  expect(published.ok()).toBeTruthy();
+  expect((await published.json()).data.cases[0]).toEqual(saved);
+});
+
+test('manual creation wizard saves the same full expectation controls', async ({ page }) => {
+  const datasetId = await open(page);
+  await page.getByRole('button', { name: 'Open manual sample wizard', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: '下一步', exact: true }).click();
+  await dialog.getByLabel('样本名称', { exact: true }).fill('向导完整期望');
+  await dialog.getByLabel('用户输入', { exact: true }).fill('通过向导创建');
+  await dialog.getByLabel('期望输出', { exact: true }).fill('向导基本输出');
+  await expect(dialog.getByText('期望结果', { exact: true })).toBeVisible();
+  const stateIndex = await dialog.locator('.expectation-row').count();
+  await dialog.getByTestId('add-expectation').click();
+  await page.getByRole('menuitem', { name: '最终状态', exact: true }).click();
+  await dialog.getByTestId(`expectation-path-${stateIndex}`).fill('status');
+  await dialog.getByTestId(`expectation-value-${stateIndex}`).fill('"done"');
+  const outputIndex = await dialog.locator('.expectation-row').count();
+  await dialog.getByTestId('add-expectation').click();
+  await page.getByRole('menuitem', { name: '最终输出', exact: true }).click();
+  await dialog.getByTestId(`expectation-path-${outputIndex}`).fill('answer');
+  await dialog.getByTestId(`expectation-value-${outputIndex}`).fill('"附加答案"');
+  const response = page.waitForResponse(response => response.request().method() === 'POST' &&
+    response.url().includes(`/api/datasets/${datasetId}/drafts/cases`));
+  await dialog.getByRole('button', { name: '保存样本', exact: true }).click();
+  expect((await response).ok()).toBeTruthy();
+  await expect(dialog.getByText('创建完成', { exact: false })).toBeVisible();
+  const draft = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
+  const saved = (await draft.json()).data.cases;
+  expect(saved).toHaveLength(1);
+  expect(saved[0].name).toBe('向导完整期望');
+  expect(saved[0].turns[0].expectations).toHaveLength(3);
+  expect(saved[0].turns[0].expectations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ kind: 'state', path: 'status', condition: { kind: 'equals', expected: 'done' } }),
+    expect.objectContaining({ kind: 'output', path: 'answer', condition: { kind: 'equals', expected: '附加答案' } }),
+    expect.objectContaining({ kind: 'output', path: null, condition: { kind: 'equals', expected: '向导基本输出' } }),
+  ]));
+});
+
+test('primary output and additional output edits and deletions do not overwrite each other', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const primary = { id: 'primary', name: '基本输出', kind: 'output', path: null,
+    condition: { kind: 'equals', expected: 'old answer' } };
+  const secondary = { id: 'secondary', name: '输出正则', kind: 'output', path: 'answer',
+    condition: { kind: 'matches_pattern', pattern: '^old$' } };
+  const removed = { id: 'removed', name: '删除输出', kind: 'output', path: 'old_field',
+    condition: { kind: 'must_be_missing' } };
+  const rules = [...original.turns[0].expectations, primary, secondary, removed];
+  expect((await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, turns: [{ ...original.turns[0], expectations: rules }] },
+  })).ok()).toBeTruthy();
+  await page.reload();
+  await page.getByLabel('期望输出', { exact: true }).fill('new answer');
+  await (await namedExpectation(page, '输出正则')).getByPlaceholder('正则表达式').fill('^new$');
+  await (await namedExpectation(page, '输出正则')).getByTestId(/^expectation-path-/).fill('response.answer');
+  await (await namedExpectation(page, '删除输出')).getByRole('button', { name: '删除', exact: true }).click();
+  const added = await addExpectation(page, 'output');
+  await expectationInput(page, 'path', added).fill('private');
+  await selectCondition(page, added, '字段不存在');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations.slice(0, 4)).toEqual([
+    ...original.turns[0].expectations,
+    { ...primary, condition: { kind: 'equals', expected: 'new answer' } },
+    { ...secondary, path: 'response.answer', condition: { kind: 'matches_pattern', pattern: '^new$' } },
+  ]);
+  expect(saved.turns[0].expectations).toHaveLength(5);
+  expect(saved.turns[0].expectations[4]).toMatchObject({ kind: 'output', path: 'private', condition: { kind: 'must_be_missing' } });
+  expect(saved.turns[0].expectations.some((rule: any) => rule.id === 'removed')).toBeFalsy();
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('new answer');
+  await expect((await namedExpectation(page, '输出正则')).getByPlaceholder('正则表达式')).toHaveValue('^new$');
+  await page.getByLabel('期望输出', { exact: true }).fill('');
+  const cleared = await save(page, datasetId);
+  expect(cleared.turns[0].expectations).toEqual(saved.turns[0].expectations.filter((rule: any) => rule.id !== 'primary'));
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('');
+  await expect(page.locator('.expectation-row')).toHaveCount(3);
+});
+
+test('changing a rule kind retains identity and each turn keeps its own expectations', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  await expectationRow(page).locator('.expectation-row-head .el-select').click();
+  await page.getByRole('option', { name: '工具参数', exact: true }).click();
+  await expectationInput(page, 'tool').fill('lookup');
+  await expectationInput(page, 'path').fill('arguments.status');
+  await expectationInput(page, 'value').fill('"changed"');
+  await page.getByRole('button', { name: '添加新轮次' }).click();
+  await page.getByLabel('用户输入', { exact: true }).fill('第二轮');
+  const secondRule = await addExpectation(page, 'output');
+  await expectationInput(page, 'path', secondRule).fill('ok');
+  await expectationInput(page, 'value', secondRule).fill('true');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  await expect(expectationInput(page, 'tool')).toHaveValue('lookup');
+  await expect(expectationInput(page, 'value')).toHaveValue('"changed"');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0]).toEqual({
+    ...sample('state').turns[0].expectations[0], kind: 'tool_argument', tool: 'lookup',
+    occurrence: 'last', path: 'arguments.status', condition: { kind: 'equals', expected: 'changed' },
+  });
+  expect(saved.turns[0].expectations[1]).toEqual(sample('state').turns[0].expectations[1]);
+  expect(saved.turns[1].expectations).toEqual([
+    expect.objectContaining({ kind: 'output', path: 'ok', condition: { kind: 'equals', expected: true } }),
+  ]);
+  await page.reload();
+  await page.getByRole('button', { name: /第 2 轮/ }).click();
+  await expect(expectationInput(page, 'value')).toHaveValue('true');
+  await expectationInput(page, 'value').fill('[1,');
+  await page.getByRole('button', { name: /第 1 轮/ }).click();
+  await expect(page.getByLabel('用户输入', { exact: true })).toHaveValue('第二轮');
+  await expect(expectationInput(page, 'value')).toHaveValue('[1,');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('JSON');
+  await expectationRow(page).getByRole('button', { name: '删除', exact: true }).click();
+  const removed = await save(page, datasetId);
+  expect(removed.turns[0]).toEqual(saved.turns[0]);
+  expect(removed.turns[1].expectations).toEqual([]);
+});
+
+test('non-equality output rules stay visible and leave the optional basic output empty', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const secondary = [
+    { id: 'regex-full-output', name: '完整输出模式', kind: 'output', path: null,
+      condition: { kind: 'matches_pattern', pattern: '(?P<answer>yes|no)' } },
+    { id: 'range-output', name: '评分范围', kind: 'output', path: 'score',
+      condition: { kind: 'within_range', minimum: 0, maximum: 1 } },
+    { id: 'set-output', name: '集合检查', kind: 'output', path: 'choice',
+      condition: { kind: 'one_of', allowed: ['a,b', [0, false, null], { nested: { enabled: true } }] } },
+    { id: 'schema-output', name: '输出结构', kind: 'output', path: 'answer',
+      condition: { kind: 'matches_json_schema', json_schema: { type: 'object', required: ['text'] } } },
+  ];
+  const seeded = { ...original, turns: [{ ...original.turns[0], expectations: [...original.turns[0].expectations, ...secondary] }] };
+  const seededResponse = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, { data: seeded });
+  expect(seededResponse.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('');
+  await expect(page.locator('.expectation-row')).toHaveCount(5);
+  await expect(expectationRow(page, 1).getByPlaceholder('正则表达式')).toHaveValue('(?P<answer>yes|no)');
+  expect(JSON.parse(await expectationInput(page, 'allowed', 3).inputValue())).toEqual(secondary[2].condition.allowed);
+  expect(JSON.parse(await expectationInput(page, 'schema', 4).inputValue())).toEqual(secondary[3].condition.json_schema);
+  expect(await save(page, datasetId)).toEqual(seeded);
+  await expectationInput(page, 'path', 1).fill(' ');
+  await expectationInput(page, 'allowed', 3).fill('[0,false,"text,with,commas",[1,2],{"limit":2}]');
+  await expectationInput(page, 'schema', 4).fill('{"type":"object","required":["answer"]}');
+  const edited = await save(page, datasetId);
+  expect(edited.turns[0].expectations.find((rule: any) => rule.id === 'regex-full-output')).toEqual(secondary[0]);
+  expect(edited.turns[0].expectations.find((rule: any) => rule.id === 'set-output')?.condition)
+    .toEqual({ kind: 'one_of', allowed: [0, false, 'text,with,commas', [1, 2], { limit: 2 }] });
+  expect(edited.turns[0].expectations.find((rule: any) => rule.id === 'schema-output')?.condition)
+    .toEqual({ kind: 'matches_json_schema', json_schema: { type: 'object', required: ['answer'] } });
+  await page.reload();
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('');
+  expect(await save(page, datasetId)).toEqual(edited);
+});
+
+test('condition controls validate raw collections, numeric bounds and schema without losing rule identity', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const row = expectationRow(page);
+  const error = page.locator('.sample-editor > [role="alert"]');
+  const clickSave = () => page.getByRole('button', { name: '保存样本', exact: true }).click();
+  const fillNumber = async (placeholder: string, value: string) => {
+    const input = row.getByPlaceholder(placeholder, { exact: true });
+    await input.fill(value);
+    await input.press('Tab');
+  };
+  await selectCondition(page, 0, '属于集合');
+  await expectationInput(page, 'allowed').fill('[1,');
+  await clickSave();
+  await expect(error).toContainText('JSON');
+  await expect(expectationInput(page, 'allowed')).toHaveValue('[1,');
+  await expect(page.getByTestId('dirty')).toHaveText('true');
+  await expectationInput(page, 'allowed').fill('[]');
+  await clickSave();
+  await expect(error).not.toBeEmpty();
+  await expectationInput(page, 'allowed').fill('[{"a":1,"b":2},{"b":2,"a":1}]');
+  await clickSave();
+  await expect(error).toContainText('不能重复');
+  await expectationInput(page, 'allowed').fill('[0,false,"a,b",[1,2]]');
+  let saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0]).toEqual({
+    ...sample('state').turns[0].expectations[0],
+    condition: { kind: 'one_of', allowed: [0, false, 'a,b', [1, 2]] },
+  });
+  await selectCondition(page, 0, '数值范围');
+  await clickSave();
+  await expect(error).not.toBeEmpty();
+  await fillNumber('最小值', '10');
+  await fillNumber('最大值', '5');
+  await clickSave();
+  await expect(error).not.toBeEmpty();
+  await fillNumber('最小值', '1');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0].condition).toEqual({ kind: 'within_range', minimum: 1, maximum: 5 });
+  await selectCondition(page, 0, '数值容差');
+  await fillNumber('期望值', '4.5');
+  await fillNumber('容差', '0.2');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0].condition).toEqual({ kind: 'within_tolerance', expected: 4.5, epsilon: 0.2 });
+  await selectCondition(page, 0, '正则匹配');
+  await row.getByPlaceholder('正则表达式').fill('^done$');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0].condition).toEqual({ kind: 'matches_pattern', pattern: '^done$' });
+  await selectCondition(page, 0, '字段不存在');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0].condition).toEqual({ kind: 'must_be_missing' });
+  await selectCondition(page, 0, 'JSON Schema');
+  await expectationInput(page, 'schema').fill('{"type":');
+  await clickSave();
+  await expect(error).toContainText('JSON');
+  await expectationInput(page, 'schema').fill('[]');
+  await clickSave();
+  await expect(error).not.toBeEmpty();
+  await expectationInput(page, 'schema').fill('{"type":"string"}');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0]).toEqual({
+    ...sample('state').turns[0].expectations[0], condition: { kind: 'matches_json_schema', json_schema: { type: 'string' } },
+  });
+  expect(saved.turns[0].expectations[1]).toEqual(sample('state').turns[0].expectations[1]);
+});
+
+test('state paths are required while plain text equality and an omitted check name remain supported', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  await expectationRow(page).getByPlaceholder('检查名称（可选）').fill('');
+  await expectationInput(page, 'path').fill(' ');
+  await expectationInput(page, 'value').fill('普通文本，无需 JSON 引号');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('路径');
+  await expectationInput(page, 'path').fill('status');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0]).toEqual({
+    ...sample('state').turns[0].expectations[0], name: null,
+    condition: { kind: 'equals', expected: '普通文本，无需 JSON 引号' },
+  });
+  await page.reload();
+  await expect(expectationInput(page, 'value')).toHaveValue('"普通文本，无需 JSON 引号"');
+});
+
+test('full-output rules keep their editing controls and synchronize with the basic output without duplication', async ({ page }) => {
+  const datasetId = await open(page);
+  await page.getByLabel('用户输入', { exact: true }).fill('完整输出生命周期');
+  const index = await addExpectation(page, 'output');
+  await expectationRow(page, index).getByPlaceholder('检查名称（可选）').fill('完整输出规则');
+  await expectationInput(page, 'value', index).fill('"first answer"');
+  const created = await save(page, datasetId, 'POST');
+  expect(created.turns[0].expectations).toHaveLength(1);
+  const originalRule = created.turns[0].expectations[0];
+  expect(originalRule).toMatchObject({ kind: 'output', name: '完整输出规则', path: null,
+    condition: { kind: 'equals', expected: 'first answer' } });
+  await page.reload();
+  await expect(page.locator('.expectation-row')).toHaveCount(1);
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('first answer');
+  await expect(expectationRow(page).getByRole('button', { name: '删除', exact: true })).toBeVisible();
+  await expect(expectationRow(page).getByPlaceholder('检查名称（可选）')).toHaveValue('完整输出规则');
+  await page.getByLabel('期望输出', { exact: true }).fill('second answer');
+  let saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([
+    { ...originalRule, condition: { kind: 'equals', expected: 'second answer' } },
+  ]);
+  await expect(expectationInput(page, 'value')).toHaveValue('"second answer"');
+  await expectationInput(page, 'value').fill('"third answer"');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([
+    { ...originalRule, condition: { kind: 'equals', expected: 'third answer' } },
+  ]);
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('third answer');
+  await expectationRow(page).getByPlaceholder('检查名称（可选）').fill('完整输出模式');
+  await selectCondition(page, 0, '正则匹配');
+  await expectationRow(page).getByPlaceholder('正则表达式').fill('^third');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual([
+    { ...originalRule, name: '完整输出模式', condition: { kind: 'matches_pattern', pattern: '^third' } },
+  ]);
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('');
+  await expect(expectationRow(page).getByPlaceholder('正则表达式')).toHaveValue('^third');
+  await expectationInput(page, 'path').fill('answer');
+  saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations[0].path).toBe('answer');
+  expect(saved.turns[0].expectations[0].id).toBe(originalRule.id);
+  await expectationRow(page).getByRole('button', { name: '删除', exact: true }).click();
+  expect((await save(page, datasetId)).turns[0].expectations).toEqual([]);
+  await page.reload();
+  await expect(page.locator('.expectation-row')).toHaveCount(0);
+  await expect(page.getByLabel('期望输出', { exact: true })).toHaveValue('');
+  await addExpectation(page, 'output');
+  const emptyOutput = await save(page, datasetId);
+  expect(emptyOutput.turns[0].expectations).toEqual([
+    expect.objectContaining({ kind: 'output', path: null, condition: { kind: 'equals', expected: '' } }),
+  ]);
+  await page.reload();
+  await expect(page.locator('.expectation-row')).toHaveCount(1);
+  await expect(expectationInput(page, 'value')).toHaveValue('""');
+});
+
+test('non-finite JSON numbers cannot silently become null in saved expectation values', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const submitted: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'PUT' && request.url().includes(`/api/datasets/${datasetId}/drafts/cases`))
+      submitted.push(request.url());
+  });
+  for (const raw of ['1e400', '-1e400', '[1e400]', '{"value":1e400}', '{"nested":[1e400]}']) {
+    await expectationInput(page, 'value').fill(raw);
+    await page.getByRole('button', { name: '保存样本', exact: true }).click();
+    await expect(page.locator('.sample-editor > [role="alert"]')).not.toBeEmpty();
+    await expect(expectationInput(page, 'value')).toHaveValue(raw);
+    await expect(page.getByTestId('dirty')).toHaveText('true');
+    await page.getByRole('button', { name: '添加新轮次' }).click();
+    await expect(page.locator('.round')).toHaveCount(1);
+  }
+  expect(submitted).toEqual([]);
+  const persisted = await page.request.get(baseUrl + `/api/datasets/${datasetId}/drafts/current`);
+  expect((await persisted.json()).data.cases[0]).toEqual(sample('state'));
+  await expectationInput(page, 'value').fill('7');
+  expect((await save(page, datasetId)).turns[0].expectations[0].condition)
+    .toEqual({ kind: 'equals', expected: 7 });
+});
+
+test('editing the basic output preserves an invalid JSON draft in another rule and keeps saving blocked', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const submitted: string[] = [];
+  page.on('request', request => {
+    if (request.method() === 'PUT' && request.url().includes(`/api/datasets/${datasetId}/drafts/cases`))
+      submitted.push(request.url());
+  });
+  const unfinished = '{"unfinished":';
+  await expectationInput(page, 'value').fill(unfinished);
+  await page.getByLabel('期望输出', { exact: true }).fill('new basic answer');
+  await expect(expectationInput(page, 'value')).toHaveValue(unfinished);
+  await expect(page.getByTestId('dirty')).toHaveText('true');
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor > [role="alert"]')).toContainText('JSON');
+  await page.getByRole('button', { name: '添加新轮次' }).click();
+  await expect(page.locator('.round')).toHaveCount(1);
+  await expect(expectationInput(page, 'value')).toHaveValue(unfinished);
+  expect(submitted).toEqual([]);
+  await expectationInput(page, 'value').fill('"fixed state"');
+  const saved = await save(page, datasetId);
+  expect(saved.turns[0].expectations).toEqual(expect.arrayContaining([
+    { ...sample('state').turns[0].expectations[0], condition: { kind: 'equals', expected: 'fixed state' } },
+    expect.objectContaining({ kind: 'output', path: null, condition: { kind: 'equals', expected: 'new basic answer' } }),
+  ]));
+  expect(saved.turns[0].expectations).toHaveLength(3);
 });

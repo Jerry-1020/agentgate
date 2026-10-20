@@ -270,6 +270,14 @@ def discard_draft(dataset_id: str, dependencies: Dependencies) -> None:
         raise_not_found(error)
 
 
+@router.delete("/{dataset_id}/versions/{version}", status_code=204)
+def delete_published_version(dataset_id: str, version: int, dependencies: Dependencies) -> None:
+    try:
+        dependencies.datasets.delete_published_version(dataset_id, version)
+    except ValueError as error:
+        raise_not_found(error)
+
+
 @router.post("/{dataset_id}/drafts/publish")
 def publish_draft(dataset_id: str, dependencies: Dependencies):
     try:

@@ -3,8 +3,8 @@ import type { CaseTurn } from '../../datasets/types';
 import { displayValue } from './task-report';
 
 export const annotationObjects = [
-  { key: 'dataset', title: '测评集人工标注' },
-  { key: 'evaluator', title: '评估器人工标注' },
+  { key: 'dataset', title: '测评集标注' },
+  { key: 'evaluator', title: '评估器标注' },
 ] as const;
 export function originalExpectedAnswer(turn?: CaseTurn): string {
   const expectations = (turn?.original_expectations ?? turn?.expectations ?? []).filter(

@@ -11,7 +11,6 @@ import {
   type RunProgress,
 } from '../../../api/evaluations';
 import { readTaskLinks, refreshTaskLinks, includeCurrentTaskRuns } from '../utils/task-links';
-import { downloadCsv } from '../utils/task-report';
 import { taskTitle } from '../utils/dashboard-data';
 const emit = defineEmits<{
   create: [];
@@ -37,8 +36,28 @@ let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false;
 const link = (id: string) => links.value.find((t) => t.runIds.includes(id));
 const title = (r: EvaluationRun) => taskTitle(r, link(r.id)?.kind, link(r.id)?.name);
-const previousRunIds = computed(() => new Set(links.value.flatMap(t => t.previousRunIds ?? [])));
+const previousRunIds = computed(() => new Set(links.value.flatMap((t) => t.previousRunIds ?? [])));
 const createdAt = (r: EvaluationRun) => link(r.id)?.createdAt ?? r.created_at;
+const identityColumns = ['target', 'dataset'] as const;
+function comparisonSides(r: EvaluationRun, column: (typeof identityColumns)[number]) {
+  return (link(r.id)?.runIds ?? []).map((id, index) => {
+    const manifest = runs.value.find((run) => run.id === id)?.manifest;
+    return {
+      id,
+      label: index === 0 ? 'A' : 'B',
+      name: !manifest
+        ? '运行记录待加载'
+        : column === 'target'
+          ? manifest.target.display_name
+          : manifest.dataset.dataset_name,
+      version: !manifest
+        ? '—'
+        : column === 'target'
+          ? manifest.target.ref.external_version_id
+          : `v${manifest.dataset.version}`,
+    };
+  });
+}
 function state(r: EvaluationRun) {
   const states = (link(r.id)?.runIds ?? [r.id]).map(
     (id) => runs.value.find((x) => x.id === id)?.status,
@@ -64,7 +83,9 @@ const filtered = computed(() =>
           : state(r) === status.value)) &&
       (!taskTab.value || (link(r.id)?.kind ?? 'single') === taskTab.value) &&
       (!kind.value || (link(r.id)?.kind ?? 'single') === kind.value) &&
-      `${title(r)} ${link(r.id)?.id ?? r.id} ${r.id}`.toLowerCase().includes(query.value.toLowerCase()) &&
+      `${title(r)} ${link(r.id)?.id ?? r.id} ${r.id}`
+        .toLowerCase()
+        .includes(query.value.toLowerCase()) &&
       (!from.value || Date.parse(createdAt(r)) >= Date.parse(from.value + 'T00:00:00')) &&
       (!to.value || Date.parse(createdAt(r)) <= Date.parse(to.value + 'T23:59:59.999')) &&
       (!days.value ||
@@ -94,7 +115,11 @@ function strategy(r: EvaluationRun) {
       specs
         .filter((s: any) => r.manifest.primary_evaluator_ids.includes(s.id))
         .map((s: any) =>
-          s.kind === 'rule' ? '规则评估' : s.kind === 'llm_judge' ? 'LLM 评估' : '复合评估',
+          s.kind === 'rule'
+            ? '规则评估'
+            : ['llm_judge', 'llm_group'].includes(s.kind)
+              ? 'LLM 评估'
+              : '复合评估',
         ),
     ),
   ].join(' + ');
@@ -118,25 +143,6 @@ async function deleteTask(id: string) {
   }
 }
 
-function exportTasks(ids?: string[]) {
-  downloadCsv(
-    [
-      ['任务名称', '被测Agent', '测评集', '状态', '评估方式', '得分', '创建时间'],
-      ...filtered.value
-        .filter((r) => !ids || ids.includes(r.id))
-        .map((r) => [
-          title(r),
-          r.manifest.target.display_name,
-          r.manifest.dataset.dataset_name,
-          statusLabel(state(r)),
-          strategy(r),
-          score(reports.value[r.id]?.metrics.find((m) => m.level === 'overall')?.score ?? null),
-          createdAt(r),
-        ]),
-    ],
-    '测评任务.csv',
-  );
-}
 async function details() {
   for (let start = 0; start < rows.value.length; start += 4) {
     if (disposed) return;
@@ -280,10 +286,16 @@ onUnmounted(() => {
               />
             </td>
             <td class="name-cell">
-              <button class="link" :title="title(r)" @click="emit('navigate', 'tasks/' + (link(r.id)?.id ?? r.id))">
+              <button
+                class="link"
+                :title="title(r)"
+                @click="emit('navigate', 'tasks/' + (link(r.id)?.id ?? r.id))"
+              >
                 {{ title(r) }}</button
               ><small>{{ new Date(createdAt(r)).toLocaleString() }}</small>
-              <small v-if="link(r.id)?.previousRunIds?.length">已重跑 {{ link(r.id)!.previousRunIds!.length }} 次</small>
+              <small v-if="link(r.id)?.previousRunIds?.length"
+                >已重跑 {{ link(r.id)!.previousRunIds!.length }} 次</small
+              >
             </td>
             <td>
               <span>{{
@@ -294,17 +306,59 @@ onUnmounted(() => {
                     : '单任务'
               }}</span>
             </td>
-            <td>
-              <span class="primary-text" :title="r.manifest.target.display_name">{{
-                r.manifest.target.display_name
-              }}</span
-              ><small>{{ r.manifest.target.ref.external_version_id }}</small>
-            </td>
-            <td>
-              <span class="primary-text" :title="r.manifest.dataset.dataset_name">{{
-                r.manifest.dataset.dataset_name
-              }}</span
-              ><small>v{{ r.manifest.dataset.version }}</small>
+            <td v-for="column in identityColumns" :key="column">
+              <el-tooltip
+                v-if="link(r.id)?.kind === 'ab'"
+                placement="top"
+                effect="light"
+                :trigger="['hover', 'focus']"
+                :enterable="false"
+                :hide-after="0"
+              >
+                <template #content>
+                  <div class="ab-tooltip">
+                    <div
+                      v-for="side in comparisonSides(r, column)"
+                      :key="side.id"
+                      class="ab-tooltip-row"
+                    >
+                      <span class="ab-side">{{ side.label }}</span>
+                      <div>
+                        <div>{{ side.name }}</div>
+                        <div class="ab-tooltip-version">{{ side.version }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <div class="ab-summary" tabindex="0">
+                  <span
+                    v-for="side in comparisonSides(r, column)"
+                    :key="side.id"
+                    class="primary-text"
+                  >
+                    {{ side.label }}：{{ side.name }}（{{ side.version }}）
+                  </span>
+                </div>
+              </el-tooltip>
+              <template v-else>
+                <span
+                  class="primary-text"
+                  :title="
+                    column === 'target'
+                      ? r.manifest.target.display_name
+                      : r.manifest.dataset.dataset_name
+                  "
+                  >{{
+                    column === 'target'
+                      ? r.manifest.target.display_name
+                      : r.manifest.dataset.dataset_name
+                  }}</span
+                ><small>{{
+                  column === 'target'
+                    ? r.manifest.target.ref.external_version_id
+                    : `v${r.manifest.dataset.version}`
+                }}</small>
+              </template>
             </td>
             <td>
               <span>{{ strategy(r) }}</span>
@@ -343,8 +397,7 @@ onUnmounted(() => {
               >
             </td>
             <td class="row-actions">
-              <button class="link" @click="exportTasks([r.id])">导出</button
-              ><button
+              <button
                 v-if="
                   (link(r.id)?.kind ?? 'single') === 'single' &&
                   ['pending', 'running', 'scheduled'].includes(r.status)
@@ -355,10 +408,25 @@ onUnmounted(() => {
                 取消
               </button>
               <button
-                v-if="(link(r.id)?.kind ?? 'single') === 'single' && ['completed', 'failed', 'cancelled'].includes(r.status)"
+                v-if="
+                  (link(r.id)?.kind ?? 'single') === 'single' &&
+                  ['completed', 'failed', 'cancelled'].includes(r.status)
+                "
                 class="link"
                 @click="emit('action', r.id, 'rerun')"
-              >重跑</button>
+              >
+                重跑
+              </button>
+              <button
+                v-if="
+                  link(r.id)?.kind === 'ab' &&
+                  ['completed', 'failed', 'cancelled'].includes(state(r))
+                "
+                type="button"
+                class="link"
+              >
+                重跑
+              </button>
               <button class="link danger" @click="deleteTask(link(r.id)?.id ?? r.id)">删除</button>
             </td>
           </tr>
@@ -440,7 +508,7 @@ onUnmounted(() => {
 }
 .data-table {
   width: 100%;
-  min-width: 0;
+  min-width: 1100px;
   table-layout: fixed;
   font-size: 13px;
 }
@@ -474,6 +542,39 @@ onUnmounted(() => {
   white-space: nowrap;
   line-height: 22px;
   padding: 16px 6px;
+}
+.ab-summary {
+  cursor: default;
+}
+.ab-summary:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+}
+.ab-tooltip {
+  max-width: min(420px, calc(100vw - 48px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 22px;
+}
+.ab-tooltip-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+.ab-tooltip-row + .ab-tooltip-row {
+  margin-top: 10px;
+}
+.ab-side {
+  text-align: center;
+  border-radius: 4px;
+  color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+  font-weight: 600;
+}
+.ab-tooltip-version {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .data-table .row-actions {
   white-space: normal;

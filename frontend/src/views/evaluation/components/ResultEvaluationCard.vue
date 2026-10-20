@@ -3,11 +3,15 @@ import { computed } from 'vue';
 import type { EvaluationResult } from '../../../api/client';
 import { metricLabel, pretty, score, statusLabel } from '../../../api/evaluations';
 import { equalsCondition, needsAttention } from '../utils/report-presentation';
+import type { WeightedChildResult } from '../utils/task-report';
 
 const props = defineProps<{
   result: EvaluationResult;
   primary: boolean;
   turns: { id: string }[];
+  childResults?: WeightedChildResult[];
+  subEvaluator?: boolean;
+  weight?: number | null;
 }>();
 const checks = computed(() =>
   [...props.result.checks].sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a))),
@@ -26,11 +30,21 @@ const turnLabel = (id: string | null) => {
   >
     <header class="evaluation-heading">
       <div>
-        <h4>{{ metricLabel(result.metric) }}</h4>
+        <h4>
+          {{
+            subEvaluator || result.evaluator_kind === 'llm_group'
+              ? result.evaluator_name
+              : metricLabel(result.metric)
+          }}
+        </h4>
         <p class="muted evaluator-reference">
           {{ result.evaluator_name }} ·
           {{ result.evaluator_version ? 'v' + result.evaluator_version : '版本未记录'
-          }}<span v-if="!primary"> · 辅助评估项</span>
+          }}<span v-if="subEvaluator">
+            · 子评估器<span v-if="weight != null">
+              · 权重 {{ Number((weight * 100).toFixed(2)) }}%</span
+            ></span
+          ><span v-else-if="!primary"> · 辅助评估项</span>
         </p>
       </div>
       <div class="evaluation-score">
@@ -46,14 +60,33 @@ const turnLabel = (id: string | null) => {
           >{{ statusLabel(result.outcome) }}</span
         >
         <small v-if="result.score != null && result.outcome !== 'not_applicable'" class="muted"
-          >本评估器 {{ score(result.score) }} / 100</small
+          >{{ result.evaluator_kind === 'llm_group' ? '综合得分' : '本评估器' }}
+          {{ score(result.score) }} / 100</small
         >
       </div>
     </header>
-    <p v-if="!checks.length || result.outcome === 'error'" class="result-reason">
+    <p
+      v-if="!checks.length || result.outcome === 'error' || result.evaluator_kind === 'llm_group'"
+      class="result-reason"
+    >
       {{ result.reason || '未返回检查明细' }}
     </p>
-    <div v-if="checks.length" class="check-table-wrap">
+    <section v-if="childResults?.length" class="child-results" aria-label="子评估器结果">
+      <h5>子评估器结果</h5>
+      <ResultEvaluationCard
+        v-for="child in childResults"
+        :key="child.result.evaluator_id"
+        :result="child.result"
+        :primary="false"
+        :sub-evaluator="true"
+        :weight="child.weight"
+        :turns="turns"
+      />
+    </section>
+    <p v-if="subEvaluator && checks.length" class="result-reason">
+      {{ checks.map((c) => c.reason).join('；') }}
+    </p>
+    <div v-if="checks.length && result.evaluator_kind !== 'llm_group'" class="check-table-wrap">
       <table class="check-comparison">
         <thead>
           <tr>
@@ -194,6 +227,15 @@ const turnLabel = (id: string | null) => {
 }
 .result-reason {
   font-size: 13px;
+}
+.child-results {
+  margin: 12px 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--el-color-primary-light-7);
+}
+.child-results h5 {
+  margin: 0 0 8px;
+  font-size: 14px;
 }
 @media (max-width: 768px) {
   .evaluation-heading {

@@ -8,14 +8,17 @@ import math
 import os
 import time
 from collections.abc import Mapping
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
+from threading import Event
 from typing import Any, Literal
 from urllib.parse import quote, urlencode, urlparse
 from uuid import uuid4
 
 import requests
 
-from agentgate.domain import TargetType, Trace, TraceSpan, utcnow
+from agentgate.domain import CaseTurn, TargetType, Trace, TraceSpan, utcnow
 from agentgate.integrations.observability.trace_server import (
     InbankTraceSettings,
     TraceServerClient,
@@ -33,6 +36,7 @@ from agentgate.integrations.targets.inbank.evidence import (
     output_only_turn_span,
 )
 from agentgate.run.target_protocol import (
+    CaseExecutionPending,
     CaseExecutionRequest,
     CaseExecutionResult,
     CaseExecutionStatus,
@@ -142,6 +146,7 @@ def wait_for_pod_ready(
     http=None,
     sleep=time.sleep,
     monotonic=time.monotonic,
+    request_timeout: float = 10,
 ) -> bool:
     http = http or requests
     url = _url(
@@ -151,7 +156,7 @@ def wait_for_pod_ready(
     start = monotonic()
     while monotonic() - start < max_wait:
         try:
-            with http.get(url, timeout=10) as resp:
+            with http.get(url, timeout=request_timeout) as resp:
                 resp.raise_for_status()
                 data = resp.json()
             inner = data.get("data") if isinstance(data, dict) else None
@@ -244,7 +249,9 @@ class AgentChatClient:
             "data": data,
         }
 
-    def init_session(self, prompt_variables: list, tool_variables: list | None = None) -> str:
+    def init_session(
+        self, prompt_variables: list, tool_variables: list | None = None, *, timeout: float = 30,
+    ) -> str:
         url = _url(
             self.base_url, f"/agent-api/{quote(self.agent_name, safe='')}/chatabc/init_session"
         )
@@ -263,7 +270,7 @@ class AgentChatClient:
                 url,
                 http=self.http,
                 json=payload,
-                timeout=30,
+                timeout=timeout,
                 headers=self._common_headers(),
             )
             if result.get("status") == "success":
@@ -440,7 +447,12 @@ class ChatABCSettings:
     request_timeout_seconds: float = 180.0
     health_wait_seconds: float = 300.0
     health_poll_interval_seconds: float = 5.0
+    create_timeout_seconds: float = 60.0
+    init_timeout_seconds: float = 30.0
+    delete_timeout_seconds: float = 60.0
+    health_request_timeout_seconds: float = 10.0
     debug_sse_failures: bool = False
+    total_timeout_seconds: float = 0.0
     trace_settings: InbankTraceSettings = field(default_factory=InbankTraceSettings)
 
     def __post_init__(self) -> None:
@@ -458,6 +470,8 @@ class ChatABCSettings:
             "request_timeout_seconds",
             "health_wait_seconds",
             "health_poll_interval_seconds",
+            "create_timeout_seconds", "delete_timeout_seconds", "health_request_timeout_seconds",
+            "init_timeout_seconds",
         ):
             if getattr(self, field_name) <= 0:
                 raise ValueError(f"{field_name} must be greater than zero")
@@ -497,8 +511,12 @@ class InbankChatABCTargetAdapter:
         self._run_id: str | None = None
         self._agent_name: str | None = None
         self._pod_name: str | None = None
-        self._statuses: dict[str, CaseExecutionStatus] = {}
-        self._results: dict[str, CaseExecutionResult] = {}
+        self._pool: ThreadPoolExecutor | None = None
+        self._futures: dict[str, Future[CaseExecutionResult]] = {}
+        self._cancelled: dict[str, Event] = {}
+        self._session_tails: dict[str, Future[CaseExecutionResult]] = {}
+        self._deadline: float | None = None
+        self._preparation_failures: set[str] = set()
         self._pod_lifecycle = {
             "create": "not_attempted",
             "health": "not_attempted",
@@ -519,85 +537,107 @@ class InbankChatABCTargetAdapter:
 
     def start(self, request: CaseExecutionRequest) -> str:
         self._validate_request(request)
-        handle = request.execution_id
-        if handle in self._statuses:
-            raise TargetExecutionError("invalid_request", "duplicate execution ID")
         if self._closed:
             raise TargetExecutionError("invalid_request", "adapter is closed")
-
-        self._statuses[handle] = CaseExecutionStatus.RUNNING
-        started = time.monotonic()
-        LOGGER.info(
-            "inbank_case_start adapter=chatabc run_id=%r case_id=%r "
-            "execution_id=%r turn_count=%d timeout_seconds=%.3f",
-            request.run_id,
-            request.case.id,
-            handle,
-            len(request.case.turns),
-            request.timeout_seconds,
-        )
+        if (request.execution_id in self._preparation_failures
+                or request.execution_id in self._futures):
+            raise TargetExecutionError("invalid_request", "duplicate execution ID")
         try:
             self._ensure_pod(request)
-            result = self._execute_case(request)
-        except TargetExecutionError as exc:
-            self._statuses[handle] = CaseExecutionStatus.FAILED
-            LOGGER.error(
-                "inbank_case_failed adapter=chatabc run_id=%r case_id=%r "
-                "execution_id=%r elapsed_ms=%.1f error_code=%s",
-                request.run_id,
-                request.case.id,
-                handle,
-                (time.monotonic() - started) * 1000,
-                exc.code,
-            )
+        except TargetExecutionError:
+            self._preparation_failures.add(request.execution_id)
             raise
-        except Exception as exc:
-            self._statuses[handle] = CaseExecutionStatus.FAILED
-            LOGGER.exception(
-                "inbank_case_failed adapter=chatabc run_id=%r case_id=%r "
-                "execution_id=%r elapsed_ms=%.1f error_type=%s",
-                request.run_id,
-                request.case.id,
-                handle,
-                (time.monotonic() - started) * 1000,
-                type(exc).__name__,
-            )
-            raise TargetExecutionError(
-                "protocol_error",
-                f"ChatABC execution failed ({type(exc).__name__})",
-            ) from None
-        self._results[handle] = result
-        self._statuses[handle] = CaseExecutionStatus.COMPLETED
-        LOGGER.info(
-            "inbank_case_complete adapter=chatabc run_id=%r case_id=%r "
-            "execution_id=%r elapsed_ms=%.1f",
-            request.run_id,
-            request.case.id,
-            handle,
-            (time.monotonic() - started) * 1000,
-        )
+        if not self._futures:
+            if request.max_parallel_cases > 1:
+                self._pool = ThreadPoolExecutor(max_workers=request.max_parallel_cases)
+            if self.settings.total_timeout_seconds > 0:
+                self._deadline = self._monotonic() + self.settings.total_timeout_seconds
+        handle = request.execution_id
+        self._cancelled[handle] = Event()
+        previous = self._session_tails.get(request.case.id)
+
+        def run() -> CaseExecutionResult:
+            if previous is not None:
+                try:
+                    previous.result()
+                except (TargetExecutionError, CancelledError):
+                    LOGGER.debug("Continuing Case %r after a prior failure", request.case.id)
+            self._check_cancelled(handle)
+            LOGGER.info("inbank_case_start adapter=%s run_id=%r case_id=%r execution_id=%r",
+                        self.adapter_type, request.run_id, request.case.id, handle)
+            try:
+                result = self._execute_case(request)
+                self._check_cancelled(handle)
+                LOGGER.info("inbank_case_complete adapter=%s run_id=%r case_id=%r failed=%s",
+                            self.adapter_type, request.run_id, request.case.id,
+                            result.error is not None)
+                return result
+            except TargetExecutionError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - sanitize at the adapter boundary.
+                raise TargetExecutionError(
+                    "protocol_error", f"Case execution failed ({type(exc).__name__})"
+                ) from None
+
+        # Customer workflow&bianpai.py submits complete sessions, not individual turns.
+        if self._pool is None:
+            future: Future[CaseExecutionResult] = Future()
+            self._futures[handle] = future
+            try:
+                future.set_result(run())
+            except Exception as exc:
+                future.set_exception(exc)
+                raise
+        else:
+            future = self._pool.submit(run)
+            self._futures[handle] = future
+        self._session_tails[request.case.id] = future
         return handle
 
-    def get_status(self, handle: str) -> CaseExecutionStatus:
+    def _future(self, handle: str) -> Future[CaseExecutionResult]:
         try:
-            return self._statuses[handle]
+            return self._futures[handle]
         except KeyError:
             raise TargetExecutionError("invalid_request", "unknown execution") from None
+
+    def get_status(self, handle: str) -> CaseExecutionStatus:
+        if handle in self._preparation_failures:
+            return CaseExecutionStatus.FAILED
+        future = self._future(handle)
+        if self._cancelled[handle].is_set() or future.cancelled():
+            return CaseExecutionStatus.CANCELLED
+        if not future.done():
+            return CaseExecutionStatus.RUNNING
+        if future.exception() is not None or future.result().error is not None:
+            return CaseExecutionStatus.FAILED
+        return CaseExecutionStatus.COMPLETED
 
     def wait(self, handle: str, timeout_seconds: float) -> CaseExecutionResult:
         if timeout_seconds <= 0:
             raise TargetExecutionError("invalid_request", "timeout must be positive")
-        if self.get_status(handle) is not CaseExecutionStatus.COMPLETED:
-            raise TargetExecutionError("protocol_error", "execution is not complete")
-        return self._results[handle]
+        future = self._future(handle)
+        self._check_cancelled(handle)
+        try:
+            return future.result(timeout=min(timeout_seconds, 0.1))
+        except TimeoutError:
+            raise CaseExecutionPending() from None
+        except CancelledError:
+            raise TargetExecutionError("cancelled", "Case execution was cancelled") from None
+
+    def _check_cancelled(self, handle: str) -> None:
+        if self._cancelled[handle].is_set():
+            raise TargetExecutionError("cancelled", "Case execution was cancelled")
+
+    def _before_turn(self, request: CaseExecutionRequest) -> None:
+        self._check_cancelled(request.execution_id)
+        if self._deadline is not None and self._monotonic() > self._deadline:
+            raise TargetExecutionError("timeout", "Overall evaluation timeout exceeded")
 
     def cancel(self, handle: str) -> None:
-        status = self.get_status(handle)
-        if status in {
-            CaseExecutionStatus.PENDING,
-            CaseExecutionStatus.RUNNING,
-        }:
-            self._statuses[handle] = CaseExecutionStatus.CANCELLED
+        future = self._future(handle)
+        if not future.done():
+            self._cancelled[handle].set()
+            future.cancel()
 
     def close(self) -> None:
         """Best-effort, idempotent cleanup through the unified manager API."""
@@ -605,13 +645,19 @@ class InbankChatABCTargetAdapter:
         if self._closed:
             return
         self._closed = True
+        for handle in self._futures:
+            self.cancel(handle)
+        if self._pool is not None:
+            self._pool.shutdown(wait=True, cancel_futures=True)
         agent_name = self._agent_name
         self._agent_name = None
         if agent_name is None:
             return
         self._pod_lifecycle["delete"] = "started"
         try:
-            result = delete_agent_pod(agent_name, self._cfg, http=self._http)
+            result = delete_agent_pod(
+                agent_name, self._cfg, timeout=self.settings.delete_timeout_seconds, http=self._http,
+            )
             if not result["success"]:
                 raise TargetExecutionError(result["error_code"], result["error"])
             self._pod_lifecycle["delete"] = "succeeded"
@@ -647,6 +693,7 @@ class InbankChatABCTargetAdapter:
             self._cfg,
             http=self._http,
             sleep=self._sleep,
+            timeout=self.settings.create_timeout_seconds,
         )
         if not result["success"]:
             self._pod_lifecycle["create"] = "failed"
@@ -658,7 +705,7 @@ class InbankChatABCTargetAdapter:
         self._log_pod_lifecycle("create", "succeeded")
         self._pod_lifecycle["health"] = "started"
         try:
-            self._wait_until_healthy(request.timeout_seconds)
+            self._wait_until_healthy()
         except Exception:
             self._pod_lifecycle["health"] = "failed"
             self._log_pod_lifecycle("health", "failed")
@@ -666,16 +713,17 @@ class InbankChatABCTargetAdapter:
         self._pod_lifecycle["health"] = "succeeded"
         self._log_pod_lifecycle("health", "succeeded")
 
-    def _wait_until_healthy(self, case_timeout_seconds: float) -> None:
+    def _wait_until_healthy(self) -> None:
         assert self._agent_name is not None
         if not wait_for_pod_ready(
             self._agent_name,
             self._cfg,
             self.settings.health_poll_interval_seconds,
-            min(case_timeout_seconds, self.settings.health_wait_seconds),
+            self.settings.health_wait_seconds,
             http=self._http,
             sleep=self._sleep,
             monotonic=self._monotonic,
+            request_timeout=self.settings.health_request_timeout_seconds,
         ):
             raise TargetExecutionError("timeout", "Agent Pod health check timed out")
 
@@ -691,12 +739,27 @@ class InbankChatABCTargetAdapter:
             sleep=self._sleep,
             headers=self._pod_headers(request.traceparent),
         )
-        session_id = client.init_session(
-            initial.get("config_variables", [])
-            if arrange_type == "workflow"
-            else initial.get("prompt_variables", []),
-            initial.get("tool_variables", []) if arrange_type == "base" else [],
-        )
+        try:
+            session_id = client.init_session(
+                initial.get("config_variables", [])
+                if arrange_type == "workflow"
+                else initial.get("prompt_variables", []),
+                initial.get("tool_variables", []) if arrange_type == "base" else [],
+                timeout=self.settings.init_timeout_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001 - retain the customer's per-session failure boundary.
+            error = exc if isinstance(exc, TargetExecutionError) else TargetExecutionError(
+                "protocol_error", f"Session initialization failed ({type(exc).__name__})"
+            )
+            if error.code in {"cancelled", "invalid_request"}:
+                raise error
+            spans, outcomes = [], {}
+            for turn in request.case.turns:
+                span, outcomes[turn.id] = _failed_turn_evidence(
+                    request, turn, error, started_at=utcnow(), adapter=arrange_type,
+                )
+                spans.append(span.model_copy(update={"sequence": len(spans)}))
+            return _case_execution_result(request, spans, outcomes)
         LOGGER.info(
             "inbank_session_ready adapter=chatabc run_id=%r case_id=%r "
             "arrange_type=%s session_id=%r",
@@ -711,97 +774,105 @@ class InbankChatABCTargetAdapter:
         outcomes: dict[str, dict[str, Any]] = {}
         project_id = request.target.ref.external_target_id
         for sequence, turn in enumerate(request.case.turns):
-            turn_input = turn.input.to_dict()
-            question = _chatabc_question(turn_input, input_field)
             started_at = utcnow()
-            answer, full_answer, error, _duration, _chat_events, request_id = client.chat_stream(
-                session_id,
-                question,
-                timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds),
-            )
-            if error:
-                if self.settings.debug_sse_failures:
-                    LOGGER.error(
-                        "inbank_sse_failure adapter=chatabc run_id=%r case_id=%r "
-                        "turn_id=%r request_id=%r session_id=%r response_body=%r",
-                        request.run_id,
-                        request.case.id,
-                        turn.id,
-                        request_id,
-                        session_id,
-                        full_answer[:8192],
-                    )
-                code, _, detail = error.partition(": ")
-                raise TargetExecutionError(code, detail)
-            ended_at = utcnow()
-            final_output = {"output": answer}
-            outcomes[turn.id] = {
-                "input": turn_input,
-                "output": final_output,
-                "state": {},
-            }
-            LOGGER.info(
-                "inbank_trace_query adapter=chatabc arrange_type=%s run_id=%r "
-                "case_id=%r turn_id=%r project_id=%r request_id=%r output_chars=%d",
-                arrange_type,
-                request.run_id,
-                request.case.id,
-                turn.id,
-                project_id,
-                request_id,
-                len(answer),
-            )
-            events: list[dict] = []
             try:
-                events = self._fetch_trace_events(
+                self._before_turn(request)
+                turn_input = turn.input.to_dict()
+                question = _chatabc_question(turn_input, input_field)
+                started_at = utcnow()
+                answer, full_answer, error, _duration, _chat_events, request_id = client.chat_stream(
+                    session_id,
+                    question,
+                    timeout=min(request.timeout_seconds, self.settings.request_timeout_seconds),
+                )
+                if error:
+                    if self.settings.debug_sse_failures:
+                        LOGGER.error(
+                            "inbank_sse_failure adapter=chatabc run_id=%r case_id=%r "
+                            "turn_id=%r request_id=%r session_id=%r response_body=%r",
+                            request.run_id,
+                            request.case.id,
+                            turn.id,
+                            request_id,
+                            session_id,
+                            full_answer[:8192],
+                        )
+                    code, _, detail = error.partition(": ")
+                    raise TargetExecutionError(code, detail)
+                self._check_cancelled(request.execution_id)
+                ended_at = utcnow()
+                final_output = {"output": answer}
+                outcomes[turn.id] = {
+                    "input": turn_input,
+                    "output": final_output,
+                    "state": {},
+                }
+                LOGGER.info(
+                    "inbank_trace_query adapter=chatabc arrange_type=%s run_id=%r "
+                    "case_id=%r turn_id=%r project_id=%r request_id=%r output_chars=%d",
+                    arrange_type,
+                    request.run_id,
+                    request.case.id,
+                    turn.id,
                     project_id,
                     request_id,
-                    customer_task_id=_task_id_from_run_id(request.run_id),
-                    final_output=final_output,
-                    timeout=min(
-                        request.timeout_seconds,
-                        self.settings.request_timeout_seconds,
-                        self.settings.trace_settings.wait_seconds,
-                    ),
+                    len(answer),
                 )
-                turn_spans = normalize_turn_evidence(
-                    request, turn, project_id=project_id, request_id=request_id, events=events,
+                events: list[dict] = []
+                try:
+                    events = self._fetch_trace_events(
+                        project_id,
+                        request_id,
+                        customer_task_id=_task_id_from_run_id(request.run_id),
+                        final_output=final_output,
+                        timeout=min(
+                            request.timeout_seconds,
+                            self.settings.request_timeout_seconds,
+                            self.settings.trace_settings.wait_seconds,
+                        ),
+                    )
+                    turn_spans = normalize_turn_evidence(
+                        request, turn, project_id=project_id, request_id=request_id, events=events,
+                    )
+                    outcomes[turn.id]["state"] = json.loads(
+                        turn_spans[0].attributes["agentgate.turn.state"]
+                    )
+                except TargetExecutionError as exc:
+                    turn_spans = (output_only_turn_span(
+                        request, turn, adapter=arrange_type, project_id=project_id,
+                        request_id=request_id, started_at=started_at, ended_at=ended_at, error=exc,
+                    ),)
+                for span in turn_spans:
+                    spans.append(span.model_copy(update={"sequence": len(spans)}))
+                LOGGER.info(
+                    "inbank_turn_complete adapter=chatabc run_id=%r case_id=%r "
+                    "turn_id=%r sequence=%d request_id=%r response_bytes=%d "
+                    "output_chars=%d trace_project_id=%r source_trace_id=%r "
+                    "trace_event_count=%d evidence_mode=%s elapsed_ms=%.1f",
+                    request.run_id,
+                    request.case.id,
+                    turn.id,
+                    sequence,
+                    request_id,
+                    len(full_answer.encode("utf-8")),
+                    len(answer),
+                    project_id,
+                    request_id,
+                    len(events),
+                    turn_spans[0].attributes["inbank.evidence_mode"],
+                    (ended_at - started_at).total_seconds() * 1000,
                 )
-                outcomes[turn.id]["state"] = json.loads(
-                    turn_spans[0].attributes["agentgate.turn.state"]
+            except Exception as exc:  # noqa: BLE001 - retain the customer's per-row failure boundary.
+                error = exc if isinstance(exc, TargetExecutionError) else TargetExecutionError(
+                    "protocol_error", f"Customer turn failed ({type(exc).__name__})"
                 )
-            except TargetExecutionError as exc:
-                turn_spans = (output_only_turn_span(
-                    request, turn, adapter=arrange_type, project_id=project_id,
-                    request_id=request_id, started_at=started_at, ended_at=ended_at, error=exc,
-                ),)
-            for span in turn_spans:
+                if error.code in {"cancelled", "invalid_request"}:
+                    raise error
+                span, outcomes[turn.id] = _failed_turn_evidence(
+                    request, turn, error, started_at=started_at, adapter=arrange_type,
+                )
                 spans.append(span.model_copy(update={"sequence": len(spans)}))
-            LOGGER.info(
-                "inbank_turn_complete adapter=chatabc run_id=%r case_id=%r "
-                "turn_id=%r sequence=%d request_id=%r response_bytes=%d "
-                "output_chars=%d trace_project_id=%r source_trace_id=%r "
-                "trace_event_count=%d evidence_mode=%s elapsed_ms=%.1f",
-                request.run_id,
-                request.case.id,
-                turn.id,
-                sequence,
-                request_id,
-                len(full_answer.encode("utf-8")),
-                len(answer),
-                project_id,
-                request_id,
-                len(events),
-                turn_spans[0].attributes["inbank.evidence_mode"],
-                (ended_at - started_at).total_seconds() * 1000,
-            )
-        final = outcomes[request.case.turns[-1].id]
-        trace = Trace(
-            trace_id=request.traceparent.split("-")[1], run_id=request.run_id,
-            case_id=request.case.id, spans=tuple(spans), turn_outcomes=outcomes,
-            final_output=final["output"], final_state=final["state"],
-        )
-        return CaseExecutionResult(request.execution_id, trace.trace_id, trace)
+        return _case_execution_result(request, spans, outcomes)
 
     def _fetch_trace_events(
         self, project_id: str, trace_id: str, *, customer_task_id: str,
@@ -968,6 +1039,41 @@ class InbankChatABCTargetAdapter:
             _chatabc_question(turn.input.to_dict(), input_field)
 
 
+def _failed_turn_evidence(
+    request: CaseExecutionRequest, turn: CaseTurn, error: TargetExecutionError,
+    *, started_at: datetime, adapter: str,
+) -> tuple[TraceSpan, dict]:
+    if error.code == "cancelled":
+        raise error
+    detail = {"code": error.code, "message": error.message}
+    span = TraceSpan(
+        trace_id=request.traceparent.split("-")[1], span_id=uuid4().hex[:16],
+        name=f"inbank.{adapter}.turn", operation_type="turn", sequence=0,
+        started_at=started_at, ended_at=utcnow(), status="error",
+        attributes={"agentgate.turn.id": turn.id,
+                    "agentgate.execution.id": request.execution_id,
+                    "agentgate.execution.error": detail},
+    )
+    LOGGER.warning("inbank_turn_failed run_id=%r case_id=%r turn_id=%r code=%s",
+                   request.run_id, request.case.id, turn.id, error.code)
+    return span, {"input": turn.input.to_dict(), "output": {},
+                  "state": {"execution_status": "error"}, "error": detail}
+
+
+def _case_execution_result(
+    request: CaseExecutionRequest, spans: list[TraceSpan], outcomes: dict,
+) -> CaseExecutionResult:
+    final = outcomes[request.case.turns[-1].id]
+    trace = Trace(
+        trace_id=request.traceparent.split("-")[1], run_id=request.run_id,
+        case_id=request.case.id, spans=tuple(spans), turn_outcomes=outcomes,
+        final_output=final["output"], final_state=final["state"],
+    )
+    failure = next((item["error"] for item in outcomes.values() if "error" in item), None)
+    error = TargetExecutionError(failure["code"], failure["message"]) if failure else None
+    return CaseExecutionResult(request.execution_id, trace.trace_id, trace, error)
+
+
 def _chatabc_question(value: dict[str, Any], input_field: str) -> str:
     """Keep text envelopes unchanged; encode complete business objects only at transport."""
     if not value:
@@ -1027,13 +1133,28 @@ def load_chatabc_settings(
         request_timeout_seconds=_positive_float(
             values, "AGENTGATE_INBANK_REQUEST_TIMEOUT_SECONDS", 180.0
         ),
+        total_timeout_seconds=_load_total_timeout(values),
         trace_settings=load_inbank_trace_settings(values),
+        create_timeout_seconds=_positive_float(values, "AGENTGATE_INBANK_CREATE_TIMEOUT_SECONDS", 60),
+        init_timeout_seconds=_positive_float(values, "AGENTGATE_INBANK_INIT_TIMEOUT_SECONDS", 30),
+        delete_timeout_seconds=_positive_float(values, "AGENTGATE_INBANK_DELETE_TIMEOUT_SECONDS", 60),
+        health_request_timeout_seconds=_positive_float(
+            values, "AGENTGATE_INBANK_HEALTH_REQUEST_TIMEOUT_SECONDS", 10
+        ),
         health_wait_seconds=_positive_float(values, "AGENTGATE_INBANK_HEALTH_WAIT_SECONDS", 300.0),
         health_poll_interval_seconds=_positive_float(
             values, "AGENTGATE_INBANK_HEALTH_POLL_INTERVAL_SECONDS", 5.0
         ),
         debug_sse_failures=_environment_flag(values, "AGENTGATE_INBANK_DEBUG_SSE_FAILURES"),
     )
+
+
+def _load_total_timeout(values: Mapping[str, str]) -> float:
+    name = "AGENTGATE_INBANK_TOTAL_TIMEOUT_SECONDS"
+    value = float(values.get(name, "0"))
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and nonnegative")
+    return value
 
 
 def _arrange_type(request: CaseExecutionRequest) -> ChatABCArrangeType:

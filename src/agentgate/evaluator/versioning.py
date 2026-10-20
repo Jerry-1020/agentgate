@@ -22,6 +22,8 @@ from agentgate.domain import (
 def _require_user_evaluator(evaluator: Evaluator) -> None:
     if evaluator.source != EvaluatorSource.USER:
         raise ValueError("Evaluator draft operation requires a user Evaluator")
+    if evaluator.archived:
+        raise ValueError("archived Evaluator cannot be edited or published")
 
 
 def create_evaluator_draft(

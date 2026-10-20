@@ -10,7 +10,6 @@ from typing import Literal, Protocol, TypeAlias, get_args
 from agentgate.domain import Case, TargetSnapshot, Trace
 from agentgate.domain.base import require_non_blank
 
-
 _TRACE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _TRACEPARENT_PATTERN = re.compile(
     r"^(?!ff)[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$"
@@ -53,6 +52,7 @@ class CaseExecutionRequest:
     target: TargetSnapshot
     timeout_seconds: float
     traceparent: str
+    max_parallel_cases: int = 1
 
     def __post_init__(self) -> None:
         require_non_blank(self.execution_id, "Case execution_id")
@@ -66,11 +66,12 @@ class CaseExecutionRequest:
 
 @dataclass(frozen=True, slots=True)
 class CaseExecutionResult:
-    """Normalized completion result returned by a Target adapter."""
+    """Terminal result, retaining successful evidence even when some turns failed."""
 
     execution_id: str
     trace_id: str
     inline_trace: Trace | None = None
+    error: TargetExecutionError | None = None
 
     def __post_init__(self) -> None:
         require_non_blank(self.execution_id, "Case execution_id")
@@ -80,6 +81,10 @@ class CaseExecutionResult:
             )
         if self.inline_trace is not None and self.inline_trace.trace_id != self.trace_id:
             raise ValueError("inline Trace must match Case execution trace_id")
+
+
+class CaseExecutionPending(TimeoutError):
+    """The wait interval elapsed; the Case itself has not timed out."""
 
 
 class TargetExecutionError(RuntimeError):

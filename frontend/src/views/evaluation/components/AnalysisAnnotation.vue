@@ -50,7 +50,7 @@ async function save() {
 }
 </script>
 <template>
-  <aside class="annotation-panel" aria-label="人工标注">
+  <aside class="annotation-panel" aria-label="标注">
     <h4>人工备注</h4>
     <textarea
       class="input"

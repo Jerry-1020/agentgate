@@ -97,6 +97,10 @@ def load_judge_model_from_environment(
             provider_id=provider_id,
             base_url=base_url,
             api_key=api_key,
+            output_token_field=source.get(
+                "AGENTGATE_JUDGE_OUTPUT_TOKEN_FIELD", "max_completion_tokens"
+            ),
+            thinking=source.get("AGENTGATE_JUDGE_THINKING") or None,
         )
 
     return ConfiguredJudgeModel(

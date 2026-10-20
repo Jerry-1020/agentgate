@@ -51,7 +51,8 @@
   grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
   gap: 18px;
 }
-.asset-card {
+.asset-card,
+.llm-group-template-card {
   border: 1px solid #dce4f1;
   border-radius: 12px;
   padding: 20px;
@@ -61,23 +62,27 @@
   min-width: 0;
   background: #fff;
 }
-.asset-card:hover {
+.asset-card:hover,
+.llm-group-template-card:hover {
   border-color: #7b9ff1;
   box-shadow: 0 4px 18px #225ad00a;
 }
-.asset-card h2 {
+.asset-card h2,
+.llm-group-template-card h2 {
   font-size: 17px;
   margin: 0;
   overflow-wrap: anywhere;
   color: #334259;
 }
-.asset-card p {
+.asset-card p,
+.llm-group-template-card p {
   font-size: 13px;
   color: #7f8ba0;
   line-height: 1.7;
   margin: 0;
 }
-.asset-card .asset-card-actions {
+.asset-card .asset-card-actions,
+.llm-group-template-card .asset-card-actions {
   margin-top: auto;
   display: flex;
   justify-content: space-between;
@@ -141,6 +146,29 @@
   cursor: pointer;
   padding: 0;
   font-size: 13px;
+}
+.llm-group-template-dialog .llm-template-create-button {
+  border: 1px solid var(--el-color-primary);
+  border-radius: 7px;
+  padding: 9px 14px;
+  white-space: nowrap;
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.llm-group-template-dialog .llm-template-create-button:hover:not(:disabled) {
+  background: var(--el-color-primary-dark-2);
+}
+.llm-group-template-dialog .llm-template-create-button:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 3px;
+}
+.llm-group-template-dialog .llm-template-create-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .asset-empty {
   padding: 48px 24px;

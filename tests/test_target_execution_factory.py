@@ -33,7 +33,6 @@ def configure_inbank(monkeypatch, adapter_type):
         monkeypatch.setenv(f"AGENTGATE_INBANK_{prefix}_{name}_BASE_URL", "http://bank.invalid")
     if prefix == "YUNXIA":
         monkeypatch.setenv("AGENTGATE_INBANK_YUNXIA_AGENT_NAMESPACE", "test")
-        monkeypatch.setenv("AGENTGATE_INBANK_YUNXIA_TEST_CUSTOMER_PREFIX", "test-customer")
 
 
 @pytest.mark.parametrize(

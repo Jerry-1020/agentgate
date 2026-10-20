@@ -180,3 +180,14 @@ def test_api_transport_never_imports_sdk(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert isinstance(configured.client, OpenAICompatibleModelClient)
     configured.client.close()
+
+
+def test_loads_explicit_deepseek_transport_settings() -> None:
+    configured = load_judge_model_from_environment({
+        **COMPLETE_ENVIRONMENT,
+        "AGENTGATE_JUDGE_OUTPUT_TOKEN_FIELD": "max_tokens",
+        "AGENTGATE_JUDGE_THINKING": "disabled",
+    })
+    assert configured.client.output_token_field == "max_tokens"
+    assert configured.client.thinking == "disabled"
+    configured.client.close()

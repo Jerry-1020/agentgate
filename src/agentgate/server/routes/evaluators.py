@@ -15,6 +15,14 @@ from agentgate.application import (
     EvaluatorNotFound,
     EvaluatorVersionNotFound,
 )
+from agentgate.application.llm_evaluator_groups import (
+    LLMGroupChildInput,
+    LLMGroupSnapshot,
+    discard_llm_group_draft,
+    publish_llm_group,
+    read_llm_group,
+    save_llm_group,
+)
 from agentgate.domain import (
     CombinationPolicy,
     Evaluator,
@@ -28,7 +36,6 @@ from agentgate.domain import (
 from agentgate.evaluator.models import EvaluatorError
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
 from agentgate.server.errors import raise_conflict, raise_not_found, raise_unprocessable
-
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -82,6 +89,7 @@ class EvaluatorSummary(BaseModel):
     implementation_id: str | None
     implementation_version: str | None
     has_draft: bool
+    child_count: int = 0
 
 
 class EvaluatorDetail(BaseModel):
@@ -93,6 +101,97 @@ class EvaluatorDetail(BaseModel):
 class CreatedEvaluator(BaseModel):
     evaluator: Evaluator
     draft: EvaluatorDraft
+
+
+class LLMGroupChildRequest(_RequestModel):
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=50)
+    description: str = Field(default="", max_length=200)
+    template_id: str | None = None
+    weight: float = Field(gt=0, le=1, strict=True)
+    definition: DraftDefinitionRequest
+
+
+class LLMGroupRequest(_RequestModel):
+    name: str = Field(min_length=1, max_length=50)
+    description: str = Field(default="", max_length=200)
+    pass_threshold: float = Field(default=0.8, ge=0, le=1, strict=True)
+    children: tuple[LLMGroupChildRequest, ...] = Field(min_length=1, max_length=32)
+    based_on_version: str | None = None
+    expected_draft_id: str | None = None
+    expected_draft_updated_at: datetime | None = None
+
+
+class LLMGroupRevisionRequest(_RequestModel):
+    expected_draft_id: str
+    expected_draft_updated_at: datetime
+
+
+class LLMGroupChildDetail(BaseModel):
+    evaluator: Evaluator
+    definition: EvaluatorDraft | EvaluatorSpec
+    description: str
+    template_id: str | None
+    weight: float
+
+
+class LLMGroupDetail(BaseModel):
+    evaluator: Evaluator
+    definition: EvaluatorDraft | EvaluatorSpec
+    latest_version: str | None
+    has_draft: bool
+    viewing_draft: bool
+    children: list[LLMGroupChildDetail]
+
+
+def _group_detail(snapshot: LLMGroupSnapshot) -> LLMGroupDetail:
+    return LLMGroupDetail(
+        evaluator=snapshot.evaluator,
+        definition=snapshot.definition,
+        latest_version=snapshot.latest_version,
+        has_draft=snapshot.has_draft,
+        viewing_draft=snapshot.viewing_draft,
+        children=[
+            LLMGroupChildDetail(
+                evaluator=item.evaluator,
+                definition=item.definition,
+                description=item.description,
+                template_id=item.template_id,
+                weight=item.weight,
+            )
+            for item in snapshot.children
+        ],
+    )
+
+
+def _save_group(
+    request: LLMGroupRequest, dependencies: ServerDependencies, evaluator_id: str | None = None
+) -> LLMGroupDetail:
+    return _group_detail(
+        save_llm_group(
+            dependencies.evaluators,
+            evaluator_id=evaluator_id,
+            name=request.name,
+            description=request.description,
+            pass_threshold=request.pass_threshold,
+            based_on_version=request.based_on_version,
+            expected_draft_id=request.expected_draft_id,
+            expected_draft_updated_at=request.expected_draft_updated_at,
+            children=tuple(
+                LLMGroupChildInput(
+                    id=item.id,
+                    name=item.name,
+                    description=item.description,
+                    template_id=item.template_id,
+                    weight=item.weight,
+                    definition=EvaluatorDraft(
+                        evaluator_id=item.id or "new", **item.definition.model_dump()
+                    ),
+                )
+                for item in request.children
+            ),
+        )
+    )
 
 
 def _raise_catalog_error(error: Exception) -> NoReturn:
@@ -110,7 +209,7 @@ def _draft_or_none(
     evaluator: Evaluator,
     dependencies: ServerDependencies,
 ) -> EvaluatorDraft | None:
-    if evaluator.source == EvaluatorSource.BUILTIN:
+    if evaluator.source == EvaluatorSource.BUILTIN or evaluator.archived:
         return None
     try:
         return dependencies.evaluators.get_draft(evaluator.id)
@@ -140,10 +239,9 @@ def _summary(detail: EvaluatorDetail) -> EvaluatorSummary:
         metric=definition.metric if definition else None,
         severity=definition.severity if definition else None,
         implementation_id=definition.implementation_id if definition else None,
-        implementation_version=(
-            definition.implementation_version if definition else None
-        ),
+        implementation_version=(definition.implementation_version if definition else None),
         has_draft=detail.draft is not None,
+        child_count=len(definition.children) if definition else 0,
     )
 
 
@@ -175,6 +273,56 @@ def create_evaluator(
             **request.draft.model_dump(),
         )
         return CreatedEvaluator(evaluator=evaluator, draft=draft)
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+@router.post("/llm-groups", status_code=201)
+def create_llm_group(request: LLMGroupRequest, dependencies: Dependencies) -> LLMGroupDetail:
+    try:
+        return _save_group(request, dependencies)
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+@router.get("/{evaluator_id}/llm-group")
+def llm_group_detail(
+    evaluator_id: str, dependencies: Dependencies, version: str | None = None
+) -> LLMGroupDetail:
+    try:
+        return _group_detail(read_llm_group(dependencies.evaluators, evaluator_id, version))
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+@router.put("/{evaluator_id}/llm-group/draft")
+def update_llm_group_draft(
+    evaluator_id: str, request: LLMGroupRequest, dependencies: Dependencies
+) -> LLMGroupDetail:
+    try:
+        return _save_group(request, dependencies, evaluator_id)
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+@router.post("/{evaluator_id}/llm-group/publish")
+def publish_llm_group_draft(
+    evaluator_id: str, request: LLMGroupRevisionRequest, dependencies: Dependencies
+) -> LLMGroupDetail:
+    try:
+        return _group_detail(
+            publish_llm_group(dependencies.evaluators, evaluator_id, **request.model_dump())
+        )
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+@router.delete("/{evaluator_id}/llm-group/draft", status_code=204)
+def delete_llm_group_draft(
+    evaluator_id: str, request: LLMGroupRevisionRequest, dependencies: Dependencies
+) -> None:
+    try:
+        discard_llm_group_draft(dependencies.evaluators, evaluator_id, **request.model_dump())
     except (EvaluatorError, ValueError) as error:
         _raise_catalog_error(error)
 

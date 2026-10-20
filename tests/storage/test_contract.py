@@ -319,3 +319,63 @@ def test_delete_dataset_record_rejects_published_versions(repository):
     with pytest.raises(ValueError):
         service.delete_record(dataset.id)
     assert repository.get_dataset(dataset.id, user_team_id="") is not None
+
+
+def test_discard_unpublished_dataset_removes_record(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("仅有草稿")
+    draft = service.create_draft(dataset.id)
+    with pytest.raises(ValueError):
+        repository.delete_dataset_draft(dataset.id, draft.id, user_team_id="other-team")
+    assert repository.get_dataset(dataset.id, user_team_id="") == dataset
+    service.discard_draft(dataset.id)
+    assert repository.get_dataset(dataset.id, user_team_id="") is None
+    assert repository.list_dataset_versions(dataset.id, user_team_id="") == []
+
+
+def test_discard_published_dataset_preserves_publication(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("保留发布版本")
+    service.create_draft(dataset.id)
+    service.save_case(
+        dataset.id, Case(id="c1", name="c1", turns=(CaseTurn(id="t", input={"txt": "hi"}),))
+    )
+    published = service.publish_draft(dataset.id)
+    service.create_draft(dataset.id)
+    service.discard_draft(dataset.id)
+    assert repository.get_dataset(dataset.id, user_team_id="") is not None
+    assert repository.list_dataset_versions(dataset.id, user_team_id="") == [published]
+
+
+def test_delete_publication_preserves_other_versions_and_sequence(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("版本删除")
+    service.create_draft(dataset.id)
+    service.save_case(dataset.id, Case(id="c", name="c", turns=(CaseTurn(id="t", input={"txt": "hi"}),)))
+    first = service.publish_draft(dataset.id)
+    service.create_draft(dataset.id)
+    second = service.publish_draft(dataset.id)
+    with pytest.raises(ValueError):
+        repository.delete_dataset_version(dataset.id, second.version, user_team_id="other-team")
+    service.delete_published_version(dataset.id, second.version)
+    assert service.get_version(dataset.id, first.version) == first
+    with pytest.raises(ValueError):
+        service.get_version(dataset.id, second.version)
+    service.create_draft(dataset.id)
+    third = service.publish_draft(dataset.id)
+    assert third.version == 3
+    service.delete_published_version(dataset.id, first.version)
+    service.delete_published_version(dataset.id, third.version)
+    assert repository.get_dataset(dataset.id, user_team_id="") is None
+
+
+def test_delete_only_publication_preserves_existing_draft(repository):
+    service = DatasetManagement(repository)
+    dataset = service.create_dataset("保留草稿")
+    service.create_draft(dataset.id)
+    service.save_case(dataset.id, Case(id="c", name="c", turns=(CaseTurn(id="t", input={"txt": "hi"}),)))
+    published = service.publish_draft(dataset.id)
+    draft = service.create_draft(dataset.id)
+    service.delete_published_version(dataset.id, published.version)
+    assert service.get_draft(dataset.id) == draft
+    assert service.publish_draft(dataset.id).version == 2

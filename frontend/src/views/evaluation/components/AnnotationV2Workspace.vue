@@ -230,7 +230,7 @@ onUnmounted(() => {
 <template>
   <section class="v2-workspace asset-dialog">
     <nav>
-      <button class="asset-link" @click="emit('back')">人工标注</button
+      <button class="asset-link" @click="emit('back')">标注</button
       ><span> / {{ task.name }}</span>
     </nav>
     <template v-if="!selected">

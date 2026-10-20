@@ -1,6 +1,231 @@
 # AgentGate Project Progress
 
-Last updated: 2026-10-17
+Last updated: 2026-10-19
+
+## 2026-10-19 — Restore complete sample expectations
+
+The current sample page replaces the two simplified state/tool controls with the
+reference backup's Add expectation workflow: final state, tool arguments and final
+output. Adapt the existing ExpectationEditor and reuse the current domain, dataset
+API, publication and rule execution contracts. All rules stay configurable and
+removable after reload. The basic expected-output field shares one equality-rule ID
+with the complete editor, so editing either does not duplicate or erase checks.
+
+The full editor preserves unfinished JSON drafts, validates required references and
+numeric conditions, edits membership as a JSON array, and exposes JSON Schema.
+Overflowing JSON numbers are rejected rather than silently serialized as null.
+Fix `Equals.expected` and `OneOf.allowed` JSON serialization of frozen nested
+objects/arrays while preserving immutable domain values. No schema migration or
+Agent directory/token routing change is introduced.
+
+The retained `examples/expectation-rules/` dataset contains a two-turn sample with
+state, nested tool arguments and final-output checks, along with synthetic pass/fail
+traces, a replay script and deterministic results. HTTP contract tests cover authoring,
+editing, persistence, publication and export; RunManagement/RunEngine tests create
+and execute real local tasks and read persisted reports, including an immutable v1
+task snapshot after publishing v2. This is isolated acceptance with synthetic evidence,
+not a live in-bank or external Agent execution.
+
+Verification: related backend regression **245 passed**; the actual sample editor and
+manual-create wizard browser suite **41 passed** with the production theme, desktop
+and narrow-screen layout checks; the shared editor's older CaseEditor entry has
+**3 passed** isolated browser regressions (44 browser cases total). Existing frontend
+unit tests **112 passed**, and
+the output helper suite including the new overflow case **6 passed** (113 distinct
+unit cases overall). Type checking, affected ESLint and production build pass; the
+existing large-bundle warning remains. Other-field regression covers initialization,
+structured input, classification, multi-turn data, expected Skill and tool constraints,
+hidden notes/extensions and unchanged expectation identities. The user subsequently
+authorized committing and pushing this verified change to `integration/baibo1017`.
+
+## 2026-10-19 — Integration with baibo1017, including PR #57
+
+The user authorized delivering both PR #57 (head `98ff389`) and the execution-parity
+work (`dbe00ca`) to `open-fin-sub/agentgate:integration/baibo1017`. Merge the
+destination head `a7cbbaf` without rewriting either branch's history. Preserve its
+evaluator groups, dataset/rule editing, task/report changes, and in-bank platform-only
+target selection alongside the complete PR #57 initialization and structured-input
+features, frontend-owned Case concurrency, failure isolation, timeout settings, and
+customer final-message output handling. Attachments remain outside this delivery.
+
+Resolve four textual conflicts in SampleEditor, its browser tests, platform task
+tests, and this progress log. Keep both test suites and progress histories; adapt the
+initial-variable controls to the destination's removal of conversation preview, preserve
+hidden historical output conditions, and combine the test helper's mode and Case inputs.
+No additional customer payload validation or production module is introduced by the merge.
+
+Merged-tree verification: backend **2653 passed / 85 skipped**; frontend unit tests
+**112 passed**; platform browser tests **80 passed**, sample-editor browser tests
+**31 passed** after updating the obsolete comparison against the removed advanced
+foldout. Vue type checking, affected-component ESLint, production build, and diff
+whitespace checks passed. Existing large-bundle warnings remain. These are local
+regressions; actual in-bank/BJS deployment acceptance is still required.
+
+## 2026-10-19 — Frontend-owned concurrency and inline customer-style workers
+
+The user superseded the backend-environment approach below: ordinary, stability,
+and in-bank A/B submissions should use the page's existing `max_parallel_cases` value.
+Both in-bank A/B variants use the same submitted value. External/mock A/B stays fixed
+at 1. After the application checkpoint, the user explicitly authorized implementing
+the remaining files together. The existing page control is restored; in-bank A/B also
+allows editing and submits the same field. HTTP A/B accepts it with default 1 and the
+existing 1–30 range. Ordinary submission retains its original required field. Remove
+`AGENTGATE_INBANK_MAX_PARALLEL_CASES` from the environment example and runtime readers.
+Run manifests, dispatch, credentials, output handling, and rerun snapshots are reused.
+No new customer business-field validation is added.
+
+The new shared `inbank/execution.py` is removed. Each existing ChatABC/Yunxia adapter
+directly owns its bounded `ThreadPoolExecutor`, futures, cancellation, and deadline.
+The customer scripts' session-group pool strategy is adapted, not replaced by a new
+scheduler: independent Cases run concurrently; Turns stay ordered, as do Yunxia Cases
+that explicitly share a session. Keep single-concurrency synchronous execution,
+partial failure evidence, scoreless ERROR handling, request payloads, complete message
+output, and joining workers before deleting the Pod. Customer Excel, batch database,
+progress, and export orchestration are not copied into the platform. No new production
+module or wrapper class is introduced. The declined malformed-error-marker guard stays
+excluded. Submission to `open-fin-sub/agentgate` branch `integration/baibo1017` is now
+authorized; integration must preserve the target branch's changes. No deployment or
+real in-bank acceptance has been performed.
+
+Verification: full backend regression **2549 passed / 58 skipped**; frontend unit
+tests **91 passed**; focused browser tests **23 passed**. Vue type checks, production
+build, affected Ruff/ESLint checks, and `git diff --check` passed. The build retains
+the existing large-chunk warnings. Coverage includes
+three agent modes, ordinary/stability/A/B caller values, actual bounded worker overlap,
+Turn/session ordering, cancellation/cleanup, ignored obsolete environment values,
+immutable saved manifests, and unchanged external routing. These are local tests,
+not in-bank acceptance.
+
+## 2026-10-19 — Unused concurrency argument cleanup
+
+Removed the unused `max_parallel_cases` argument from the private target-snapshot
+helper and its two callers; the actual submission, manifest, and adapter concurrency
+values are unchanged. The user declined the optional incomplete-error-marker guard;
+that guard and its added tests have been withdrawn. Existing execution-failure ERROR
+handling remains unchanged. No customer business fields, HTTP payloads, or Domain/Trace
+schemas are changed. No commit, push, or real in-bank deployment has been performed.
+
+Verification after withdrawing the optional guard: focused platform-submission,
+in-bank execution, evaluator, and Engine regression **374 passed / 28 skipped**;
+affected Python Ruff checks and `git diff --check` passed. The two test files added
+only for that guard are back to HEAD with no changes.
+
+## 2026-10-19 — Backend-owned in-bank Case concurrency (superseded)
+
+Historical checkpoint only; the frontend-owned implementation above replaces this
+configuration and UI behavior. The following results describe that earlier revision.
+
+The user requested backend configuration instead of a per-task frontend concurrency
+setting. `AGENTGATE_INBANK_MAX_PARALLEL_CASES` in `.env.example` now supplies one positive
+integer, default 1, for newly created in-bank ordinary, stability, and A/B Runs. Read it
+before creating target descriptors or credentials; A/B reads once and pins the same
+value on both manifests. Reuse the existing manifest, Engine, and grouped-session
+execution runtime. No second concurrency scheduler or arbitrary 30-Case environment
+limit is introduced. Invalid server configuration fails submission without creating
+task resources.
+
+The frontend hides the concurrency control for selected in-bank platform targets and
+omits it from requests. External/mock/Demo/local-bank directory, token, and execution
+behavior remain unchanged. The shared ordinary platform API allows the field to be
+omitted in in-bank mode, but still requires it in external/mock mode. Existing in-bank
+clients cannot override the backend value by sending the old request field.
+
+Configuration is pinned when creating the Run, not reloaded by workers. Existing Runs,
+reservations, and reruns keep their recorded manifests; restarting the submission
+service with a changed environment affects new tasks. This is a per-Run limit, not a
+global concurrency quota: concurrently scheduled A/B sides can use up to twice the
+configured Case count. Same-Case turns and explicitly shared sessions remain ordered.
+No customer HTTP payload, Trace parser, evaluator, database schema, worker scheduling, or
+customer attachment behavior is changed. No commit or push has been performed.
+
+Verification: full backend regression **2534 passed / 58 skipped**; frontend unit
+tests **91 passed**; affected browser checks **18 passed**. The complete task-form/
+directory browser file has **72 passed / 2 pre-existing baseline failures** (legacy
+A/B static-analysis availability and uncovered-case confirmation), not expanded in
+this change. TypeScript checks, production build, affected-file Ruff/ESLint, and
+`git diff --check` passed. The build retains the existing large-chunk warnings. Tests
+use local mocks; real in-bank deployment acceptance is still required.
+
+## 2026-10-19 — Yunxia final-message output alignment
+
+The customer original and revised `yunxia.py` both retain the last `event: message`
+data in `message_data`, independently from `event: trace`. Yunxia now uses the complete
+decoded message object as each turn's output and the last turn's `final_output`.
+Customer fields, including nested business data, are preserved without inventing
+`output`, `intent_code`, `slots`, or `workflow_calls` defaults. Non-object message data
+keeps the existing `{output: value}` container required by the object-valued Trace
+contract. No new business validation or public Domain schema is introduced.
+
+Removed the redundant response copy on Turn Span attributes, the evaluator's raw
+response fallback, and special JSON-string redaction. Normal output path observation
+and structured Trace redaction handle the customer object directly. A customer's
+`message` field is evaluated at `message`; no `output` alias is manufactured. Existing
+datasets using the synthetic four-field whole output or such an alias need their
+expectations adjusted. ChatABC, Trace collection, tool/Skill extraction, and database
+schemas are unchanged. No commit or push has been performed.
+
+Verification after this correction: full backend regression **2504 passed / 58 skipped**;
+frontend contract/data tests **91 passed**, TypeScript checks passed, and production
+build passed with the existing large-chunk warnings. Affected Python Ruff checks and
+`git diff --check` passed. Coverage includes Dataset creation/publication, execution,
+complete response persistence, native field-path scoring, and rerun snapshots. All
+services were local mocks; real in-bank acceptance remains outstanding.
+
+Known pre-existing limitation, reproduced without changing Domain code: an object-valued
+`Equals.expected` becomes `FrozenJsonObject` and fails JSON serialization while publishing
+or snapshotting a DatasetVersion. Direct whole-object Rule comparison works, but this
+is not a claim that such expectations can currently be persisted end to end. Worker
+regression verifies complete response persistence and scoring through scalar field paths.
+The unrelated expectation serializer is unchanged in this scoped output correction.
+
+## 2026-10-18 — In-bank execution parity (PR #57 baseline)
+
+Scope approved for one implementation pass: failure isolation, Case concurrency,
+independent timeout configuration, Yunxia customer-ID parity, and complete response
+evidence. Attachments remain deferred. Work is on `feature/inbank-execution-parity`
+from PR #57 HEAD `98ff389`; no commit, push, or merge has been performed.
+
+The customer HTTP payloads, session variables, SSE parsers, creation/init retries,
+and default timeouts are reused. One small in-bank runtime owns the shared thread
+pool, per-session execution order, cancellation, and the overall pre-turn deadline;
+both adapters consume it. Existing Run manifest concurrency is propagated rather
+than adding another concurrency configuration. Local-bank and external-mode
+routing/credentials remain unchanged.
+
+Failed turns retain sanitized errors and successful turns keep their real Trace
+evidence. Other turns and Cases continue as in the customer scripts. Init failure
+is isolated to its Case; shared Pod preparation and cancellation remain task-level.
+Evaluation uses the existing ERROR/report path with no normal score for an execution
+failure, retains completed Rule checks, and skips case-level Judge calls for incomplete
+conversations. Existing successful score aggregation is unchanged.
+
+Yunxia now directly concatenates the customer's session/custom-customer ID with one
+Run-scoped UUID hex, without the extra test prefix or an inserted hyphen, matching the
+customer script. Multi-turn IDs stay stable and separate Runs remain isolated.
+Final-response storage was simplified on 2026-10-19 as documented above; the entire
+customer message object is now the output rather than a second copy on Turn Spans.
+
+All timeouts are configured together in `.env.example`. Overall timeout defaults to
+unlimited and is checked before each turn, not forcibly applied to in-flight requests.
+Pod readiness is independent of the chat request timeout. No new business-field
+whitelists, required customer fields, database tables, or frontend controls are added.
+
+Verification before the final-message alignment: the complete backend suite passed
+(2489 passed, 56 skipped), including
+default/explicit customer-ID formatting, multi-turn stability, and cross-Run isolation. Frontend
+pure contract/data tests passed (91), TypeScript checks passed, and the production
+build passed with its existing large-chunk warnings. Focused execution/budget/BJS
+tests passed (131). Static syntax/import/unused-reference checks and `git diff --check`
+passed. Worker-entry concurrency coverage passed for all three agent modes (3 tests)
+and is included in the final full regression. All services were local mocks and all databases were temporary;
+real in-bank gateway and Pod acceptance is still required.
+
+Delivery files at this checkpoint: nine backend business files (the two adapters; shared in-bank execution;
+Run protocol/engine; submission/worker guards; result error classification; evaluator
+execution), six test files, `.env.example`,
+and these two existing progress/implementation documents. Local `.venv` and
+`frontend/node_modules` links only reuse installed dependencies and are not delivery
+files. No frontend business source or customer attachments were changed.
 
 ## Yunxia native request fields in turn input — 2026-10-17
 
@@ -85,6 +310,188 @@ Last updated: 2026-10-17
   Initial BJS subprocess failures were resolved by supplying the expected local test
   virtual environment, without application changes. Real in-bank deployment is not
   claimed; see [ChatABC input instructions](inbank-evidence-acceptance.md#chatabc-business-inputs--2026-10-17).
+## 行内任务创建表单精简 — 2026-10-19
+
+行内新建单任务和 A/B 试验不再加载或展示本地 Demo 目录、目录回退提示和重复的版本选择区，
+只保留平台智能体选择；未选完整平台目标时禁止提交。行外仍保留原有 Demo A/B 入口。
+切换登录模式时清空旧目录选择并使未完成请求失效，避免行外响应回填行内表单。
+A/B 候选版本和说明合并到同一行，窄屏按顺序堆叠，收紧移除 Demo 区后的留白。
+验证：组件 ESLint、类型检查、生产构建及 20 项相关隔离浏览器场景通过，
+覆盖行内平台提交、行外 Demo、登录模式切换及迟到响应；已检查桌面和 600px 窄屏截图。
+
+## 本地集成代码快照 — 2026-10-17
+
+按用户要求，从当前本地代码创建 `integration/baibo1017`，整合评估器、测评集、测评任务
+及界面调整，同时保留示例、测试与文档。上传范围遵循 Git 忽略规则，不包含密钥、本地配置、
+数据库、运行日志及依赖目录。
+上传前验证：后端 2501 passed / 83 skipped，前端单元测试 110 passed，生产构建通过。
+环境相关集成测试按配置跳过；静态敏感信息扫描及新增示例截图检查未发现真实凭据。
+
+## 标注入口调整 — 2026-10-17
+
+左侧“标注”移到“测评任务”下方。标注页面展示“待实现”，不再挂载原标注工作台。
+相关组件 ESLint、类型检查、生产构建和差异格式检查通过。
+
+## 任务详情移除耗时列 — 2026-10-17
+
+执行结果与低分样本表格移除“耗时”列，并同步收紧基础列宽，保留 10 行高度及固定操作列。
+组件 ESLint、格式检查及对应隔离浏览器回归通过。
+
+## 执行结果表格高度 — 2026-10-17
+
+按用户反馈，将结果表格最大高度统一增至 860px，可容纳表头与约 10 行样本，
+移除随视口高度压缩至三四行的限制。少量样本继续按实际内容高度展示；
+超出部分保留内部滚动、固定表头和操作列。
+组件 ESLint、格式检查及对应浏览器回归通过；桌面和窄屏均可完整容纳至少 10 行，
+第 12 行及右侧评分列仍可滚动查看。
+
+## 多评估器执行结果显示修复 — 2026-10-17
+
+复现“测试2”的 12 条样本、6 个评估器结果：原表格被列最小宽度和不换行表头撑至约 1573px，
+横向滚动条位于长表底部。改为按列分配宽度，评估器表头允许换行，长样本名称和场景
+单行省略并提供悬停全文；结果区域独立滚动，固定表头与右侧操作列。
+1265px 桌面视口可完整展示六项评估器列；窄屏保留局部横向滚动，不撑宽整页。
+执行结果与低分样本共用修复，不改变评分、样本数据或行内/行外 Agent 路由。
+验证：类型检查、生产构建、组件 ESLint 和格式检查通过；5 项相关隔离浏览器场景通过，
+覆盖多评估器布局、末条样本可达、固定列、低分筛选及原页签内容。
+使用“测试2”已有结果在隔离环境回放，并检查 1440px、1265px、768px 视口截图，未重新执行任务。
+
+## 执行结果概览文字 — 2026-10-16
+
+统计主数值由 28px 调为 24px，辅助数值由 16px 调为 14px，统一采用常规字重。
+失败计数改用独立颜色类，去掉通用危险按钮样式带来的红框、背景及内边距，保留红色数字。
+相关组件 ESLint、Prettier 和差异格式检查通过。
+按后续要求，主数值进一步缩至 20px，辅助数值缩至 13px，移除概览完成进度条，
+保留百分比文本；样本详情中的得分进度条保持原样。
+
+## 任务详情卡片高度 — 2026-10-16
+
+收紧任务信息卡与六项统计卡的上下留白、图标及统计项间距，保留原字号和横向布局。
+1440px 视口下，信息卡由 139.19px 降至 91.59px，统计卡由 154.59px 降至 102.59px，
+均约为原高度的三分之二。已检查桌面及 768px 窄屏截图，无内容裁切；组件 ESLint 通过。
+
+## 测评任务详情页签 — 2026-10-16
+
+“样本结果”更名为“执行结果”，依次新增“低分样本”“优化迭代”；移除“Skill 静态分析”页签，
+原“任务配置”更名为“任务快照”并放到最后。低分样本沿用低于 80 分的筛选口径，
+未评分不计入，支持筛选、导出和详情查看；详情上下条及返回保留低分范围。
+优化迭代按用户要求统一展示「能力构建中」，移除本页报告分析内容与按钮，不触发模型请求。
+验证：lint、类型检查、生产构建、9 项任务报告单元测试及 4 项隔离浏览器测试通过；
+覆盖边界分数、导出、详情返回、快照以及优化分析调用和空态，未调用真实模型。
+后续占位内容调整通过类型检查、相关组件 ESLint 和 3 项浏览器回归，覆盖已完成、运行中、
+失败任务统一展示「能力构建中」，并确认不请求模型分析。
+
+## 预置模板创建按钮 — 2026-10-16
+
+新建窗口中的模板按钮由“应用”改为“使用此模版创建”，与右上角“自定义创建 LLM 评估器”
+共用绿色主按钮样式。首页继续只读查看，两处模板卡片宽高保持一致。
+lint、类型检查、生产构建和 3 项相关浏览器场景通过，实测两种创建按钮的尺寸及样式一致，
+模板应用、自定义创建与保存发布正常；已检查模板窗口截图。
+
+## 精简新建评估器页顶部 — 2026-10-16
+
+新建 LLM 评估器不再展示图标、标题、状态、备注预览、日期和收起基本信息的顶部概览，
+名称与备注输入框直接展示，并移除概览下方分隔线及留白。已有评估器的详情仍展示元信息。
+lint、类型检查、生产构建及 3 项现有浏览器场景通过，覆盖模板应用、自定义新建和保存发布；
+已检查基本信息截图。
+
+## Prompt 变量提示实时更新 — 2026-10-16
+
+综合评估器子项与历史单体编辑器的变量提示改为从当前 System/User Prompt 实时提取，
+按首次出现顺序合并去重、去除名称首尾空格；空名称不显示，无变量时隐藏整行。
+手动删除、清空按钮、移除 User Prompt 和切换子项均同步更新；input/output 保留原含义说明。
+其他名称只反映当前文本，执行变量支持与原有保存校验不变。
+验证：lint、类型检查、生产构建、15 项相关单元测试及 10 项隔离浏览器回归通过，
+覆盖动态增删、System/User 去重、空括号隐藏及子项间切换，原有保存发布行为正常。
+
+## LLM 评估器卡片与基本信息样式对齐 — 2026-10-16
+
+父评估器备注改为与名称相同高度的单行输入框，保留 200 字限制及保存行为。
+综合模板卡片复用规则卡的白底、浅绿标签、深色标题、边框、悬停效果和底部文字操作，
+首页与新建弹窗统一 320px 列宽及内容排版，小屏幕按可用宽度收缩。
+首页仍为只读查看，新建仍为应用模板；四子项和权重不变。
+验证：lint、类型检查、生产构建及 10 项隔离浏览器回归通过，实测两处卡片宽高一致、
+名称与备注框等高，已检查首页、模板弹窗和基本信息截图。
+
+## 清理已有 LLM 评估器实例 — 2026-10-16
+
+按用户明确指出的目录范围，备份本机数据库后删除 7 个已保存的 LLM 评估器实例，
+包括原子评估器端到端示例、三个简洁性/一致性实例和三个贷款 Agent 的核心质量 LLM。
+本机 LLM 首页现在仅保留“回答质量综合评估”只读模板；新建后的自建评估器仍可正常显示。
+删除通过服务端归档并停用实现，不按名称或 ID 在前端隐藏；归档项禁止再修改、发布或选入新任务。
+精确发布版本、原任务及引用保留，清理前后整表指纹一致。API、Worker、前端、目录、
+被测 Agent 和 Trace 服务已重启并检查可用。示例源码与历史执行证据继续保留。
+
+验证：Python 全量 **2501 passed / 83 skipped**，10 项隔离浏览器测试通过，
+覆盖 7 个实例删除后刷新只剩模板、旧地址刷新返回目录、历史版本读取及既有创建发布流程。
+存储约束和归档后禁止写入的测试通过；未配置的 MySQL 等集成测试跳过，未声明实测。
+
+## LLM 综合模板首页只读 — 2026-10-16
+
+仅保留“回答质量综合评估”预置模板，四个子项继续作为模板内部配置。
+移除子评估器及历史单体编辑页的独立模板选择。首页模板卡片只提供“查看详情”，
+弹窗中可切换只读查看四子权重及提示词，不创建配置。应用模板保留在新建 LLM 评估器流程，
+后续配置、删增、保存发布能力不变。沿用深绿色名称背景；未修改已有自建评估器或历史版本。
+验证：110 项前端单元测试、9 项隔离浏览器测试、lint、类型检查及生产构建通过；
+只读详情切换四子项不产生 API 写入，新建应用及保存发布流程正常。
+
+## 预置 LLM 列表与模板样式 — 2026-10-16
+
+LLM 评估列表中的旧内置单体卡片替换为 **回答质量综合评估** 模板；点击应用直接进入四子评估器
+编辑表单。列表与新建模板弹窗共用卡片，名称区域采用主题深绿色背景及白字，展示既有
+简洁性 10%、相关性 30%、准确性 40%、合理性 20% 配置。规则、自建和历史读取路径不变，
+模型仍在应用后配置，保存发布后用于测评任务。
+验证：110 项前端单元测试、9 项隔离浏览器测试、lint、类型检查及生产构建通过。
+已检查目录和新建弹窗截图，深绿色标题及四子项权重显示一致。
+
+## 综合评估器模板入口修正 — 2026-10-16
+
+新建 LLM 评估器现在先展示 **回答质量综合评估** 模板，包含简洁性、相关性、准确性、合理性
+四个子评估器，默认权重依次为 10%、30%、40%、20%。应用后可分别配置；左侧每行提供删除按钮，
+“新增”直接创建并选中空白子项，Prompt 模板入口仍可按需选择预置子模板。
+删除非当前子项时保留当前编辑选择；新建模板弹窗整体增高约三分之一，并适配小屏幕视口。
+复用现有表单和整组保存/发布，无后端契约改动，已有评估器实例不变。
+验证：前端 110 项单元测试、8 项隔离浏览器测试、lint、类型检查及生产构建全部通过。
+在 1440×1000 视口实测模板面板高 839.33px（原约 630px），完整位于屏幕内。
+
+## LLM 子评估器 — 2026-10-16
+
+用户确认 UI 并明确授权豁免逐文件确认；在 `feature/llm-child-evaluators` 完成实现，
+未提交、推送或合并。分支基于同步后的 `origin/refactor-1`（`102ed29`），保留既有未提交修改。
+
+新建 LLM 评估器支持父级名称、备注、状态、版本、创建/更新日期；左侧管理子评估器及权重，
+右侧独立配置模型、System/User Prompt、模板及阈值。预置相关性、准确性、合理性、简洁性；
+旧单体和单次请求多维度评估器继续打开原编辑器。按钮沿用绿色主题。
+
+新增 `llm_group@1`，整组保存、发布和草稿清理采用 SQLite/MySQL 事务及 CAS；
+禁止子项独立修改/选用/跨组借用，并防止旧通用接口绕过整组版本校验。
+父版本固定子版本、权重和版本化备注/模板来源；各子项独立调用模型和保存 JudgeRecord，
+父项用十进制加权并只计入任务总分一次。单任务、A/B、稳定性及行内/行外入口均有精确引用测试；
+本次没有改动被测 Agent 数据源与 Token 路由。
+
+真实 DeepSeek 官方 `deepseek-v4-pro` 三子项调用完成，保留评估器
+`e9d657db-d59c-4c00-b742-8dcdbcce706b` v1 和任务
+`7a9d8589-80b0-471d-9fc4-da540c8f96ad`。模拟 Agent 回显问题，三项均得 0，
+综合分为 0；模型执行、证据留存及聚合验证通过，低分仍如实显示不通过。
+重启完整本地服务后再次只读验证持久化结果成功。复现、摘要及说明见
+[子评估器示例](../examples/llm-group/README.md)。密钥仅由已有本机配置提供。
+
+最终验证：Python 全量 **2483 passed / 78 skipped**（未配置 MySQL、Redis Cluster、
+私有客户归档，以及不适用于所选适配器的用例）；前端 **108** 项单元测试、栈检查、lint、
+类型检查和生产构建通过；**8** 项独立临时数据库浏览器测试覆盖模板、多子配置、保存失败、
+原子发布、历史版本、旧编辑器和实际报告的父子展示；示例离线验证 **4** 项通过。
+真实行内网关和 MySQL 集成未在本机实测，既有依赖弃用及构建包体积提示仍存在。
+
+
+## LLM Prompt 编辑器与简洁性模板 — 2026-10-15
+
+在 `feature/llm-evaluator-templates` 分支完成新建 LLM 评估器完整页面：名称、描述、模型、System/User Prompt、选择模版弹窗、搜索筛选和应用。内置用户提供的完整“简洁性”提示词，复用已有 Catalog 草稿、发布版本和任务引用；既有多维度评估器继续使用原编辑器。没有提交、合并或推送本次改动。
+
+整体评分实现增加显式模板渲染，脱敏、限长后一次性替换输入输出，历史配置保持原提示词语义。DeepSeek 连接支持显式 token 字段与 thinking 设置，流式读取响应体时共享超时预算，避免空白保活无限延长请求。API Key 仅在本机忽略文件中保存。
+
+浏览器实际验证新建、应用模板、选择模型、保存发布、刷新恢复、历史版本和任务勾选，并补齐跨组件离开和登出的未保存保护。“简洁性 v1”及延长评审超时的 v2、实际测评任务均已保留。真实 Pro 评审在 180 秒后超时，延长后的首次任务又触发原 300 秒任务回收期限；示例已对齐任务和模型预算。随后确认 [DeepSeek 官方 API 故障](https://status.deepseek.com/incidents/7116348214287)同时影响 Pro 与 Flash，结束最后一次等待，因此**真实评分端到端验收尚未完成**，没有将失败标记为通过。复现脚本、数据集、评估器配置、截图与真实结果见 [简洁性示例](../examples/llm-conciseness/README.md)。
+
+后端全量回归 2434 项通过、56 项跳过（含沙箱限制放行后的 20 项重跑）；前端 96 项单元测试、类型检查、lint、生产构建通过；示例离线测试 4 项通过。仍有已有的依赖弃用及构建包体积提示。
 
 ## LLM 评估器保存、发布与按版本运行 — 2026-10-08
 
@@ -479,7 +886,7 @@ committed and pushed; review and merge remain.
 - Suggestion review and application lifecycle.
 - Automatic regression Run creation from accepted suggestions.
 
-### 2026-09-27 · V2 逐评估器人工标注
+### 2026-09-27 · V2 逐评估器标注
 
 完成本次运行快照驱动的评估器列表、规则证据/结果/关键代码与左右联动折叠、LLM 实际请求提示词留存和历史重建标识、逐评估器评分与提示词保存。操作步骤见 docs/annotation/end-to-end-guide.md。后端全量回归 1337 passed / 35 skipped，前端 60 项测试及构建通过；规则浏览器闭环通过，LLM 使用录制模型验证，尚无本地历史 LLM 会话供真实页面验收。
 
@@ -552,7 +959,7 @@ LiveModel 支持显式 thinking 参数并校验取值，工具消息保留 reaso
 
 复用现有 answer_quality 实现、Evaluator Catalog 版本发布、full_trajectory 证据选择及 Judge 严格 JSON 契约，未新增执行框架或修改被测智能体。创建并启用“贷款云虾 · 回答可信度与审批解释”（113ee56f-3136-4d7d-9b43-ab47dfaeea06），当前发布 v3。评分提示词定义事实一致性40%、审批原因解释30%、请求与多轮处理20%、测试边界10%，通过阈值0.85、最低置信度0.75；原因混淆最高0.79，关键事实矛盾/编造审批/真实放款最高0.49，关键证据不足转review。权重由LLM依据评分提示计算，后端目前仅持久化一个整体score，不提供独立的维度得分字段。
 
-v1试运行发现模型把信用评分的 [redacted] 当成事实矛盾；v2明确脱敏值不属于可核验数值，不据此扣分或反推出值。后续发现“因为高风险（存在阻断标记）”被过宽解释，v3加入并列归因、括号归因、简洁正确归因等评分锚点。7类校准样例全部符合预期：原历史混淆回答与括号变体均0.79/fail，两种正确回答均1.0/pass，虚构审批及提示注入均fail，独立证据缺失review。这些是开发者构造的校准样例，尚非人工标注一致率或泛化准确率。
+v1试运行发现模型把信用评分的 [redacted] 当成事实矛盾；v2明确脱敏值不属于可核验数值，不据此扣分或反推出值。后续发现“因为高风险（存在阻断标记）”被过宽解释，v3加入并列归因、括号归因、简洁正确归因等评分锚点。7类校准样例全部符合预期：原历史混淆回答与括号变体均0.79/fail，两种正确回答均1.0/pass，虚构审批及提示注入均fail，独立证据缺失review。这些是开发者构造的校准样例，尚非标注一致率或泛化准确率。
 
 本地预览API/Worker的默认Judge连接已由旧GLM切换为 https://api.deepseek.com / deepseek-v4-pro，密钥只读环境 DEEPSEEK_API_KEY，通过 env:AGENTGATE_JUDGE_API_KEY 引用，不写入配置JSON。此默认连接也由当前预览的Skill分析和根因分析复用；不修改行内网关或登录Token路由。被测目标使用行外local_bank云虾，synthetic token=local。所有验收数据来自内置合成测试客户；发送前沿用工程脱敏，不解除脱敏。
 

@@ -1,3 +1,18 @@
+import type { EvaluatorSummary, Kind } from '../../../api/evaluations';
+
+export const isLlmEvaluator = (kind: Kind) => kind === 'llm_judge' || kind === 'llm_group';
+export const selectableEvaluator = (evaluator: EvaluatorSummary) =>
+  evaluator.enabled &&
+  !!evaluator.latest_version &&
+  !evaluator.owner_evaluator_id &&
+  (evaluator.kind === 'rule' || isLlmEvaluator(evaluator.kind));
+
+export function evaluatorDate(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
+}
+
 export const dimensionNames: Record<string, string> = {
   correctness: '正确性',
   accuracy: '准确性',

@@ -31,7 +31,7 @@ test('annotation writeback preserves source checks and adds notes after confirma
  await page.route('**/api/runs/'+id+'/cases/'+caseId+'/writeback',route=>{payload=route.request().postDataJSON();return route.fulfill({json:{code:'0',message:'success',data:{source_dataset_id:source.dataset_id}}})})
  await page.goto('/#optimizer/'+id)
  await page.getByText('查看期望与实际执行证据',{exact:true}).first().click()
- const annotation=page.getByRole('complementary',{name:'人工标注'}).first()
+ const annotation=page.getByRole('complementary',{name:'标注'}).first()
  await expect(annotation.getByRole('button',{name:'加入测评集草稿'})).toBeDisabled()
  await annotation.getByRole('textbox').fill('核对人工复核分支，保留原始期望。')
  await annotation.getByRole('button',{name:'加入测评集草稿'}).click()

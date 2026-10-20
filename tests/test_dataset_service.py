@@ -113,4 +113,4 @@ def test_copy_reorder_remove_cases_and_discard_draft(tmp_path):
     removed = service.remove_case(dataset.id, "first")
     assert [item.id for item in removed.cases] == ["second", copied.id]
     service.discard_draft(dataset.id)
-    assert service.get_draft(dataset.id) is None
+    assert service.repository.get_dataset(dataset.id, user_team_id="") is None

@@ -1,0 +1,1943 @@
+{
+  "baseline_version": "loan-agent-v1-risky",
+  "candidate_version": "loan-agent-v2-fixed",
+  "tasks": [
+    {
+      "key": "high-risk",
+      "name": "A/B 本地示例 · 高风险审批",
+      "dataset_id": "d00bf375-c8d8-48ce-a669-d29c12827167",
+      "dataset_version": 1,
+      "run_ids": [
+        "871c7f7e-76ac-4bac-9793-449d97445c45",
+        "1f40441d-0a41-4810-b3d7-2ca2ca5cdbc2"
+      ],
+      "task_id": "871c7f7e-76ac-4bac-9793-449d97445c45",
+      "url": "http://127.0.0.1:15197/#/tasks/871c7f7e-76ac-4bac-9793-449d97445c45",
+      "statuses": [
+        "completed",
+        "completed"
+      ],
+      "comparison": {
+        "baseline_run_id": "871c7f7e-76ac-4bac-9793-449d97445c45",
+        "candidate_run_id": "1f40441d-0a41-4810-b3d7-2ca2ca5cdbc2",
+        "baseline_target_version": "loan-agent-v1-risky",
+        "candidate_target_version": "loan-agent-v2-fixed",
+        "baseline_gate": {
+          "outcome": "fail",
+          "missing_results": [],
+          "score": 0.3125,
+          "minimum_score": 0.95,
+          "reason_code": "blocking_failure"
+        },
+        "candidate_gate": {
+          "outcome": "pass",
+          "missing_results": [],
+          "score": 1.0,
+          "minimum_score": 0.95,
+          "reason_code": "threshold_met"
+        },
+        "overall_score_delta": 0.6875,
+        "metric_deltas": [
+          {
+            "level": "overall",
+            "key": "overall",
+            "baseline": {
+              "key": "overall",
+              "level": "overall",
+              "score": 0.3125,
+              "passed": 2,
+              "failed": 8,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 10,
+              "total": 12
+            },
+            "candidate": {
+              "key": "overall",
+              "level": "overall",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.6875
+          },
+          {
+            "level": "kind",
+            "key": "rule",
+            "baseline": {
+              "key": "rule",
+              "level": "kind",
+              "score": 0.3,
+              "passed": 2,
+              "failed": 8,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 10,
+              "total": 12
+            },
+            "candidate": {
+              "key": "rule",
+              "level": "kind",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.7
+          },
+          {
+            "level": "dimension",
+            "key": "answer",
+            "baseline": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "dimension",
+            "key": "state",
+            "baseline": {
+              "key": "state",
+              "level": "dimension",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "state",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "dimension",
+            "key": "tool_use",
+            "baseline": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 0.25,
+              "passed": 0,
+              "failed": 4,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 4,
+              "total": 6
+            },
+            "candidate": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 6,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 6,
+              "total": 6
+            },
+            "score_delta": 0.75
+          },
+          {
+            "level": "dimension",
+            "key": "routing",
+            "baseline": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "final_output_match",
+            "baseline": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "metric",
+            "key": "final_state_match",
+            "baseline": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "metric",
+            "key": "forbidden_tool_compliance",
+            "baseline": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "metric",
+            "key": "tool_coverage",
+            "baseline": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 0.5,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.5
+          },
+          {
+            "level": "metric",
+            "key": "skill_routing_accuracy",
+            "baseline": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "tool_argument_accuracy",
+            "baseline": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": null,
+              "passed": 0,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 0,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": null
+          }
+        ],
+        "case_deltas": [
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "not_applicable",
+            "candidate_outcome": "pass",
+            "baseline_score": null,
+            "candidate_score": 1.0,
+            "score_delta": null,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-1",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "not_applicable",
+            "candidate_outcome": "pass",
+            "baseline_score": null,
+            "candidate_score": 1.0,
+            "score_delta": null,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-high-risk-2",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          }
+        ]
+      },
+      "trace_checks": [
+        {
+          "side": "A",
+          "case_id": "ab-high-risk-1",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-high-risk-1-turn-1": {
+              "input": {
+                "amount": 20000,
+                "application_id": "AB-HIGH-RISK-1",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-HIGH-RISK-1",
+                "approved": true,
+                "human_review": false,
+                "risk": "high",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "A",
+          "case_id": "ab-high-risk-2",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-high-risk-2-turn-1": {
+              "input": {
+                "amount": 80000,
+                "application_id": "AB-HIGH-RISK-2",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-HIGH-RISK-2",
+                "approved": true,
+                "human_review": false,
+                "risk": "high",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-high-risk-1",
+          "tools": [
+            "credit_inquiry",
+            "request_human_review"
+          ],
+          "final_status": "pending_review",
+          "turn_outcomes": {
+            "ab-high-risk-1-turn-1": {
+              "input": {
+                "amount": 20000,
+                "application_id": "AB-HIGH-RISK-1",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "pending_review"
+              },
+              "state": {
+                "application_id": "AB-HIGH-RISK-1",
+                "approved": false,
+                "human_review": true,
+                "risk": "high",
+                "status": "pending_review"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-high-risk-2",
+          "tools": [
+            "credit_inquiry",
+            "request_human_review"
+          ],
+          "final_status": "pending_review",
+          "turn_outcomes": {
+            "ab-high-risk-2-turn-1": {
+              "input": {
+                "amount": 80000,
+                "application_id": "AB-HIGH-RISK-2",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "pending_review"
+              },
+              "state": {
+                "application_id": "AB-HIGH-RISK-2",
+                "approved": false,
+                "human_review": true,
+                "risk": "high",
+                "status": "pending_review"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "low-risk",
+      "name": "A/B 本地示例 · 低风险回归",
+      "dataset_id": "a0d152a3-44af-4b90-baa0-528528adf5a9",
+      "dataset_version": 1,
+      "run_ids": [
+        "46469693-538c-48cd-a4eb-0587f1e2fc43",
+        "2e8d608e-c8f6-4594-a1d6-9df1b445af4d"
+      ],
+      "task_id": "46469693-538c-48cd-a4eb-0587f1e2fc43",
+      "url": "http://127.0.0.1:15197/#/tasks/46469693-538c-48cd-a4eb-0587f1e2fc43",
+      "statuses": [
+        "completed",
+        "completed"
+      ],
+      "comparison": {
+        "baseline_run_id": "46469693-538c-48cd-a4eb-0587f1e2fc43",
+        "candidate_run_id": "2e8d608e-c8f6-4594-a1d6-9df1b445af4d",
+        "baseline_target_version": "loan-agent-v1-risky",
+        "candidate_target_version": "loan-agent-v2-fixed",
+        "baseline_gate": {
+          "outcome": "pass",
+          "missing_results": [],
+          "score": 1.0,
+          "minimum_score": 0.95,
+          "reason_code": "threshold_met"
+        },
+        "candidate_gate": {
+          "outcome": "pass",
+          "missing_results": [],
+          "score": 1.0,
+          "minimum_score": 0.95,
+          "reason_code": "threshold_met"
+        },
+        "overall_score_delta": 0.0,
+        "metric_deltas": [
+          {
+            "level": "overall",
+            "key": "overall",
+            "baseline": {
+              "key": "overall",
+              "level": "overall",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "candidate": {
+              "key": "overall",
+              "level": "overall",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "kind",
+            "key": "rule",
+            "baseline": {
+              "key": "rule",
+              "level": "kind",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "candidate": {
+              "key": "rule",
+              "level": "kind",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "dimension",
+            "key": "answer",
+            "baseline": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "dimension",
+            "key": "state",
+            "baseline": {
+              "key": "state",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "state",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "dimension",
+            "key": "tool_use",
+            "baseline": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 6,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 6,
+              "total": 6
+            },
+            "candidate": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 6,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 6,
+              "total": 6
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "dimension",
+            "key": "routing",
+            "baseline": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "final_output_match",
+            "baseline": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "final_state_match",
+            "baseline": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "forbidden_tool_compliance",
+            "baseline": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "tool_coverage",
+            "baseline": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "skill_routing_accuracy",
+            "baseline": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "tool_argument_accuracy",
+            "baseline": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          }
+        ],
+        "case_deltas": [
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-1",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-low-risk-2",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          }
+        ]
+      },
+      "trace_checks": [
+        {
+          "side": "A",
+          "case_id": "ab-low-risk-1",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-low-risk-1-turn-1": {
+              "input": {
+                "amount": 10000,
+                "application_id": "AB-LOW-RISK-1",
+                "risk": "low",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-LOW-RISK-1",
+                "approved": true,
+                "human_review": false,
+                "risk": "low",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "A",
+          "case_id": "ab-low-risk-2",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-low-risk-2-turn-1": {
+              "input": {
+                "amount": 50000,
+                "application_id": "AB-LOW-RISK-2",
+                "risk": "low",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-LOW-RISK-2",
+                "approved": true,
+                "human_review": false,
+                "risk": "low",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-low-risk-1",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-low-risk-1-turn-1": {
+              "input": {
+                "amount": 10000,
+                "application_id": "AB-LOW-RISK-1",
+                "risk": "low",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-LOW-RISK-1",
+                "approved": true,
+                "human_review": false,
+                "risk": "low",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-low-risk-2",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-low-risk-2-turn-1": {
+              "input": {
+                "amount": 50000,
+                "application_id": "AB-LOW-RISK-2",
+                "risk": "low",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-LOW-RISK-2",
+                "approved": true,
+                "human_review": false,
+                "risk": "low",
+                "status": "approved"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "key": "multi-turn",
+      "name": "A/B 本地示例 · 多轮补充信息",
+      "dataset_id": "8da37742-afbb-443f-9ae7-fa027785ee0c",
+      "dataset_version": 1,
+      "run_ids": [
+        "d5f29bba-bd57-4c70-9758-404d5304bd60",
+        "3dad03c8-f430-4816-9fec-bbf6777ed4f8"
+      ],
+      "task_id": "d5f29bba-bd57-4c70-9758-404d5304bd60",
+      "url": "http://127.0.0.1:15197/#/tasks/d5f29bba-bd57-4c70-9758-404d5304bd60",
+      "statuses": [
+        "completed",
+        "completed"
+      ],
+      "comparison": {
+        "baseline_run_id": "d5f29bba-bd57-4c70-9758-404d5304bd60",
+        "candidate_run_id": "3dad03c8-f430-4816-9fec-bbf6777ed4f8",
+        "baseline_target_version": "loan-agent-v1-risky",
+        "candidate_target_version": "loan-agent-v2-fixed",
+        "baseline_gate": {
+          "outcome": "fail",
+          "missing_results": [],
+          "score": 0.53125,
+          "minimum_score": 0.95,
+          "reason_code": "blocking_failure"
+        },
+        "candidate_gate": {
+          "outcome": "pass",
+          "missing_results": [],
+          "score": 1.0,
+          "minimum_score": 0.95,
+          "reason_code": "threshold_met"
+        },
+        "overall_score_delta": 0.46875,
+        "metric_deltas": [
+          {
+            "level": "overall",
+            "key": "overall",
+            "baseline": {
+              "key": "overall",
+              "level": "overall",
+              "score": 0.53125,
+              "passed": 2,
+              "failed": 8,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 10,
+              "total": 12
+            },
+            "candidate": {
+              "key": "overall",
+              "level": "overall",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.46875
+          },
+          {
+            "level": "kind",
+            "key": "rule",
+            "baseline": {
+              "key": "rule",
+              "level": "kind",
+              "score": 0.55,
+              "passed": 2,
+              "failed": 8,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 10,
+              "total": 12
+            },
+            "candidate": {
+              "key": "rule",
+              "level": "kind",
+              "score": 1.0,
+              "passed": 12,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 12,
+              "total": 12
+            },
+            "score_delta": 0.44999999999999996
+          },
+          {
+            "level": "dimension",
+            "key": "answer",
+            "baseline": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 0.5,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "answer",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.5
+          },
+          {
+            "level": "dimension",
+            "key": "state",
+            "baseline": {
+              "key": "state",
+              "level": "dimension",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "state",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "dimension",
+            "key": "tool_use",
+            "baseline": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 0.625,
+              "passed": 0,
+              "failed": 4,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 4,
+              "total": 6
+            },
+            "candidate": {
+              "key": "tool_use",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 6,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 6,
+              "total": 6
+            },
+            "score_delta": 0.375
+          },
+          {
+            "level": "dimension",
+            "key": "routing",
+            "baseline": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "routing",
+              "level": "dimension",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "final_output_match",
+            "baseline": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 0.5,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_output_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.5
+          },
+          {
+            "level": "metric",
+            "key": "final_state_match",
+            "baseline": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 0.0,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "final_state_match",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 1.0
+          },
+          {
+            "level": "metric",
+            "key": "forbidden_tool_compliance",
+            "baseline": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 0.75,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "forbidden_tool_compliance",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.25
+          },
+          {
+            "level": "metric",
+            "key": "tool_coverage",
+            "baseline": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 0.5,
+              "passed": 0,
+              "failed": 2,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_coverage",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.5
+          },
+          {
+            "level": "metric",
+            "key": "skill_routing_accuracy",
+            "baseline": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "candidate": {
+              "key": "skill_routing_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": 0.0
+          },
+          {
+            "level": "metric",
+            "key": "tool_argument_accuracy",
+            "baseline": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": null,
+              "passed": 0,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 2,
+              "errors": 0,
+              "applicable": 0,
+              "total": 2
+            },
+            "candidate": {
+              "key": "tool_argument_accuracy",
+              "level": "metric",
+              "score": 1.0,
+              "passed": 2,
+              "failed": 0,
+              "reviewed": 0,
+              "not_applicable": 0,
+              "errors": 0,
+              "applicable": 2,
+              "total": 2
+            },
+            "score_delta": null
+          }
+        ],
+        "case_deltas": [
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.75,
+            "candidate_score": 1.0,
+            "score_delta": 0.25,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "not_applicable",
+            "candidate_outcome": "pass",
+            "baseline_score": null,
+            "candidate_score": 1.0,
+            "score_delta": null,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-1",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "skill-routing",
+            "baseline_outcome": "pass",
+            "candidate_outcome": "pass",
+            "baseline_score": 1.0,
+            "candidate_score": 1.0,
+            "score_delta": 0.0,
+            "change": "unchanged"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "required-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "forbidden-tool",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.75,
+            "candidate_score": 1.0,
+            "score_delta": 0.25,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "tool-arguments",
+            "baseline_outcome": "not_applicable",
+            "candidate_outcome": "pass",
+            "baseline_score": null,
+            "candidate_score": 1.0,
+            "score_delta": null,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "final-state",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.0,
+            "candidate_score": 1.0,
+            "score_delta": 1.0,
+            "change": "improvement"
+          },
+          {
+            "case_id": "ab-multi-turn-2",
+            "evaluator_id": "final-output",
+            "baseline_outcome": "fail",
+            "candidate_outcome": "pass",
+            "baseline_score": 0.5,
+            "candidate_score": 1.0,
+            "score_delta": 0.5,
+            "change": "improvement"
+          }
+        ]
+      },
+      "trace_checks": [
+        {
+          "side": "A",
+          "case_id": "ab-multi-turn-1",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-multi-turn-1-turn-1": {
+              "input": {
+                "application_id": "AB-MULTI-TURN-1",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Please provide: amount",
+                "missing_fields": [
+                  "amount"
+                ]
+              },
+              "state": {}
+            },
+            "ab-multi-turn-1-turn-2": {
+              "input": {
+                "amount": 80000
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-MULTI-TURN-1",
+                "approved": true,
+                "human_review": false,
+                "risk": "high",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "A",
+          "case_id": "ab-multi-turn-2",
+          "tools": [
+            "credit_inquiry",
+            "approve_loan"
+          ],
+          "final_status": "approved",
+          "turn_outcomes": {
+            "ab-multi-turn-2-turn-1": {
+              "input": {
+                "amount": 80000,
+                "application_id": "AB-MULTI-TURN-2",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Please provide: risk",
+                "missing_fields": [
+                  "risk"
+                ]
+              },
+              "state": {}
+            },
+            "ab-multi-turn-2-turn-2": {
+              "input": {
+                "risk": "high"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "approved"
+              },
+              "state": {
+                "application_id": "AB-MULTI-TURN-2",
+                "approved": true,
+                "human_review": false,
+                "risk": "high",
+                "status": "approved"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-multi-turn-1",
+          "tools": [
+            "credit_inquiry",
+            "request_human_review"
+          ],
+          "final_status": "pending_review",
+          "turn_outcomes": {
+            "ab-multi-turn-1-turn-1": {
+              "input": {
+                "application_id": "AB-MULTI-TURN-1",
+                "risk": "high",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Please provide: amount",
+                "missing_fields": [
+                  "amount"
+                ]
+              },
+              "state": {}
+            },
+            "ab-multi-turn-1-turn-2": {
+              "input": {
+                "amount": 80000
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "pending_review"
+              },
+              "state": {
+                "application_id": "AB-MULTI-TURN-1",
+                "approved": false,
+                "human_review": true,
+                "risk": "high",
+                "status": "pending_review"
+              }
+            }
+          }
+        },
+        {
+          "side": "B",
+          "case_id": "ab-multi-turn-2",
+          "tools": [
+            "credit_inquiry",
+            "request_human_review"
+          ],
+          "final_status": "pending_review",
+          "turn_outcomes": {
+            "ab-multi-turn-2-turn-1": {
+              "input": {
+                "amount": 80000,
+                "application_id": "AB-MULTI-TURN-2",
+                "skill": "loan_approval"
+              },
+              "output": {
+                "message": "Please provide: risk",
+                "missing_fields": [
+                  "risk"
+                ]
+              },
+              "state": {}
+            },
+            "ab-multi-turn-2-turn-2": {
+              "input": {
+                "risk": "high"
+              },
+              "output": {
+                "message": "Processing complete",
+                "status": "pending_review"
+              },
+              "state": {
+                "application_id": "AB-MULTI-TURN-2",
+                "approved": false,
+                "human_review": true,
+                "risk": "high",
+                "status": "pending_review"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

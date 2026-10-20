@@ -5,11 +5,13 @@ import type { EvaluationResult, Trace } from '../../../api/client';
 import { pretty } from '../../../api/evaluations';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import { needsAttention, sameJson } from '../utils/report-presentation';
+import { groupEvaluatorResults, type EvaluatorSnapshot } from '../utils/task-report';
 
 const props = defineProps<{
   sample: EvaluationCase;
   results: EvaluationResult[];
   primaryIds: string[];
+  evaluatorSpecs?: EvaluatorSnapshot[];
   hideAnalyze?: boolean;
   trace: Trace | null;
   traceError: string;
@@ -18,10 +20,11 @@ const props = defineProps<{
 }>();
 defineEmits<{ analyze: [] }>();
 const tab = ref('evidence');
-const attention = computed(() => props.results.filter(needsAttention));
-const passed = computed(() => props.results.filter((result) => result.outcome === 'pass'));
+const grouped = computed(() => groupEvaluatorResults(props.results, props.evaluatorSpecs));
+const attention = computed(() => grouped.value.filter((group) => needsAttention(group.result)));
+const passed = computed(() => grouped.value.filter((group) => group.result.outcome === 'pass'));
 const inapplicable = computed(() =>
-  props.results.filter((result) => result.outcome === 'not_applicable'),
+  grouped.value.filter((group) => group.result.outcome === 'not_applicable'),
 );
 const traceTurn = (id: string) => props.trace?.turn_outcomes?.[id];
 const inputStatus = (id: string, input: unknown) => {
@@ -54,23 +57,25 @@ const inputStatus = (id: string, input: unknown) => {
       </p>
       <p v-if="!complete" class="muted">尚未生成完整报告，以下为已返回结果。</p>
       <p v-else-if="!results.length" class="muted">未返回评估明细，请核对任务的评估器配置。</p>
-      <p v-else-if="inapplicable.length === results.length" class="muted">
+      <p v-else-if="inapplicable.length === grouped.length" class="muted">
         本样本没有适用检查，不能据此判断通过。
       </p>
       <ResultEvaluationCard
-        v-for="result in attention"
-        :key="result.evaluator_id"
-        :result="result"
-        :primary="primaryIds.includes(result.evaluator_id)"
+        v-for="group in attention"
+        :key="group.result.evaluator_id"
+        :result="group.result"
+        :child-results="group.children"
+        :primary="primaryIds.includes(group.result.evaluator_id)"
         :turns="sample.turns"
       />
       <details v-if="passed.length" class="result-group" data-testid="passed-results">
         <summary>已通过的评估项（{{ passed.length }}）</summary>
         <ResultEvaluationCard
-          v-for="result in passed"
-          :key="result.evaluator_id"
-          :result="result"
-          :primary="primaryIds.includes(result.evaluator_id)"
+          v-for="group in passed"
+          :key="group.result.evaluator_id"
+          :result="group.result"
+          :child-results="group.children"
+          :primary="primaryIds.includes(group.result.evaluator_id)"
           :turns="sample.turns"
         />
       </details>
@@ -78,10 +83,11 @@ const inputStatus = (id: string, input: unknown) => {
         <summary>不适用的评估项（{{ inapplicable.length }}）</summary>
         <p class="muted">未参与本样本评分，不等于通过或失败。</p>
         <ResultEvaluationCard
-          v-for="result in inapplicable"
-          :key="result.evaluator_id"
-          :result="result"
-          :primary="primaryIds.includes(result.evaluator_id)"
+          v-for="group in inapplicable"
+          :key="group.result.evaluator_id"
+          :result="group.result"
+          :child-results="group.children"
+          :primary="primaryIds.includes(group.result.evaluator_id)"
           :turns="sample.turns"
         />
       </details>
