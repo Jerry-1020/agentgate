@@ -1,5 +1,10 @@
 <script setup lang="ts">
-defineProps<{ page: string; online: boolean | null; authLabel: string }>();
+withDefaults(defineProps<{
+  page: string;
+  online: boolean | null;
+  authLabel: string;
+  hideAuthControls?: boolean;
+}>(), { hideAuthControls: false });
 defineEmits<{ logout: [] }>();
 const navigation = [
   ['overview', '测评总览'],
@@ -16,7 +21,7 @@ const navigation = [
   >
     <header class="topbar">
       <div class="brand">智能体测评中心</div>
-      <div class="topbar-right">
+      <div v-if="!hideAuthControls" class="topbar-right">
         <span class="mode-chip">{{ authLabel }}</span>
         <button type="button" class="logout-btn" @click="$emit('logout')">登出 Logout</button>
       </div>

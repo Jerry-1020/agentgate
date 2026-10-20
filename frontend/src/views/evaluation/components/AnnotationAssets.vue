@@ -38,9 +38,9 @@ const platformSelection = ref<AgentTargetSelection | null>(null);
 const historicalMode = ref(false),
   historicalRunId = ref('');
 const historicalRuns = ref<EvaluationRun[]>([]);
-const platformDirectory = computed(() => (auth.isBank ? agentDirectory : localAgentDirectory));
-const platformToken = computed(() => (auth.isBank ? auth.token : 'local'));
-const platformTeam = computed(() => (auth.isBank ? auth.teamId : ''));
+const platformDirectory = computed(() => (auth.usesPlatformDirectory ? agentDirectory : localAgentDirectory));
+const platformToken = computed(() => (auth.usesPlatformDirectory ? auth.token : 'local'));
+const platformTeam = computed(() => (auth.usesPlatformDirectory ? auth.teamId : ''));
 const props = defineProps<{ templates?: boolean; taskId?: string }>(),
   emit = defineEmits<{ dirtyChange: [value: boolean]; navigate: [path: string] }>();
 const query = ref(''),

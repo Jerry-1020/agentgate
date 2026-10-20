@@ -1,4 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
+import { pinia } from '../stores';
+import { useAuthStore } from '../stores/modules/auth';
+import { embeddedMode } from '../integration/platform-url-context';
 
 export class ApiError extends Error {
   constructor(
@@ -19,6 +22,35 @@ export const http = axios.create({
   baseURL: import.meta.env?.VITE_API_BASE_URL || '/api',
   timeout: 30000,
 });
+http.interceptors.request.use((config) => {
+  const auth = useAuthStore(pinia);
+  if (!embeddedMode && auth.loginMode === 'external') return config;
+  if (embeddedMode && (!auth.isIntegrated || !auth.platformReady)) {
+    throw new ApiError(0, '尚未收到平台登录信息，请等待初始化');
+  }
+
+  // This client is reserved for the configured evaluation backend.
+  // Reject attempts to override the destination and leak identity headers.
+  const pageUrl = typeof window === 'undefined' ? 'http://localhost/' : window.location?.href ?? 'http://localhost/';
+  const base = new URL(String(http.defaults.baseURL || '/api'), pageUrl);
+  const destination = new URL(http.getUri(config), pageUrl);
+  const prefix = base.pathname.replace(/\/+$/, '');
+  if (destination.origin !== base.origin ||
+      (destination.pathname !== prefix && !destination.pathname.startsWith(`${prefix}/`))) {
+    throw new ApiError(0, '拒绝向非测评服务发送身份信息');
+  }
+
+  config.headers = {
+    ...config.headers,
+    token: auth.token ?? '',
+    user_team_id: auth.teamId ?? '',
+    user_team_name: encodeURIComponent(auth.teamName ?? ''),
+    user_id: auth.userId ?? '',
+    user_name: encodeURIComponent(auth.userName ?? ''),
+  };
+  return config;
+});
+
 http.interceptors.response.use(
   (response) => {
     const payload = response.data;

@@ -45,10 +45,10 @@ watch(inbankPlatformSelected, (selected) => {
   if (taskKind.value === 'ab' && !selected) concurrency.value = 1;
 });
 const platformDirectory = computed(() =>
-  auth.loginMode === 'external' ? localAgentDirectory : agentDirectory,
+  auth.usesPlatformDirectory ? agentDirectory : localAgentDirectory,
 );
-const platformToken = computed(() => (auth.loginMode === 'bank' ? auth.token : 'local'));
-const platformTeamId = computed(() => (auth.loginMode === 'bank' ? auth.teamId : ''));
+const platformToken = computed(() => (auth.usesPlatformDirectory ? auth.token : 'local'));
+const platformTeamId = computed(() => (auth.usesPlatformDirectory ? auth.teamId : ''));
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   platformSelection.value = selection;
   if (selection?.localTarget?.adapter_type === 'local_bank') {

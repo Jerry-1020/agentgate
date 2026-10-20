@@ -156,6 +156,7 @@ const overviewDays = ref(7);
 const auth = useAuthStore();
 const authLabel = computed(() => auth.modeLabel);
 async function confirmLogout() {
+  if (auth.isIntegrated) return;
   try {
     await ElMessageBox.confirm(
       (hasUnsavedChanges.value ? '当前页面有未保存的修改，登出将放弃这些修改。' : '') +
@@ -354,7 +355,7 @@ async function taskRerunCreated(taskId: string) {
 }
 </script>
 <template>
-  <EvaluationLayout :page="page" :online="online" :auth-label="authLabel" @logout="confirmLogout">
+  <EvaluationLayout :page="page" :online="online" :auth-label="authLabel" :hide-auth-controls="auth.isIntegrated" @logout="confirmLogout">
     <div v-if="error" class="notice error" role="alert">
       服务连接失败：{{ error }}
       <button class="link" @click="refresh">重试</button>。不使用模拟数据替代。
