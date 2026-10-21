@@ -33,11 +33,17 @@ class WritebackResultCaseRequest(BaseModel):
 
 
 @router.get("/overview")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def overview(dependencies: Dependencies) -> dict[str, Any]:
     return dependencies.results.overview()
 
 
 @router.get("/runs/{run_id}")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def run_report(run_id: str, dependencies: Dependencies) -> EvaluationReport:
     try:
         return dependencies.results.get_report(run_id)
@@ -61,6 +67,9 @@ def result_analytics(
 
 
 @router.get("/runs/{run_id}/samples")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def available_samples(run_id: str, dependencies: Dependencies):
     """Return persisted evidence even while a run is pending, failed or cancelled.
 

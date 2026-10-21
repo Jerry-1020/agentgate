@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import evaluation_projection as projection
+
 import hashlib
 import os
 from collections.abc import Iterator, Sequence
@@ -93,6 +95,9 @@ def _values(table: Table, model: BaseModel) -> dict:
         data["target_ref_key"] = _target_key(model.ref)
     if table is s.dataset_versions:
         data["draft_slot"] = 1 if model.status == DatasetVersionStatus.DRAFT else None
+        data["sample_count"] = len(model.cases)
+    if table is s.evaluation_tasks:
+        data["first_run_key"] = _digest(model.run_ids[0])
     for original, key in _KEY_FIELDS.items():
         if key in table.c and original in data:
             data[key] = _digest(data[original])
@@ -143,6 +148,8 @@ def _models(db: Connection, table: Table, model_type: type[M], *, lock=False, **
             name: value
             for name, value in _values(table, model).items()
             if name not in ("payload", "metadata_payload")
+            and not (table is s.dataset_versions and name == "sample_count")
+            and not (table is s.evaluation_tasks and name in {"name", "kind", "first_run_key"})
         }
         if any(row[name] != value for name, value in indexed.items()):
             raise ValueError("stored indexed columns do not match payload")
@@ -432,6 +439,7 @@ class MySQLRepository:
                    for run_id in task.run_ids + task.previous_run_ids):
                 raise ValueError("task does not exist")
             for run_id in task.run_ids + task.previous_run_ids:
+                projection.remove_run(db, run_id)
                 db.execute(
                     s.run_asset_refs.delete().where(s.run_asset_refs.c.run_key == _digest(run_id))
                 )
@@ -877,6 +885,7 @@ class MySQLRepository:
 
     def _insert_run(self, db: Connection, run: EvaluationRun) -> None:
         _insert(db, s.runs, run)
+        projection.put_run(db, run)
         manifest = run.manifest
         dataset = manifest.dataset
         refs = [("dataset", "", dataset.dataset_id, str(dataset.version), dataset.content_sha256)]
@@ -928,6 +937,53 @@ class MySQLRepository:
                     content_sha256=digest,
                 )
             )
+
+    def audit_evaluation_summaries(self):
+        with self._transaction() as db:
+            return projection.audit(db)
+
+    def list_summary_backfill_ids(self, *, entity, after_id=None, limit=50):
+        with self._transaction() as db:
+            return projection.backfill_ids(db, entity, after_id, limit)
+
+    def read_run_summary_source(self, run_id):
+        with self._transaction() as db:
+            return projection.source(db, run_id)
+
+    def rebuild_run_summary(self, source, summary):
+        with self._transaction() as db:
+            return projection.rebuild_run(db, source, summary)
+
+    def rebuild_task_query_fields(self, task_id):
+        with self._transaction() as db:
+            return projection.rebuild_entity(db, 'task', task_id)
+
+    def rebuild_dataset_version_query_fields(self, version_id):
+        with self._transaction() as db:
+            return projection.rebuild_entity(db, 'dataset_version', version_id)
+
+    def save_completed_run(self, run, summary):
+        with self._transaction() as db:
+            stored = _one(db, s.runs, EvaluationRun, id=run.id, lock=True)
+            if stored is None:
+                raise ValueError("unknown EvaluationRun")
+            if stored.status not in {RunStatus.RUNNING, RunStatus.COMPLETED}:
+                raise ValueError("run cannot complete from its current state")
+            if any(getattr(stored, f) != getattr(run, f) for f in ("manifest", "created_at", "scheduled_for", "started_at", "user_team_id")):
+                raise ValueError("immutable run fields changed")
+            if stored.completed_at is not None and stored != run:
+                raise ValueError("terminal EvaluationRun is immutable")
+            results = _models(db, s.results, EvaluationResult, run_id=run.id)
+            projection.put_completed(db, run, summary, results)
+            _update(db, s.runs, run)
+
+    def get_evaluation_overview_summary(self, query, *, user_team_id):
+        with self._transaction() as db:
+            return projection.overview(db, query, user_team_id)
+
+    def list_evaluation_task_summaries(self, query, *, user_team_id):
+        with self._transaction() as db:
+            return projection.task_page(db, query, user_team_id)
 
     def save_run(self, run: EvaluationRun) -> None:
         with self._transaction() as db:
@@ -1194,6 +1250,7 @@ class MySQLRepository:
                         raise ValueError("EvaluationResult is immutable")
                 else:
                     _insert(db, s.results, item)
+                    projection.update_progress(db, item.run_id)
 
     def list_results(self, run_id: str) -> list[EvaluationResult]:
         with self._transaction() as db:
@@ -1215,6 +1272,7 @@ class MySQLRepository:
                 task_key=_digest(task_id), task_id=task_id,
             ))
             _update(db, s.evaluation_tasks, updated)
+            projection.put_task(db, updated)
         return updated
 
     def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
@@ -1270,6 +1328,7 @@ class MySQLRepository:
                         task_id=task.id,
                     )
                 )
+        projection.put_task(db, task)
         return task
 
     def save_evaluation_task(self, task: EvaluationTask) -> EvaluationTask:

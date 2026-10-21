@@ -4,7 +4,7 @@ References are enforced by repository transactions so the same schema can be use
 on TDSQL deployments that do not implement foreign keys.
 """
 
-from sqlalchemy import BigInteger, Column, Index, MetaData, SmallInteger, Table, UniqueConstraint
+from sqlalchemy import Double, Integer, BigInteger, Column, Index, MetaData, SmallInteger, Table, UniqueConstraint
 from sqlalchemy.dialects.mysql import BINARY, CHAR, DATETIME, LONGTEXT, VARCHAR
 
 metadata = MetaData(
@@ -65,6 +65,7 @@ datasets = _table(
 
 dataset_versions = _table(
     "agentgate_dataset_versions",
+    Column("sample_count", BigInteger, nullable=True),
     *_identity(),
     _key("dataset_key"),
     _text("dataset_id"),
@@ -206,6 +207,9 @@ skill_analysis_reviews = _table(
 
 evaluation_tasks = _table(
     "agentgate_evaluation_tasks",
+    _text("name", nullable=True),
+    Column("kind", VARCHAR(16), nullable=True),
+    Column("first_run_key", BINARY(32), nullable=True),
     *_identity(),
     _time("created_at"),
     _text("payload"),
@@ -213,11 +217,14 @@ evaluation_tasks = _table(
 )
 evaluation_task_runs = _table(
     "agentgate_evaluation_task_runs",
+    Column("is_current", SmallInteger, nullable=True),
+    Column("position", Integer, nullable=True),
     _key("run_key", primary=True),
     _text("run_id"),
     _key("task_key"),
     _text("task_id"),
     Index("ix_agentgate_evaluation_task_runs_task", "task_key"),
+    Index("ix_task_runs_current_position", "task_key", "is_current", "position"),
 )
 optimization_reports = _table(
     "agentgate_optimization_reports",
@@ -238,4 +245,23 @@ api_keys = _table(
     _text("metadata_payload"),
     _text("encrypted_api_key"),
     Index("ix_api_keys_created", "created_at"),
+)
+
+run_summaries = _table(
+    "agentgate_run_summaries", _key("run_key", primary=True), _text("run_id"),
+    _hash("manifest_sha256"), _text("display_payload"), _text("fallback_name"),
+    Column("total_cases", BigInteger, nullable=False),
+    Column("overall_score", Double, nullable=True),
+    Column("gate_reason", VARCHAR(64), nullable=True),
+    Column("summary_version", Integer, nullable=True),
+    Column("result_count", BigInteger, nullable=True),
+    Column("source_results_sha256", CHAR(64), nullable=True),
+)
+run_case_progress = _table(
+    "agentgate_run_case_progress", _key("run_key", primary=True),
+    _key("case_key", primary=True), Column("completed", SmallInteger, nullable=False),
+)
+run_expected_evaluators = _table(
+    "agentgate_run_expected_evaluators", _key("run_key", primary=True),
+    _key("evaluator_key", primary=True),
 )

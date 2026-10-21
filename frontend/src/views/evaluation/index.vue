@@ -10,23 +10,24 @@ import EvaluationLayout from '../../layout/EvaluationLayout.vue';
 import TaskStaticAnalysis from './components/TaskStaticAnalysis.vue';
 import TaskTuning from './components/TaskTuning.vue';
 import EvaluationTaskForm from './components/EvaluationTaskForm.vue';
-import { readTaskLinks, refreshTaskLinks, includeCurrentTaskRuns, type TaskLink } from './utils/task-links';
+import {
+  readTaskLinks,
+  refreshTaskLinks,
+  includeCurrentTaskRuns,
+  type TaskLink,
+} from './utils/task-links';
 import { shallowRef, computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+  getOverviewSummary,
+  getTaskSummaries,
+  type TaskAction,
+} from '../../api/evaluation-summaries';
+import { dayWindow, taskPath } from './utils/summary-query';
+import { useSummaryQuery } from './composables/use-summary-query';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/modules/auth';
-import {
-  api,
-  request,
-  statusLabel,
-  kindLabel,
-  type EvaluationRun,
-  type Overview,
-  type DatasetSummary,
-  type EvaluatorSummary,
-  type Report,
-} from '../../api/evaluations';
+import { api, request, statusLabel, type EvaluationRun } from '../../api/evaluations';
 import OverviewMetrics from './components/OverviewMetrics.vue';
-import DatasetMerge from './components/DatasetMerge.vue';
 import RerunDialog from './components/RerunDialog.vue';
 import DatasetWorkspace from '../datasets/index.vue';
 import ScoringTemplates from './components/ScoringTemplates.vue';
@@ -37,11 +38,7 @@ import TaskList from './components/TaskList.vue';
 import Comparisons from './components/Comparisons.vue';
 import Analysis from './components/UpstreamAnalysis.vue';
 import Stability from './components/Stability.vue';
-import {
-  evaluatorScenarios,
-  recommendEvaluators,
-  recommendationReason,
-} from './utils/evaluator-guidance';
+
 const datasetDirty = ref(false),
   evaluatorDirty = ref(false),
   settingsDirty = ref(false);
@@ -71,21 +68,6 @@ watch(
         : 'results'),
   { immediate: true },
 );
-function pairRows(id: string) {
-  return (linkFor(id)?.runIds ?? [id]).map((runId, index) => {
-    const run = runs.value.find((r) => r.id === runId);
-    return {
-      id: runId,
-      side: index === 0 ? 'A' : 'B',
-      name: run?.manifest.target.display_name ?? '运行记录待加载',
-      version: run?.manifest.target.ref.external_version_id ?? '—',
-    };
-  });
-}
-const taskType = ref(''),
-  datasetFilter = ref(''),
-  evaluatorFilter = ref(''),
-  timeOrder = ref('newest');
 const taskLinks = ref(readTaskLinks()),
   detailDialog = ref('');
 function syncTaskLinks() {
@@ -98,27 +80,11 @@ const pairLink = computed(() =>
 function linkFor(id: string) {
   return taskLinks.value.find((t) => t.id === id || t.runIds.includes(id));
 }
-function groupStatus(run: EvaluationRun, records = runs.value) {
-  const link = linkFor(run.id);
-  if (!link || link.runIds.length === 1) return run.status;
-  const states = link.runIds.map((id) => records.find((r) => r.id === id)?.status);
-  if (states.includes('failed')) return 'failed';
-  if (states.includes('cancelled')) return 'cancelled';
-  if (states.every((s) => s === 'completed')) return 'completed';
-  return states.includes('running') || states.includes('completed') ? 'running' : 'pending';
-}
-const datasetOptions = computed(() => [
-  ...new Map(
-    runs.value.map((r) => [r.manifest.dataset.dataset_id, r.manifest.dataset.dataset_name]),
-  ).entries(),
-]);
-const evaluatorOptions = computed(() => [
-  ...new Set(runs.value.flatMap((r) => r.manifest.primary_evaluator_ids)),
-]);
 const runId = computed(() => {
   const id = route.value.split('/')[1]?.split('?')[0] || '';
   return /^(tasks|results)\//.test(route.value)
-    ? taskLinks.value.find(t => t.id === id)?.runIds[0] ?? id : id;
+    ? (taskLinks.value.find((t) => t.id === id)?.runIds[0] ?? id)
+    : id;
 });
 function go(value: string) {
   const id = value.split('/')[1];
@@ -137,21 +103,13 @@ function clearDirtyState() {
 }
 const confirmNavigation: NavigationGuard = (to, from) => {
   if (to.fullPath === from.fullPath) return;
-  if (
-    hasUnsavedChanges.value &&
-    !window.confirm('当前页面有未保存的修改，确定离开并放弃修改？')
-  )
+  if (hasUnsavedChanges.value && !window.confirm('当前页面有未保存的修改，确定离开并放弃修改？'))
     return false;
   clearDirtyState();
 };
 onBeforeRouteUpdate(confirmNavigation);
 onBeforeRouteLeave(confirmNavigation);
-const runs = shallowRef<EvaluationRun[]>([]),
-  overview = ref<Overview | null>(null);
-const latestRuns = computed(() => {
-  const history = new Set(taskLinks.value.flatMap(t => t.previousRunIds ?? []));
-  return runs.value.filter(r => !history.has(r.id));
-});
+const runs = shallowRef<EvaluationRun[]>([]);
 const overviewDays = ref(7);
 const auth = useAuthStore();
 const authLabel = computed(() => auth.modeLabel);
@@ -174,107 +132,13 @@ async function confirmLogout() {
 const error = ref(''),
   online = ref<boolean | null>(null),
   loading = ref(false);
-const query = ref(''),
-  status = ref(''),
-  listLoading = ref(false);
-const reportSummaries = ref<Record<string, Report>>({}),
-  reportErrors = ref<Record<string, boolean>>({});
-const visibleRuns = shallowRef<EvaluationRun[]>([]),
-  totalRuns = ref(0),
-  pageNumber = ref(1),
-  pageSize = ref(20);
-let pageRequest = 0;
-async function loadPage() {
-  const ticket = ++pageRequest;
-  listLoading.value = true;
-  try {
-    const records = await request<EvaluationRun[]>('/runs?limit=200');
-    let filtered = records;
-    filtered = filtered.filter((r) => {
-      const link = linkFor(r.id);
-      if (link && link.runIds[0] !== r.id) return false;
-      return (
-        (link?.runIds ?? [r.id]).some((id) => {
-          const item = records.find((x) => x.id === id);
-          return JSON.stringify([
-            id,
-            item?.manifest.target.display_name,
-            item?.manifest.target.ref.external_version_id,
-            item?.manifest.dataset.dataset_name,
-          ])
-            .toLowerCase()
-            .includes(query.value.toLowerCase());
-        }) &&
-        (!taskType.value ||
-          (link?.kind === 'stability' ? 'single' : (link?.kind ?? 'single')) === taskType.value) &&
-        (!status.value || groupStatus(r, records) === status.value) &&
-        (!datasetFilter.value || r.manifest.dataset.dataset_id === datasetFilter.value) &&
-        (!evaluatorFilter.value || r.manifest.primary_evaluator_ids.includes(evaluatorFilter.value))
-      );
-    });
-    if (timeOrder.value === 'oldest') filtered.reverse();
-    const result = {
-      items: filtered.slice(
-        (pageNumber.value - 1) * pageSize.value,
-        pageNumber.value * pageSize.value,
-      ),
-      total: filtered.length,
-    };
-    if (ticket === pageRequest) {
-      visibleRuns.value = result.items;
-      totalRuns.value = result.total;
-      if (page.value === 'tasks')
-        void loadSummaries(
-          records.filter((r) =>
-            result.items.some(
-              (item) => item.id === r.id || linkFor(item.id)?.runIds.includes(r.id),
-            ),
-          ),
-          ticket,
-        );
-    }
-  } catch (e) {
-    if (ticket === pageRequest) error.value = String(e);
-  } finally {
-    if (ticket === pageRequest) listLoading.value = false;
-  }
-}
-async function loadSummaries(rows: EvaluationRun[], ticket: number) {
-  for (let start = 0; start < rows.length; start += 4) {
-    if (ticket !== pageRequest) return;
-    await Promise.all(
-      rows
-        .slice(start, start + 4)
-        .filter((r) => r.status === 'completed' && !reportSummaries.value[r.id])
-        .map(async (r) => {
-          try {
-            const report = await api.report(r.id);
-            if (ticket === pageRequest) {
-              reportSummaries.value[r.id] = report;
-              reportErrors.value[r.id] = false;
-            }
-          } catch {
-            if (ticket === pageRequest) reportErrors.value[r.id] = true;
-          }
-        }),
-    );
-  }
-}
-function resultSummary(id: string) {
-  const report = reportSummaries.value[id];
-  return report?.metrics.find((m) => m.level === 'overall');
-}
-watch([query, status, pageSize, taskType, datasetFilter, evaluatorFilter, timeOrder], () => {
-  pageNumber.value = 1;
-  void loadPage();
-});
-watch(pageNumber, () => void loadPage());
 const actionRun = ref('');
-async function runAction(id: string, action: 'cancel' | 'rerun') {
+const listRefreshToken = ref(0);
+async function runAction({ runId: id, taskId, action }: TaskAction) {
   if (action === 'rerun') {
     if (rerunId.value) return;
     rerunId.value = id;
-    rerunTaskId.value = linkFor(id)?.id ?? '';
+    rerunTaskId.value = taskId ?? '';
     return;
   }
   if (actionRun.value) return;
@@ -285,7 +149,7 @@ async function runAction(id: string, action: 'cancel' | 'rerun') {
       cancelButtonText: '返回',
     });
     await request(`/runs/${encodeURIComponent(id)}/cancel`, 'POST');
-    await refresh();
+    listRefreshToken.value++;
     ElMessage.success('取消请求已提交');
   } catch (e) {
     if (e !== 'cancel' && e !== 'close') ElMessage.error(String(e));
@@ -293,37 +157,112 @@ async function runAction(id: string, action: 'cancel' | 'rerun') {
     actionRun.value = '';
   }
 }
-let timer: ReturnType<typeof setTimeout> | undefined;
-let disposed = false;
+const identity = () => [auth.loginMode, auth.teamId, auth.userId, auth.token, auth.platformReady];
+const overviewQuery = useSummaryQuery({
+  source: () => [page.value, overviewDays.value],
+  identity,
+  ready: () => page.value === 'overview' && auth.authenticated,
+  load: async (signal) => {
+    const [summary, recent] = await Promise.all([
+      getOverviewSummary(dayWindow(overviewDays.value), signal),
+      getTaskSummaries({ page: 1, page_size: 6 }, signal),
+    ]);
+    return { summary, recent };
+  },
+  poll: () => true,
+});
+const overviewData = overviewQuery.data;
+const overviewError = overviewQuery.error;
+const latestTasks = computed(() => overviewData.value?.recent.items ?? []);
+watch([overviewData, overviewError], () => {
+  if (page.value === 'overview')
+    online.value = overviewError.value ? false : overviewData.value ? true : null;
+});
+let contextRequest = 0;
+let contextTimer: ReturnType<typeof setTimeout> | undefined;
+const detailReady = ref(false);
+function needsContext() {
+  return (page.value === 'tasks' && !!route.value.split('/')[1]) || page.value === 'analysis';
+}
 async function refresh() {
-  if (loading.value) return;
+  clearTimeout(contextTimer);
+  const ticket = ++contextRequest;
+  if (page.value === 'overview') {
+    await overviewQuery.reload();
+    return;
+  }
+  if (!needsContext()) {
+    listRefreshToken.value++;
+    return;
+  }
+  if (document.hidden || !auth.authenticated) return;
   loading.value = true;
   try {
-    const [o, r] = await Promise.all([api.overview(), api.runs(), refreshTaskLinks()]);
-    overview.value = o;
-    runs.value = await includeCurrentTaskRuns(r);
+    // Legacy associations remain detail-only; summaries never depend on this cache.
+    const [r] = await Promise.all([api.runs(), refreshTaskLinks()]);
+    const records = await includeCurrentTaskRuns(r);
+    if (ticket !== contextRequest) return;
+    runs.value = records;
     taskLinks.value = readTaskLinks();
     online.value = true;
     error.value = '';
-  } catch (e) {
-    online.value = false;
-    error.value = e instanceof Error ? e.message : String(e);
+    detailReady.value = true;
+  } catch (cause) {
+    if (ticket === contextRequest) {
+      online.value = false;
+      error.value = String(cause);
+    }
   } finally {
-    loading.value = false;
+    if (ticket === contextRequest) {
+      loading.value = false;
+      const ids = currentLink.value?.runIds ?? [runId.value];
+      const active = runs.value.some(
+        (run) =>
+          (page.value === 'analysis' || ids.includes(run.id)) &&
+          ['pending', 'scheduled', 'running'].includes(run.status),
+      );
+      if (!error.value && active && !document.hidden && needsContext())
+        contextTimer = setTimeout(() => void refresh(), 5000);
+    }
   }
 }
-async function poll() {
-  await refresh();
-  if (!disposed) timer = setTimeout(poll, 5000);
+watch(
+  [
+    route,
+    ...[
+      () => auth.loginMode,
+      () => auth.teamId,
+      () => auth.userId,
+      () => auth.token,
+      () => auth.platformReady,
+    ],
+  ],
+  () => {
+    contextRequest++;
+    clearTimeout(contextTimer);
+    loading.value = false;
+    detailReady.value = false;
+    runs.value = [];
+    taskLinks.value = [];
+    error.value = '';
+    if (needsContext() && auth.authenticated) void refresh();
+  },
+  { immediate: true },
+);
+function contextVisibility() {
+  clearTimeout(contextTimer);
+  if (document.hidden) contextRequest++;
+  else if (needsContext()) void refresh();
 }
 onMounted(() => {
   window.addEventListener('task-links-updated', syncTaskLinks);
-  void poll();
+  document.addEventListener('visibilitychange', contextVisibility);
 });
 onUnmounted(() => {
-  disposed = true;
-  clearTimeout(timer);
+  contextRequest++;
+  clearTimeout(contextTimer);
   window.removeEventListener('task-links-updated', syncTaskLinks);
+  document.removeEventListener('visibilitychange', contextVisibility);
 });
 const create = ref(false);
 const formSource = ref<{
@@ -342,20 +281,23 @@ async function taskCreated(link: TaskLink) {
   create.value = false;
   taskLinks.value = readTaskLinks();
   go((link.kind === 'stability' ? 'stability/' : 'tasks/') + link.id);
-  await refresh();
 }
 async function taskRerunCreated(taskId: string) {
   rerunId.value = '';
   rerunTaskId.value = '';
   detailDialog.value = '';
-  await refreshTaskLinks();
-  syncTaskLinks();
-  await refresh();
-  go('tasks/' + taskId);
+  if (currentRoute.path === '/tasks/' + taskId) await refresh();
+  else go('tasks/' + taskId);
 }
 </script>
 <template>
-  <EvaluationLayout :page="page" :online="online" :auth-label="authLabel" :hide-auth-controls="auth.isIntegrated" @logout="confirmLogout">
+  <EvaluationLayout
+    :page="page"
+    :online="online"
+    :auth-label="authLabel"
+    :hide-auth-controls="auth.isIntegrated"
+    @logout="confirmLogout"
+  >
     <div v-if="error" class="notice error" role="alert">
       服务连接失败：{{ error }}
       <button class="link" @click="refresh">重试</button>。不使用模拟数据替代。
@@ -377,7 +319,11 @@ async function taskRerunCreated(taskId: string) {
           </div>
         </div>
       </div>
-      <OverviewMetrics :days="overviewDays" @update:days="overviewDays = $event" />
+      <OverviewMetrics
+        :data="overviewData?.summary ?? null"
+        :error="overviewError"
+        @retry="overviewQuery.reload"
+      />
       <div class="card">
         <div class="toolbar">
           <h2 class="section-title">最近测评任务</h2>
@@ -393,20 +339,22 @@ async function taskRerunCreated(taskId: string) {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in latestRuns.slice(0, 6)" :key="r.id">
+            <tr v-for="r in latestTasks" :key="r.id">
               <td class="nowrap">
-                {{ r.manifest.target.display_name }}
-                <span class="muted">· {{ r.manifest.target.ref.external_version_id }}</span>
+                {{ r.runs[0].target_name }}
+                <span class="muted">· {{ r.runs[0].target_version }}</span>
               </td>
-              <td class="nowrap">{{ r.manifest.dataset.dataset_name }}</td>
+              <td class="nowrap">{{ r.runs[0].dataset_name }}</td>
               <td class="nowrap">{{ statusLabel(r.status) }}</td>
               <td class="nowrap">
-                <button class="link" @click="go('tasks/' + (linkFor(r.id)?.id ?? r.id))">查看</button>
+                <button class="link" @click="go(taskPath(r))">查看</button>
               </td>
             </tr>
           </tbody>
         </table>
-        <p v-if="!runs.length" class="empty">尚无测评任务，请从“测评任务”发起。</p>
+        <p v-if="overviewData && !latestTasks.length" class="empty">
+          尚无测评任务，请从“测评任务”发起。
+        </p>
       </div>
     </template>
     <ModelSettings v-else-if="page === 'settings'" @dirty-change="settingsDirty = $event" />
@@ -420,10 +368,7 @@ async function taskRerunCreated(taskId: string) {
     <section v-else-if="page === 'dataset-merge'" class="card">
       多 Skill 合并需求已挂起，当前不提供创建入口。<a href="#datasets">返回测评集</a>
     </section>
-    <section
-      v-else-if="page === 'annotations' || page === 'annotation-templates'"
-      class="card"
-    >
+    <section v-else-if="page === 'annotations' || page === 'annotation-templates'" class="card">
       <h1 class="page-title">标注</h1>
       <p class="empty">待实现</p>
     </section>
@@ -441,7 +386,8 @@ async function taskRerunCreated(taskId: string) {
       @launch="openCreate({ id: '', version: 0, evaluatorId: $event })"
     />
     <template v-else-if="page === 'tasks' || page === 'results'">
-      <template v-if="runId">
+      <p v-if="runId && !detailReady" class="empty">正在加载任务上下文…</p>
+      <template v-else-if="runId">
         <section v-if="pairLink" class="card task-linked-summary">
           <a href="#tasks" class="link">← 返回测评任务</a>
           <h3>A/B试验</h3>
@@ -490,10 +436,23 @@ async function taskRerunCreated(taskId: string) {
           :key="pairLink.id"
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
           embedded />
-        <RunDetail v-if="!pairLink" :key="route + ':' + runId" :id="runId" :task-id="currentLink?.id" :return-page="page" @navigate="go" @rerun-created="taskRerunCreated"
+        <RunDetail
+          v-if="!pairLink"
+          :key="route + ':' + runId"
+          :id="runId"
+          :task-id="currentLink?.id"
+          :return-page="page"
+          @navigate="go"
+          @rerun-created="taskRerunCreated"
       /></template>
       <template v-else>
-        <TaskList @create="openCreate()" @navigate="go" @action="runAction" />
+        <TaskList
+          :refresh-token="listRefreshToken"
+          @connection="online = $event"
+          @create="openCreate()"
+          @navigate="go"
+          @action="runAction"
+        />
       </template>
     </template>
     <Stability v-else-if="page === 'stability'" :key="route" :id="runId" @navigate="go" />

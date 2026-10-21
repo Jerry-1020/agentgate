@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentgate.result.summary import build_completed_run_summary
+
 import logging
 import time
 from collections import deque
@@ -84,7 +86,8 @@ class RunEngine:
             self._raise_if_cancelled(running.id)
 
             completed = transition_run(running, RunStatus.COMPLETED)
-            self.repository.save_run(completed)
+            summary = build_completed_run_summary(completed, self.repository.list_results(completed.id))
+            self.repository.save_completed_run(completed, summary)
             LOGGER.info(
                 "Run execution completed: run_id=%s duration=%.1fs",
                 run.id, time.monotonic() - start_time,
