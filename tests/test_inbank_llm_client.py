@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
+from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -218,6 +221,94 @@ def test_complete_raises_unavailable_on_sdk_error(monkeypatch: pytest.MonkeyPatc
     client.close()
 
 
+def test_repeated_completions_and_async_close_use_the_same_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient()
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    try:
+        for prompt in ("case-1", "case-2", "case-2-turn-2"):
+            assert client.complete(_make_request(user_prompt=prompt)).text == prompt
+        assert fake.loop is not None and not fake.loop.is_closed()
+    finally:
+        client.close()
+    client.close()
+    assert fake.close_count == 1
+    assert fake.loop.is_closed()
+
+
+def test_simultaneous_callers_can_share_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient()
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    ready = Barrier(2)
+
+    def complete(prompt: str) -> str:
+        ready.wait(timeout=5)
+        return client.complete(_make_request(user_prompt=prompt)).text
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            responses = list(workers.map(complete, ("case-1", "case-2")))
+        assert responses == ["case-1", "case-2"]
+    finally:
+        client.close()
+    assert fake.close_count == 1
+    assert fake.loop is not None and fake.loop.is_closed()
+
+
+def test_each_completion_preserves_its_callers_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_case = ContextVar("current_case", default="unset")
+
+    def create(**kwargs: Any) -> Any:
+        case_id = current_case.get()
+        current_case.set("sdk-internal")
+        return _MockStream([_delta_chunk(case_id)])
+
+    _patch_build_sdk_client(monkeypatch, _FakeClientWithCallback(create))
+    client = _make_client()
+    try:
+        for case_id in ("case-1", "case-2"):
+            token = current_case.set(case_id)
+            try:
+                assert client.complete(_make_request()).text == case_id
+                assert current_case.get() == case_id
+            finally:
+                current_case.reset(token)
+    finally:
+        client.close()
+
+
+def test_timeout_does_not_break_later_completions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient()
+    original_create = fake.create
+    calls = 0
+
+    async def create(**kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        stream = await original_create(**kwargs)
+        return _SlowStream() if calls == 1 else stream
+
+    fake.create = create
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    try:
+        with pytest.raises(JudgeModelTimeout):
+            client.complete(_make_request(timeout_seconds=0.01))
+        assert client.complete(_make_request(user_prompt="next-case")).text == "next-case"
+    finally:
+        client.close()
+    assert fake.close_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Stream chunk handling tests
 # ---------------------------------------------------------------------------
@@ -335,9 +426,85 @@ def test_close_silent_when_no_close_method(monkeypatch: pytest.MonkeyPatch) -> N
     client.close()
 
 
+def test_close_from_async_application_lifespan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient()
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    assert client.complete(_make_request()).text == "hello"
+
+    async def shutdown() -> None:
+        application_loop = asyncio.get_running_loop()
+        client.close()
+        await asyncio.sleep(0)
+        assert asyncio.get_running_loop() is application_loop
+        assert not application_loop.is_closed()
+
+    asyncio.run(shutdown())
+    assert fake.close_count == 1
+    assert fake.loop is not None and fake.loop.is_closed()
+
+
+def test_close_before_first_request_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient()
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    client.close()
+    client.close()
+    assert fake.close_count == 1
+    assert fake.loop is not None and fake.loop.is_closed()
+    with pytest.raises(JudgeModelUnavailable):
+        client.complete(_make_request())
+
+
+def test_sdk_close_error_still_releases_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _LoopBoundClient(fail_close=True)
+    _patch_build_sdk_client(monkeypatch, fake)
+    client = _make_client()
+    assert client.complete(_make_request()).text == "hello"
+    client.close()
+    client.close()
+    assert fake.close_count == 1
+    assert fake.loop is not None and fake.loop.is_closed()
+
+
 # ---------------------------------------------------------------------------
 # Helpers / fakes
 # ---------------------------------------------------------------------------
+
+
+class _LoopBoundClient:
+    """Model the event-loop affinity of a reusable async SDK connection pool."""
+
+    def __init__(self, *, fail_close: bool = False) -> None:
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.close_count = 0
+        self.fail_close = fail_close
+        self.chat = SimpleNamespace(completions=self)
+
+    def _check_loop(self) -> None:
+        running = asyncio.get_running_loop()
+        if self.loop is None:
+            self.loop = running
+        elif self.loop is not running:
+            raise RuntimeError("SDK connection reused across event loops")
+
+    async def create(self, **kwargs: Any) -> Any:
+        self._check_loop()
+        await asyncio.sleep(0.01)
+        return _MockStream([_delta_chunk(kwargs["messages"][-1]["content"])])
+
+    async def close(self) -> None:
+        self._check_loop()
+        await asyncio.sleep(0)
+        self.close_count += 1
+        if self.fail_close:
+            raise RuntimeError("SDK cleanup failed")
 
 
 class _MockStream:
