@@ -11,6 +11,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
+from inspect import isawaitable
+from threading import Lock
 from typing import Any
 
 from agentgate.evaluator.judge import (
@@ -69,6 +73,9 @@ class InbankLLMModelClient:
         )
         self._session_id = _require_text(session_id, "session_id")
         self._client = self._build_sdk_client()
+        self._runner = asyncio.Runner(loop_factory=asyncio.new_event_loop)
+        self._lock = Lock()
+        self._closed = False
 
     def __repr__(self) -> str:
         return (
@@ -99,9 +106,14 @@ class InbankLLMModelClient:
         )
         started = time.monotonic()
         try:
-            text, finish_reason = asyncio.run(
-                self._collect_stream(create_kwargs, request.timeout_seconds)
-            )
+            # The SDK connection pool must not outlive its event loop.
+            with self._lock:
+                if self._closed:
+                    raise RuntimeError("Inbank LLM client is closed")
+                text, finish_reason = self._runner.run(
+                    self._collect_stream(create_kwargs, request.timeout_seconds),
+                    context=copy_context(),
+                )
         except TimeoutError as exc:
             LOGGER.warning(
                 "Inbank LLM Judge timed out after %gs: provider_id=%s, model=%s",
@@ -152,14 +164,35 @@ class InbankLLMModelClient:
         )
 
     def close(self) -> None:
-        """Release SDK client resources if a close method is available."""
+        """Close the SDK client on its own loop before releasing that loop."""
 
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                self._close_runner()
+            else:
+                # FastAPI lifespan invokes this synchronous hook from an async loop.
+                with ThreadPoolExecutor(max_workers=1) as worker:
+                    worker.submit(self._close_runner).result()
+
+    def _close_runner(self) -> None:
+        try:
+            self._runner.run(self._close_sdk_client())
+        except Exception:
+            LOGGER.debug("Inbank LLM SDK close() failed", exc_info=True)
+        finally:
+            self._runner.close()
+
+    async def _close_sdk_client(self) -> None:
         close = getattr(self._client, "close", None)
         if callable(close):
-            try:
-                close()
-            except Exception:
-                LOGGER.debug("Inbank LLM SDK close() failed", exc_info=True)
+            result = close()
+            if isawaitable(result):
+                await result
 
     async def _collect_stream(
         self,
