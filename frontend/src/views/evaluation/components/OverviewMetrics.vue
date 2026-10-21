@@ -1,118 +1,33 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, onUnmounted } from 'vue';
-import { api, score, type EvaluationRun } from '../../../api/evaluations';
-import { readTaskLinks, refreshTaskLinks } from '../utils/task-links';
-const props = defineProps<{ days?: number }>();
-const emit = defineEmits<{ 'update:days': [value: number] }>();
-const days = ref(props.days ?? 7),
-  data = ref<any>(null),
-  error = ref(''),
-  loading = ref(false);
-const taskRuns = shallowRef<EvaluationRun[]>([]);
-const taskCount = computed(() => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (days.value - 1));
-  const tasks = readTaskLinks();
-  const assigned = new Set(
-    tasks.flatMap((task) => [...task.runIds, ...(task.previousRunIds ?? [])]),
-  );
-  return (
-    tasks.filter(
-      (task) =>
-        new Date(
-          task.createdAt ??
-            taskRuns.value.find((run) => run.id === task.runIds[0])?.created_at ??
-            '',
-        ) >= start,
-    ).length +
-    taskRuns.value.filter((run) => !assigned.has(run.id) && new Date(run.created_at) >= start)
-      .length
-  );
-});
-watch(
-  () => props.days,
-  (v) => {
-    days.value = v ?? 7;
-  },
-);
-let sequence = 0;
-async function load() {
-  const ticket = ++sequence;
-  loading.value = true;
-  error.value = '';
-  data.value = null;
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (days.value - 1));
-  try {
-    const [overview, runs] = await Promise.all([api.overview(), api.runs(), refreshTaskLinks()]);
-    const period = runs.filter((r) => new Date(r.created_at) >= start),
-      completed = period.filter((r) => r.status === 'completed');
-    const reports = [];
-    let incomplete = false;
-    for (let i = 0; i < completed.length; i += 6) {
-      if (ticket !== sequence) return;
-      const batch = await Promise.allSettled(
-        completed.slice(i, i + 6).map((r) => api.report(r.id)),
-      );
-      for (const item of batch) {
-        if (item.status === 'fulfilled') reports.push(item.value);
-        else incomplete = true;
-      }
-    }
-    if (ticket !== sequence) return;
-    taskRuns.value = runs;
-    const scores = reports
-      .map((r) => r.metrics.find((m) => m.level === 'overall')?.score)
-      .filter((n): n is number => typeof n === 'number');
-    data.value = {
-      average_score: incomplete
-        ? null
-        : scores.length
-          ? scores.reduce((a, b) => a + b, 0) / scores.length
-          : null,
-      scored_runs: incomplete ? null : scores.length,
-      completed_samples: completed.reduce(
-        (n, r) =>
-          n + (r.manifest.selected_case_ids ?? r.manifest.dataset.cases.map((c) => c.id)).length,
-        0,
-      ),
-      dataset_samples: overview.case_count,
-      dataset_count: overview.dataset_count,
-    };
-    if (incomplete) error.value = '部分报告读取失败，平均综合分暂不展示。';
-  } catch (e) {
-    if (ticket === sequence) error.value = String(e);
-  } finally {
-    if (ticket === sequence) loading.value = false;
-  }
-}
-watch(days, load, { immediate: true });
-onUnmounted(() => sequence++);
+import { score } from '../../../api/evaluations';
+import type { OverviewSummary } from '../../../api/evaluation-summaries';
+defineProps<{ data: OverviewSummary | null; error: string }>();
+const emit = defineEmits<{ retry: [] }>();
 </script>
 <template>
   <section aria-label="总览统计">
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="error" role="alert">
+      {{ error }} <button class="link" @click="emit('retry')">重试</button>
+    </p>
     <div class="overview-metrics">
       <article class="card">
         <div class="metric-label">测评任务总数</div>
-        <div class="metric-value">{{ data ? taskCount : '—' }}</div>
+        <div class="metric-value">{{ data?.task_count ?? '—' }}</div>
         <small>所选区间内创建的任务</small>
       </article>
       <article class="card">
         <div class="metric-label">平均综合分</div>
         <div class="metric-value">{{ score(data?.average_score) }}<small> / 100</small></div>
-        <small>{{ data?.scored_runs ?? '—' }} 次已完成且有有效评分的执行</small>
+        <small>{{ data?.scored_run_count ?? '—' }} 次已完成且有有效评分的执行</small>
       </article>
       <article class="card">
         <div class="metric-label">测评完成样本数</div>
-        <div class="metric-value">{{ data?.completed_samples ?? '—' }}</div>
+        <div class="metric-value">{{ data?.completed_sample_count ?? '—' }}</div>
         <small>已完成任务的执行用例数，重跑单独计数</small>
       </article>
       <article class="card">
         <div class="metric-label">测评集样本</div>
-        <div class="metric-value">{{ data?.dataset_samples ?? '—' }}</div>
+        <div class="metric-value">{{ data?.dataset_sample_count ?? '—' }}</div>
         <small>当前 {{ data?.dataset_count ?? '—' }} 个未归档集的最新发布样本，不随时间筛选</small>
       </article>
     </div>

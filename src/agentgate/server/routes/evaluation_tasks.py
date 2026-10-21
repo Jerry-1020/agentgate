@@ -49,6 +49,9 @@ def rerun_task(task_id: str, body: TaskRerunRequest, dependencies: Dependencies)
 
 
 @router.get("")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def list_tasks(dependencies: Dependencies):
     return EvaluationTaskManagement(dependencies.repository).list()
 

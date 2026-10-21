@@ -1,129 +1,98 @@
 <script setup lang="ts">
-import { shallowRef, computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { request, statusLabel, score } from '../../../api/evaluations';
 import {
-  api,
-  request,
-  statusLabel,
-  score,
-  type EvaluationRun,
-  type Report,
-  type RunProgress,
-} from '../../../api/evaluations';
-import { readTaskLinks, refreshTaskLinks, includeCurrentTaskRuns } from '../utils/task-links';
-import { taskTitle } from '../utils/dashboard-data';
+  getTaskSummaries,
+  type TaskListSummary,
+  type TaskKind,
+  type TaskAction,
+} from '../../../api/evaluation-summaries';
+import { useAuthStore } from '../../../stores/modules/auth';
+import { useSummaryQuery } from '../composables/use-summary-query';
+import { dayWindow, taskPath, hasActiveRuns, evaluatorStrategy } from '../utils/summary-query';
+const props = defineProps<{ refreshToken?: number }>();
 const emit = defineEmits<{
+  connection: [online: boolean | null];
   create: [];
   navigate: [path: string];
-  action: [id: string, action: 'cancel' | 'rerun'];
+  action: [action: TaskAction];
 }>();
-const runs = shallowRef<EvaluationRun[]>([]),
-  reports = ref<Record<string, Report>>({}),
-  progress = ref<Record<string, RunProgress>>({}),
-  error = ref(''),
-  busy = ref(false);
-const links = computed(readTaskLinks);
-const status = ref(''),
-  days = ref(7),
-  taskTab = ref(''),
+const auth = useAuthStore();
+const days = ref(7),
+  taskTab = ref<TaskKind | ''>(''),
   query = ref(''),
-  from = ref(''),
-  to = ref(''),
-  kind = ref(''),
+  keyword = ref(''),
   page = ref(1),
   checked = ref<string[]>([]);
-let timer: ReturnType<typeof setTimeout> | undefined,
-  disposed = false;
-const link = (id: string) => links.value.find((t) => t.runIds.includes(id));
-const title = (r: EvaluationRun) => taskTitle(r, link(r.id)?.kind, link(r.id)?.name);
-const previousRunIds = computed(() => new Set(links.value.flatMap((t) => t.previousRunIds ?? [])));
-const createdAt = (r: EvaluationRun) => link(r.id)?.createdAt ?? r.created_at;
-const identityColumns = ['target', 'dataset'] as const;
-function comparisonSides(r: EvaluationRun, column: (typeof identityColumns)[number]) {
-  return (link(r.id)?.runIds ?? []).map((id, index) => {
-    const manifest = runs.value.find((run) => run.id === id)?.manifest;
-    return {
-      id,
-      label: index === 0 ? 'A' : 'B',
-      name: !manifest
-        ? '运行记录待加载'
-        : column === 'target'
-          ? manifest.target.display_name
-          : manifest.dataset.dataset_name,
-      version: !manifest
-        ? '—'
-        : column === 'target'
-          ? manifest.target.ref.external_version_id
-          : `v${manifest.dataset.version}`,
-    };
-  });
-}
-function state(r: EvaluationRun) {
-  const states = (link(r.id)?.runIds ?? [r.id]).map(
-    (id) => runs.value.find((x) => x.id === id)?.status,
-  );
-  return states.includes('failed')
-    ? 'failed'
-    : states.includes('cancelled')
-      ? 'cancelled'
-      : states.every((s) => s === 'completed')
-        ? 'completed'
-        : states.includes('running') || states.includes('completed')
-          ? 'running'
-          : r.status;
-}
-const filtered = computed(() =>
-  runs.value.filter(
-    (r) =>
-      !previousRunIds.value.has(r.id) &&
-      (!link(r.id) || link(r.id)?.runIds[0] === r.id) &&
-      (!status.value ||
-        (status.value === 'pending'
-          ? ['pending', 'scheduled'].includes(state(r))
-          : state(r) === status.value)) &&
-      (!taskTab.value || (link(r.id)?.kind ?? 'single') === taskTab.value) &&
-      (!kind.value || (link(r.id)?.kind ?? 'single') === kind.value) &&
-      `${title(r)} ${link(r.id)?.id ?? r.id} ${r.id}`
-        .toLowerCase()
-        .includes(query.value.toLowerCase()) &&
-      (!from.value || Date.parse(createdAt(r)) >= Date.parse(from.value + 'T00:00:00')) &&
-      (!to.value || Date.parse(createdAt(r)) <= Date.parse(to.value + 'T23:59:59.999')) &&
-      (!days.value ||
-        (() => {
-          const start = new Date();
-          start.setHours(0, 0, 0, 0);
-          start.setDate(start.getDate() - (days.value - 1));
-          return Date.parse(createdAt(r)) >= start.getTime();
-        })()),
-  ),
+let debounce: ReturnType<typeof setTimeout> | undefined;
+watch(query, (value) => {
+  clearTimeout(debounce);
+  debounce = setTimeout(() => {
+    keyword.value = value;
+  }, 300);
+});
+watch(
+  [days, taskTab, keyword],
+  () => {
+    page.value = 1;
+    checked.value = [];
+  },
+  { flush: 'sync' },
 );
-const rows = computed(() => filtered.value.slice((page.value - 1) * 20, page.value * 20));
-function done(r: EvaluationRun) {
-  const ids = link(r.id)?.runIds ?? [r.id],
-    values = ids.map((id) => progress.value[id]);
-  return values.every(Boolean)
-    ? {
-        done: values.reduce((s, p) => s + p.completed_cases, 0),
-        total: values.reduce((s, p) => s + p.total_cases, 0),
-      }
-    : null;
-}
-function strategy(r: EvaluationRun) {
-  const specs = (r.manifest as any).evaluator_specs ?? [];
-  return [
-    ...new Set(
-      specs
-        .filter((s: any) => r.manifest.primary_evaluator_ids.includes(s.id))
-        .map((s: any) =>
-          s.kind === 'rule'
-            ? '规则评估'
-            : ['llm_judge', 'llm_group'].includes(s.kind)
-              ? 'LLM 评估'
-              : '复合评估',
-        ),
+watch(
+  () => [auth.loginMode, auth.teamId, auth.userId, auth.token, auth.platformReady],
+  () => {
+    page.value = 1;
+    checked.value = [];
+  },
+  { flush: 'sync' },
+);
+watch(page, () => {
+  checked.value = [];
+});
+const queryState = useSummaryQuery({
+  source: () => [days.value, taskTab.value, keyword.value, page.value, props.refreshToken],
+  identity: () => [auth.loginMode, auth.teamId, auth.userId, auth.token, auth.platformReady],
+  ready: () => auth.authenticated,
+  load: (signal) =>
+    getTaskSummaries(
+      {
+        ...dayWindow(days.value),
+        page: page.value,
+        page_size: 20,
+        keyword: keyword.value,
+        ...(taskTab.value ? { kind: taskTab.value } : {}),
+      },
+      signal,
     ),
-  ].join(' + ');
+  poll: (value) => hasActiveRuns(value.items),
+});
+const { data, error, loading: busy, reload: load } = queryState;
+watch([data, error], () => emit('connection', error.value ? false : data.value ? true : null));
+const rows = computed(() => data.value?.items ?? []);
+const total = computed(() => data.value?.total ?? 0);
+watch(data, (value) => {
+  if (!value) return;
+  const last = Math.max(1, Math.ceil(value.total / 20));
+  if (page.value > last) page.value = last;
+  checked.value = checked.value.filter((id) => value.items.some((row) => row.id === id));
+});
+const identityColumns = ['target', 'dataset'] as const;
+function comparisonSides(row: TaskListSummary, column: (typeof identityColumns)[number]) {
+  return row.runs.map((run, index) => ({
+    id: run.run_id,
+    label: index === 0 ? 'A' : 'B',
+    name: column === 'target' ? run.target_name : run.dataset_name,
+    version:
+      column === 'target'
+        ? run.target_version
+        : run.dataset_version === null
+          ? '—'
+          : `v${run.dataset_version}`,
+  }));
 }
+const done = (row: TaskListSummary) => ({ done: row.completed_cases, total: row.total_cases });
 async function deleteTask(id: string) {
   try {
     await ElMessageBox.confirm(
@@ -138,59 +107,11 @@ async function deleteTask(id: string) {
     await request(`/evaluation-tasks/${encodeURIComponent(id)}`, 'DELETE');
     ElMessage.success('任务已删除');
     await load();
-  } catch (e) {
-    ElMessage.error('删除失败：' + String(e));
+  } catch (cause) {
+    ElMessage.error('删除失败：' + String(cause));
   }
 }
-
-async function details() {
-  for (let start = 0; start < rows.value.length; start += 4) {
-    if (disposed) return;
-    await Promise.all(
-      rows.value
-        .slice(start, start + 4)
-        .flatMap((r) => link(r.id)?.runIds ?? [r.id])
-        .map(async (id) => {
-          try {
-            const p = await api.status(id);
-            if (disposed) return;
-            progress.value[id] = p;
-            if (p.status === 'completed' && !reports.value[id])
-              reports.value[id] = await api.report(id);
-          } catch (e) {
-            if (!disposed) error.value = String(e);
-          }
-        }),
-    );
-  }
-}
-async function load() {
-  busy.value = true;
-  try {
-    const [r] = await Promise.all([api.runs(), refreshTaskLinks()]);
-    const records = await includeCurrentTaskRuns(r);
-    if (disposed) return;
-    runs.value = records;
-    error.value = '';
-    await details();
-  } catch (e) {
-    if (!disposed) error.value = String(e);
-  } finally {
-    busy.value = false;
-    if (!disposed) timer = setTimeout(load, 5000);
-  }
-}
-watch([status, taskTab, query, from, to, kind, days], () => {
-  page.value = 1;
-  checked.value = [];
-});
-watch(rows, () => void details());
-watch(filtered, (x) => (page.value = Math.min(page.value, Math.max(1, Math.ceil(x.length / 20)))));
-onMounted(load);
-onUnmounted(() => {
-  disposed = true;
-  clearTimeout(timer);
-});
+onUnmounted(() => clearTimeout(debounce));
 </script>
 <template>
   <div class="page-head">
@@ -210,6 +131,7 @@ onUnmounted(() => {
     </div>
   </div>
   <section class="card tasks-list">
+    <p v-if="error" role="alert">{{ error }} <button class="link" @click="load">重试</button></p>
     <div class="list-toolbar">
       <nav class="tabs">
         <button class="tab" :class="{ active: !taskTab }" @click="taskTab = ''">全部</button>
@@ -221,10 +143,7 @@ onUnmounted(() => {
           :key="'tt-' + t[0]"
           class="tab"
           :class="{ active: taskTab === t[0] }"
-          @click="
-            taskTab = t[0];
-            status = '';
-          "
+          @click="taskTab = t[0] as TaskKind"
         >
           {{ t[1] }}
         </button>
@@ -239,7 +158,6 @@ onUnmounted(() => {
         <button class="primary" @click="emit('create')">新建测评任务</button>
       </div>
     </div>
-    <p v-if="error" class="notice error" role="alert">{{ error }}</p>
     <div class="table-wrap">
       <table class="data-table">
         <colgroup>
@@ -276,7 +194,7 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in rows" :key="link(r.id)?.id ?? r.id">
+          <tr v-for="r in rows" :key="r.id">
             <td>
               <input
                 type="checkbox"
@@ -286,29 +204,19 @@ onUnmounted(() => {
               />
             </td>
             <td class="name-cell">
-              <button
-                class="link"
-                :title="title(r)"
-                @click="emit('navigate', 'tasks/' + (link(r.id)?.id ?? r.id))"
-              >
-                {{ title(r) }}</button
-              ><small>{{ new Date(createdAt(r)).toLocaleString() }}</small>
-              <small v-if="link(r.id)?.previousRunIds?.length"
-                >已重跑 {{ link(r.id)!.previousRunIds!.length }} 次</small
-              >
+              <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
+                {{ r.name }}</button
+              ><small>{{ new Date(r.created_at).toLocaleString() }}</small>
+              <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
             </td>
             <td>
               <span>{{
-                link(r.id)?.kind === 'ab'
-                  ? 'A/B试验'
-                  : link(r.id)?.kind === 'stability'
-                    ? '稳定性测试'
-                    : '单任务'
+                r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
               }}</span>
             </td>
             <td v-for="column in identityColumns" :key="column">
               <el-tooltip
-                v-if="link(r.id)?.kind === 'ab'"
+                v-if="r.kind === 'ab'"
                 placement="top"
                 effect="light"
                 :trigger="['hover', 'focus']"
@@ -343,25 +251,19 @@ onUnmounted(() => {
               <template v-else>
                 <span
                   class="primary-text"
-                  :title="
-                    column === 'target'
-                      ? r.manifest.target.display_name
-                      : r.manifest.dataset.dataset_name
-                  "
-                  >{{
-                    column === 'target'
-                      ? r.manifest.target.display_name
-                      : r.manifest.dataset.dataset_name
-                  }}</span
+                  :title="column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name"
+                  >{{ column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name }}</span
                 ><small>{{
                   column === 'target'
-                    ? r.manifest.target.ref.external_version_id
-                    : `v${r.manifest.dataset.version}`
+                    ? r.runs[0].target_version
+                    : r.runs[0].dataset_version === null
+                      ? '—'
+                      : `v${r.runs[0].dataset_version}`
                 }}</small>
               </template>
             </td>
             <td>
-              <span>{{ strategy(r) }}</span>
+              <span>{{ evaluatorStrategy(r.runs[0].evaluator_kinds) }}</span>
             </td>
             <td class="progress-cell">
               <template v-if="done(r)"
@@ -376,58 +278,55 @@ onUnmounted(() => {
                 <progress
                   :value="done(r)!.done"
                   :max="done(r)!.total || 1"
-                  :class="{ failed: state(r) === 'failed' }" /></template
-              ><small>{{ statusLabel(state(r)) }}</small>
+                  :class="{ failed: r.status === 'failed' }" /></template
+              ><small>{{ statusLabel(r.status) }}</small>
             </td>
             <td class="task-score">
-              <template v-if="link(r.id)?.kind === 'ab'"
-                ><p v-for="(id, i) in link(r.id)!.runIds" :key="id">
+              <template v-if="r.kind === 'ab'"
+                ><p v-for="(id, i) in r.runs.map((run) => run.run_id)" :key="id">
                   {{ i === 0 ? 'A' : 'B' }}
-                  {{
-                    score(reports[id]?.metrics.find((m) => m.level === 'overall')?.score ?? null)
-                  }}
+                  {{ score(r.runs.find((run) => run.run_id === id)?.overall_score ?? null) }}
                 </p></template
-              ><template v-else>{{
-                score(reports[r.id]?.metrics.find((m) => m.level === 'overall')?.score ?? null)
-              }}</template
-              ><small
-                v-if="reports[r.id]?.release_gate.reason_code === 'evaluator_error'"
-                class="danger"
+              ><template v-else>{{ score(r.runs[0].overall_score) }}</template
+              ><small v-if="r.runs[0].gate_reason === 'evaluator_error'" class="danger"
                 >评估器异常</small
               >
             </td>
             <td class="row-actions">
               <button
                 v-if="
-                  (link(r.id)?.kind ?? 'single') === 'single' &&
+                  (r.kind ?? 'single') === 'single' &&
                   ['pending', 'running', 'scheduled'].includes(r.status)
                 "
                 class="link"
-                @click="emit('action', r.id, 'cancel')"
+                @click="
+                  emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'cancel' })
+                "
               >
                 取消
               </button>
               <button
                 v-if="
-                  (link(r.id)?.kind ?? 'single') === 'single' &&
+                  (r.kind ?? 'single') === 'single' &&
                   ['completed', 'failed', 'cancelled'].includes(r.status)
                 "
                 class="link"
-                @click="emit('action', r.id, 'rerun')"
+                @click="
+                  emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'rerun' })
+                "
               >
                 重跑
               </button>
               <button
-                v-if="
-                  link(r.id)?.kind === 'ab' &&
-                  ['completed', 'failed', 'cancelled'].includes(state(r))
-                "
+                v-if="r.kind === 'ab' && ['completed', 'failed', 'cancelled'].includes(r.status)"
                 type="button"
                 class="link"
               >
                 重跑
               </button>
-              <button class="link danger" @click="deleteTask(link(r.id)?.id ?? r.id)">删除</button>
+              <button class="link danger" @click="deleteTask(r.task_id ?? r.runs[0].run_id)">
+                删除
+              </button>
             </td>
           </tr>
         </tbody>
@@ -435,12 +334,10 @@ onUnmounted(() => {
     </div>
     <p v-if="!rows.length" class="empty">{{ busy ? '正在加载…' : '暂无符合条件的任务' }}</p>
     <footer>
-      <span>共 {{ filtered.length }} 个任务</span
+      <span>共 {{ total }} 个任务</span
       ><button class="secondary" :disabled="page === 1" @click="page--">上一页</button
-      ><span>{{ page }} / {{ Math.max(1, Math.ceil(filtered.length / 20)) }}</span
-      ><button class="secondary" :disabled="page * 20 >= filtered.length" @click="page++">
-        下一页
-      </button>
+      ><span>{{ page }} / {{ Math.max(1, Math.ceil(total / 20)) }}</span
+      ><button class="secondary" :disabled="page * 20 >= total" @click="page++">下一页</button>
     </footer>
   </section>
 </template>

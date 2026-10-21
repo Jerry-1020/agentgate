@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from . import evaluation_projection as projection
+from .evaluation_migration import upgrade_sqlite
+
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -313,6 +316,8 @@ class SQLiteRepository:
                 );
             """)
 
+            upgrade_sqlite(db)
+
     def delete_task_record(self, task_id: str, *, user_team_id: str) -> None:
         """Permanently delete one task with all its runs, traces and results."""
         with self._connect() as db:
@@ -361,11 +366,12 @@ class SQLiteRepository:
                 EvaluationRun.model_validate_json(source_row["payload"]), rerun,
             )
             self._insert_task_run(db, rerun)
-            db.execute(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)", (rerun.id, task_id))
+            db.execute(f"INSERT INTO {_T_EVALUATION_TASK_RUNS}(run_id,task_id) VALUES(?,?)", (rerun.id, task_id))
             db.execute(
                 f"UPDATE {_T_EVALUATION_TASKS} SET payload=? WHERE id=?",
                 (canonical_json(updated), task_id),
             )
+            projection.put_task(db, updated)
         return updated
 
     def save_task_runs(self, task: EvaluationTask, runs: Sequence[EvaluationRun]) -> None:
@@ -381,8 +387,10 @@ class SQLiteRepository:
             db.execute("BEGIN IMMEDIATE")
             for run in runs:
                 self._insert_task_run(db, run)
-            db.execute(f"INSERT INTO {_T_EVALUATION_TASKS} VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
-            db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)", [(r.id, task.id) for r in runs])
+            db.execute(f"INSERT INTO {_T_EVALUATION_TASKS}(id,created_at,payload) VALUES(?,?,?)", (task.id, task.created_at.isoformat(), canonical_json(task)))
+            db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS}(run_id,task_id) VALUES(?,?)", [(r.id, task.id) for r in runs])
+
+            projection.put_task(db, task)
 
     def _insert_task_run(self, db: sqlite3.Connection, run: EvaluationRun) -> None:
         references = self._run_asset_references(db, run)
@@ -396,6 +404,8 @@ class SQLiteRepository:
             f"INSERT INTO {_T_RUN_ASSET_REFS}(run_id,asset_kind,source_id,asset_id,version,content_sha256) VALUES(?,?,?,?,?,?)",
             references,
         )
+
+        projection.put_run(db, run)
 
     def get_optimization_report(self, evidence_key: str) -> OptimizationReport | None:
         with self._connect() as db:
@@ -438,14 +448,15 @@ class SQLiteRepository:
                     raise ValueError("unknown static report")
             try:
                 if not row:
-                    db.execute(f"INSERT INTO {_T_EVALUATION_TASKS} VALUES(?,?,?)",
+                    db.execute(f"INSERT INTO {_T_EVALUATION_TASKS}(id,created_at,payload) VALUES(?,?,?)",
                                (task.id, task.created_at.isoformat(), canonical_json(task)))
-                    db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS} VALUES(?,?)",
+                    db.executemany(f"INSERT INTO {_T_EVALUATION_TASK_RUNS}(run_id,task_id) VALUES(?,?)",
                                    [(run_id, task.id) for run_id in task.run_ids])
                 else:
                     db.execute(f"UPDATE {_T_EVALUATION_TASKS} SET payload=? WHERE id=?", (canonical_json(task), task.id))
             except sqlite3.IntegrityError as exc:
                 raise ValueError("run does not exist or already belongs to another task") from exc
+            projection.put_task(db, task)
         return task
 
     def get_evaluation_task(self, task_id: str) -> EvaluationTask | None:
@@ -1301,6 +1312,8 @@ class SQLiteRepository:
                 ),
             )
 
+            db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
+
     def get_dataset(
         self, dataset_id: str, *, user_team_id: str
     ) -> Dataset | None:
@@ -1333,6 +1346,7 @@ class SQLiteRepository:
                 if stored.status == DatasetVersionStatus.PUBLISHED:
                     if stored != version:
                         raise ValueError("published DatasetVersion is immutable")
+                    db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
                     return
                 if version.status != DatasetVersionStatus.DRAFT:
                     raise ValueError(
@@ -1345,6 +1359,7 @@ class SQLiteRepository:
                 if version.updated_at < stored.updated_at:
                     raise ValueError("cannot save a stale DatasetVersion draft")
                 if version == stored:
+                    db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
                     return
                 db.execute(
                     f"""
@@ -1361,6 +1376,7 @@ class SQLiteRepository:
                         version.id,
                     ),
                 )
+                db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
                 return
             if version.status == DatasetVersionStatus.PUBLISHED:
                 conflict = db.execute(
@@ -1374,6 +1390,7 @@ class SQLiteRepository:
                     stored = DatasetVersion.model_validate_json(conflict[0])
                     if stored != version:
                         raise ValueError("published Dataset version number already exists")
+                    db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
                     return
             db.execute(
                 f"""
@@ -1390,6 +1407,7 @@ class SQLiteRepository:
                     canonical_json(version),
                 ),
             )
+            db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(version.cases), version.id))
 
     def get_published_dataset_version(
         self, dataset_id: str, version: int, *, user_team_id: str
@@ -1558,6 +1576,63 @@ class SQLiteRepository:
                 ),
             )
             db.execute(f"DELETE FROM {_T_DATASET_VERSIONS} WHERE id=?", (draft.id,))
+            db.execute(f"UPDATE {_T_DATASET_VERSIONS} SET sample_count=? WHERE id=?", (len(published.cases), published.id))
+
+    def audit_evaluation_summaries(self):
+        with self._connect() as db:
+            return projection.audit(db)
+
+    def list_summary_backfill_ids(self, *, entity, after_id=None, limit=50):
+        with self._connect() as db:
+            return projection.backfill_ids(db, entity, after_id, limit)
+
+    def read_run_summary_source(self, run_id):
+        with self._connect() as db:
+            return projection.source(db, run_id)
+
+    def rebuild_run_summary(self, source, summary):
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return projection.rebuild_run(db, source, summary)
+
+    def rebuild_task_query_fields(self, task_id):
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return projection.rebuild_entity(db, 'task', task_id)
+
+    def rebuild_dataset_version_query_fields(self, version_id):
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return projection.rebuild_entity(db, 'dataset_version', version_id)
+
+    def save_completed_run(self, run, summary):
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(f"SELECT payload FROM {_T_RUNS} WHERE id=?", (run.id,)).fetchone()
+            if row is None:
+                raise ValueError("unknown EvaluationRun")
+            stored = EvaluationRun.model_validate_json(row[0])
+            if stored.status not in {RunStatus.RUNNING, RunStatus.COMPLETED}:
+                raise ValueError("run cannot complete from its current state")
+            if any(getattr(stored, f) != getattr(run, f) for f in ("manifest", "created_at", "scheduled_for", "started_at", "user_team_id")):
+                raise ValueError("immutable run fields changed")
+            if stored.completed_at is not None and stored != run:
+                raise ValueError("terminal EvaluationRun is immutable")
+            results = [EvaluationResult.model_validate_json(r[0]) for r in db.execute(
+                f"SELECT payload FROM {_T_RESULTS} WHERE run_id=?", (run.id,))]
+            projection.put_completed(db, run, summary, results)
+            db.execute(f"UPDATE {_T_RUNS} SET status=?,payload=? WHERE id=?",
+                       (run.status, canonical_json(run), run.id))
+
+    def get_evaluation_overview_summary(self, query, *, user_team_id):
+        with self._connect() as db:
+            db.execute("BEGIN")
+            return projection.overview(db, query, user_team_id)
+
+    def list_evaluation_task_summaries(self, query, *, user_team_id):
+        with self._connect() as db:
+            db.execute("BEGIN")
+            return projection.task_page(db, query, user_team_id)
 
     def save_run(self, run: EvaluationRun) -> None:
         with self._connect() as db:
@@ -1599,6 +1674,7 @@ class SQLiteRepository:
                     """,
                     references,
                 )
+                projection.put_run(db, run)
                 return
 
             stored = EvaluationRun.model_validate_json(existing[0])
@@ -2122,6 +2198,7 @@ class SQLiteRepository:
                         canonical_json(result),
                     ),
                 )
+                projection.update_progress(db, result.run_id)
 
     def list_results(self, run_id: str) -> list[EvaluationResult]:
         with self._connect() as db:

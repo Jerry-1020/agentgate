@@ -18,8 +18,8 @@ def mysql_config():
     address = os.getenv("AGENTGATE_TEST_MYSQL_URL")
     if not address:
         pytest.skip("AGENTGATE_TEST_MYSQL_URL is not configured")
-    if make_url(address).database != "eric_agentgate_test":
-        pytest.fail("MySQL tests only allow the isolated eric_agentgate_test database")
+    if make_url(address).database not in {"eric_agentgate_test", "agentgate_perf_20261021_test"}:
+        pytest.fail("MySQL tests require an explicitly allowlisted isolated database")
     return TDSQLConfig(
         address,
         os.environ["AGENTGATE_TEST_MYSQL_USER"],

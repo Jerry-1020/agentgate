@@ -55,6 +55,9 @@ class RunSetupSkillAnalysisRequest(BaseModel):
 
 
 @router.get("/runs")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def list_runs(
     dependencies: Dependencies,
     status: RunStatus | None = None,
@@ -114,6 +117,9 @@ def analyze_evaluation_target(
 
 
 @router.get("/runs/{run_id}/status")
+# Performance: page lists use GET /api/evaluation-task-summaries;
+# overview cards use GET /api/evaluation-overview/summary.
+# This endpoint remains available with its original detail contract.
 def run_status(run_id: str, dependencies: Dependencies) -> RunProgress:
     try:
         dependencies.runs.fail_stale_runs()

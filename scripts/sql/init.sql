@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS agentgate_api_keys (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE IF NOT EXISTS agentgate_dataset_versions (
+    sample_count BIGINT NULL,
     id_key BINARY(32) NOT NULL,
     id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     dataset_key BINARY(32) NOT NULL,
@@ -189,6 +190,9 @@ CREATE TABLE IF NOT EXISTS agentgate_traces (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE IF NOT EXISTS agentgate_evaluation_task_runs (
+    is_current SMALLINT NULL,
+    position INTEGER NULL,
+    INDEX ix_task_runs_current_position (task_key, is_current, position),
     run_key BINARY(32) NOT NULL,
     run_id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     task_key BINARY(32) NOT NULL,
@@ -198,6 +202,9 @@ CREATE TABLE IF NOT EXISTS agentgate_evaluation_task_runs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE IF NOT EXISTS agentgate_evaluation_tasks (
+    name LONGTEXT COLLATE utf8mb4_bin NULL,
+    kind VARCHAR(16) NULL,
+    first_run_key BINARY(32) NULL,
     id_key BINARY(32) NOT NULL,
     id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
     created_at DATETIME(6) NOT NULL,
@@ -216,3 +223,31 @@ CREATE TABLE IF NOT EXISTS agentgate_optimization_reports (
     CONSTRAINT pk_agentgate_optimization_reports PRIMARY KEY (evidence_key_digest),
     INDEX ix_agentgate_optimization_reports_run (run_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
+
+CREATE TABLE IF NOT EXISTS agentgate_run_summaries (
+    run_key BINARY(32) NOT NULL,
+    run_id LONGTEXT COLLATE utf8mb4_bin NOT NULL,
+    manifest_sha256 CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    display_payload LONGTEXT COLLATE utf8mb4_bin NOT NULL,
+    fallback_name LONGTEXT COLLATE utf8mb4_bin NOT NULL,
+    total_cases BIGINT NOT NULL,
+    overall_score DOUBLE,
+    gate_reason VARCHAR(64),
+    summary_version INTEGER,
+    result_count BIGINT,
+    source_results_sha256 CHAR(64),
+    CONSTRAINT pk_agentgate_run_summaries PRIMARY KEY (run_key)
+)ENGINE=InnoDB CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC COLLATE utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS agentgate_run_case_progress (
+    run_key BINARY(32) NOT NULL,
+    case_key BINARY(32) NOT NULL,
+    completed SMALLINT NOT NULL,
+    CONSTRAINT pk_agentgate_run_case_progress PRIMARY KEY (run_key, case_key)
+)ENGINE=InnoDB CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC COLLATE utf8mb4_bin;
+
+CREATE TABLE IF NOT EXISTS agentgate_run_expected_evaluators (
+    run_key BINARY(32) NOT NULL,
+    evaluator_key BINARY(32) NOT NULL,
+    CONSTRAINT pk_agentgate_run_expected_evaluators PRIMARY KEY (run_key, evaluator_key)
+)ENGINE=InnoDB CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC COLLATE utf8mb4_bin;

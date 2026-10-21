@@ -70,7 +70,7 @@ def test_sqlite_initialization_enables_wal_and_schema_checks(tmp_path):
         )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):
             connection.execute(
-                f"INSERT INTO {_T_DATASET_VERSIONS} VALUES(?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO {_T_DATASET_VERSIONS}(id,dataset_id,version,status,created_at,content_sha256,user_team_id,user_id,user_name,payload) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 ("draft", "dataset", 1, "draft", "now", "hash", "", "", "", "{}"),
             )
         with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint"):

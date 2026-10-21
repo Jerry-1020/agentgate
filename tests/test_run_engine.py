@@ -658,15 +658,15 @@ def test_engine_preserves_cancellation_that_wins_completion_race(
     repository = SQLiteRepository(tmp_path / "cancel-completion-race.db")
     run = pending_run()
     repository.save_run(run)
-    original_save_run = repository.save_run
+    original_save_run = repository.save_completed_run
 
-    def cancel_before_completion(value):
+    def cancel_before_completion(value, summary):
         if value.status is RunStatus.COMPLETED:
             cancelled = repository.cancel_run(value.id, value.completed_at, user_team_id="")
             assert cancelled is not None
-        original_save_run(value)
+        original_save_run(value, summary)
 
-    monkeypatch.setattr(repository, "save_run", cancel_before_completion)
+    monkeypatch.setattr(repository, "save_completed_run", cancel_before_completion)
 
     cancelled = engine(repository).execute(run, StubTargetAdapter())
 

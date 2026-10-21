@@ -222,7 +222,7 @@ mkdir -p /var/log/agentgate
 ### 4.7 初始化数据库（可选）
 
 - **SQLite 模式**：首次启动 API 时自动创建数据库文件，无需手动初始化。
-- **TDSQL/MySQL 模式**：需提前在 MySQL 中创建数据库，并可使用 `scripts/init.sql` 初始化表结构：
+- **TDSQL/MySQL 模式**：需提前在 MySQL 中创建数据库，并可使用 `sql/init.sql` 初始化表结构：
 
 ```bash
 mysql -h <host> -P <port> -u <user> -p <database> < /opt/agentgate/scripts/init.sql

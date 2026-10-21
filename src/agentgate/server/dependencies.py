@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Request
+from agentgate.application.evaluation_queries import EvaluationQueries
 
 from agentgate.application import (
     ABRunPair,
@@ -87,6 +88,10 @@ class ServerDependencies:
         default=None,
         repr=False,
     )
+
+    @property
+    def evaluation_queries(self) -> EvaluationQueries:
+        return EvaluationQueries(self.repository)
 
     def close(self) -> None:
         """Release process-lifetime resources owned by these dependencies."""
