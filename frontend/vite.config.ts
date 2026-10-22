@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
     throw new Error('FRONTEND_PORT must be an integer between 1 and 65535');
   }
   return {
+    base: '/agentgate/',
     plugins: [vue()],
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
     server: {
