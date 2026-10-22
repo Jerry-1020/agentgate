@@ -18,8 +18,7 @@
     "check:stack": "node scripts/check-stack.mjs",
     "test:unit": "playwright test -c playwright.unit.config.ts",
     "check": "npm run check:stack && npm run lint && npm run typecheck && npm run test:unit",
-    "test:summary": "playwright test -c playwright.summary.config.ts",
-    "test:summary:coverage": "npm run test:summary && node scripts/check-summary-coverage.mjs"
+    "test:summary": "playwright test -c playwright.summary.config.ts"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -96,11 +95,6 @@
     "eslint-plugin-vue": "9.20.1",
     "highlight.js": "^11.11.1",
     "husky": "8.0.3",
-    "istanbul-lib-coverage": "3.2.2",
-    "istanbul-lib-instrument": "6.0.3",
-    "istanbul-lib-report": "3.0.1",
-    "istanbul-lib-source-maps": "5.0.6",
-    "istanbul-reports": "3.2.0",
     "lint-staged": "13.3.0",
     "markdown-it-highlightjs": "^4.2.0",
     "plop": "4.0.1",

@@ -1,4 +1,4 @@
-import { test, expect } from './evaluation-summary-coverage';
+import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 const envelope = (data: unknown) => ({ code: '0', message: 'success', data });
 function row(id = 'task-1', kind = 'single', status = 'completed', taskId: string | null = id) {

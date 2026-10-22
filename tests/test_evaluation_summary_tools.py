@@ -8,7 +8,10 @@ from test_evaluation_queries import seed
 
 
 def module(name):
-    path = Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py"
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts" / "upgrade" / "20261021" / f"{name}.py"
+    )
     spec = importlib.util.spec_from_file_location(name, path)
     value = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(value)
@@ -102,7 +105,7 @@ def test_cli_entrypoints_and_legacy_sqlite_upgrade(tmp_path, monkeypatch):
     import runpy
     import sqlite3
 
-    root = Path(__file__).resolve().parents[1] / "scripts"
+    root = Path(__file__).resolve().parents[1] / "scripts" / "upgrade" / "20261021"
     legacy = tmp_path / "legacy.db"
     with sqlite3.connect(legacy) as db:
         db.executescript("""
