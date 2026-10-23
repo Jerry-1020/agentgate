@@ -3,8 +3,8 @@ withDefaults(defineProps<{
   page: string;
   online: boolean | null;
   authLabel: string;
-  hideAuthControls?: boolean;
-}>(), { hideAuthControls: false });
+  hideHeader?: boolean;
+}>(), { hideHeader: false });
 defineEmits<{ logout: [] }>();
 const navigation = [
   ['overview', '测评总览'],
@@ -17,11 +17,11 @@ const navigation = [
 <template>
   <div
     class="app revision-app"
-    :class="{ 'review-layout': ['annotations', 'evaluators'].includes(page) }"
+    :class="{ 'review-layout': ['annotations', 'evaluators'].includes(page), 'header-hidden': hideHeader }"
   >
-    <header class="topbar">
+    <header v-if="!hideHeader" class="topbar">
       <div class="brand">智能体测评中心</div>
-      <div v-if="!hideAuthControls" class="topbar-right">
+      <div class="topbar-right">
         <span class="mode-chip">{{ authLabel }}</span>
         <button type="button" class="logout-btn" @click="$emit('logout')">登出 Logout</button>
       </div>

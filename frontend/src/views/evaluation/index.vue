@@ -314,7 +314,7 @@ async function taskRerunCreated(taskId: string) {
     :page="page"
     :online="online"
     :auth-label="authLabel"
-    :hide-auth-controls="auth.isIntegrated"
+    :hide-header="auth.isIntegrated"
     @logout="confirmLogout"
   >
     <div v-if="error" class="notice error" role="alert">

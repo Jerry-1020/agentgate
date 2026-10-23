@@ -283,7 +283,7 @@ test('empty metrics and helper boundaries including DST',async({page})=>{
 });
 
 
-test('real integrated iframe sends all five identity headers and hides auth controls',async({page})=>{
+test('real integrated iframe sends all five identity headers and hides the entire header',async({page})=>{
   const calls=await setup(page);
   await page.route('**/summary-host', r=>r.fulfill({contentType:'text/html',body:`<iframe style="width:1400px;height:1000px" src="/?embedded=1&token=fake&teamId=bank-team&teamName=Bank&userId=bank-user&userName=User#/tasks"></iframe>`}));
   await page.goto('/summary-host');
@@ -291,12 +291,20 @@ test('real integrated iframe sends all five identity headers and hides auth cont
   await expect(frame.getByRole('heading',{name:'测评任务',exact:true})).toBeVisible();
   await expect(frame.getByText('共 1 个任务')).toBeVisible();
   await expect(frame.getByRole('button',{name:'登出',exact:true})).toHaveCount(0);
+  await expect(frame.locator('.topbar')).toHaveCount(0);
+  await expect(frame.locator('.sidebar')).toBeVisible();
+  await expect(frame.locator('.sidebar')).toHaveCSS('top', '0px');
+  expect(await frame.locator('.shell').evaluate(el => el.getBoundingClientRect().top)).toBe(0);
   const summary=calls.filter(c=>c.path.startsWith('/api/evaluation-task-summaries'));
   expect(summary).toHaveLength(1);
   expect(summary[0].headers).toMatchObject({token:'fake','x-team-id':'bank-team','x-team-name':'Bank','x-user-id':'bank-user','x-user-name':'User'});
   expect(calls.some(c=>/^\/api\/(runs|evaluation-tasks|overview)([/?]|$)/.test(c.path))).toBe(false);
   const footer=frame.locator('.tasks-list footer');await expect(footer).toBeVisible();
   await expect(footer.getByRole('button',{name:'下一页'})).toBeDisabled();
+  await frame.locator('.sidebar').getByText('测评总览', {exact:true}).click();
+  await expect(frame.locator('.metric-value').first()).toHaveText('104');
+  await expect(frame.locator('.topbar')).toHaveCount(0);
+  await expect(frame.locator('.sidebar')).toHaveCSS('top', '0px');
 });
 
 test('integrated iframe accepts empty identity fields without falling back to old APIs',async({page})=>{
@@ -305,6 +313,8 @@ test('integrated iframe accepts empty identity fields without falling back to ol
   await page.goto('/summary-host');
   const frame=page.frameLocator('iframe');
   await expect(frame.locator('.metric-value').first()).toHaveText('104');
+  await expect(frame.locator('.topbar')).toHaveCount(0);
+  await expect(frame.locator('.sidebar')).toHaveCSS('top', '0px');
   expect(calls).toHaveLength(2);
   for(const call of calls) expect(call.headers).toMatchObject({token:'','x-team-id':'','x-team-name':'','x-user-id':'','x-user-name':''});
 });
@@ -314,6 +324,10 @@ test('real external page preserves layout and starts only summary requests',asyn
   await page.goto('/#/welcome');
   await page.getByRole('button',{name:'行外Login',exact:true}).click();
   await expect(page.locator('.metric-value').first()).toHaveText('104');
+  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(page.locator('.brand')).toHaveText('智能体测评中心');
+  await expect(page.locator('.logout-btn')).toBeVisible();
+  await expect(page.locator('.sidebar')).toHaveCSS('top', '64px');
   const before=calls.length;
   await page.locator('.sidebar').getByText('测评任务',{exact:true}).click();
   await expect(page.getByText('共 1 个任务')).toBeVisible();
@@ -336,4 +350,26 @@ test('parent error and cancellation failure remain visible and recoverable',asyn
   await navigate(page,'/results/task-1');await expect(page.getByText('Detail task-1-a task-1',{exact:false})).toBeVisible();
   await navigate(page,'/scoring-templates');await expect(page.getByText('Judges',{exact:false})).toBeVisible();
   await navigate(page,'/annotation-templates');await expect(page.getByText('待实现',{exact:true})).toBeVisible();
+});
+
+
+test('standalone bank mode keeps the full header and logout action', async ({page}) => {
+  await setup(page);
+  await page.goto('/#/welcome');
+  await page.evaluate(async () => {
+    // @ts-ignore Browser imports are served by Vite.
+    const {useAuthStore} = await import('/src/stores/modules/auth.ts');
+    // @ts-ignore Browser imports are served by Vite.
+    const {pinia} = await import('/src/stores/index.ts');
+    // @ts-ignore Browser imports are served by Vite.
+    const {router} = await import('/src/router/index.ts');
+    useAuthStore(pinia).loginBank('test-token', 'test-team', 'Test team');
+    await router.push('/overview');
+  });
+  await expect(page.locator('.metric-value').first()).toHaveText('104');
+  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(page.locator('.brand')).toHaveText('智能体测评中心');
+  await expect(page.locator('.mode-chip')).toContainText('Test team');
+  await expect(page.locator('.logout-btn')).toBeVisible();
+  await expect(page.locator('.sidebar')).toHaveCSS('top', '64px');
 });
