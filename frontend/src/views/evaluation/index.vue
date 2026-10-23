@@ -306,15 +306,15 @@ async function taskRerunCreated(taskId: string) {
       <div class="page-head">
         <div style="display: flex; align-items: flex-end; gap: 16px">
           <h1 class="page-title">测评总览</h1>
-          <div class="tabs">
+          <div class="tabs" role="group" aria-label="总览时间范围">
             <button
-              v-for="d in [1, 7, 30]"
+              v-for="d in [1, 7, 30, 0]"
               :key="d"
               :class="['tab', { active: overviewDays === d }]"
               :aria-pressed="overviewDays === d"
               @click="overviewDays = d"
             >
-              {{ d === 1 ? '今日' : '近' + d + '天' }}
+              {{ d === 0 ? '全部' : d === 1 ? '今日' : '近' + d + '天' }}
             </button>
           </div>
         </div>
