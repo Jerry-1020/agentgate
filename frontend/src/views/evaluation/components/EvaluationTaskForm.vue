@@ -795,7 +795,7 @@ async function submit() {
       };
       let refreshed = true;
       try {
-        await refreshTaskLinks();
+        await refreshTaskLinks(link.id);
       } catch {
         refreshed = false;
       }
@@ -840,7 +840,7 @@ async function submit() {
       const link = platformTaskLink(created, snapshot.repetitions);
       let refreshed = true;
       try {
-        await refreshTaskLinks();
+        await refreshTaskLinks(link.id);
       } catch {
         refreshed = false;
       }

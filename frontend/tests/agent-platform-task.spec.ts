@@ -20,11 +20,13 @@ import {createApp,h} from 'vue';
 import ElementPlus from 'element-plus';
 import {pinia} from '/src/stores/index.ts';
 import {useAuthStore} from '/src/stores/modules/auth';
+import {useTaskLinksStore} from '/src/stores/modules/task-links';
 import Form from '/src/views/evaluation/components/EvaluationTaskForm.vue';
 import '/node_modules/element-plus/dist/index.css';
 import '/src/styles/main.scss';
 import '/src/views/evaluation/index.vue?vue&type=style&index=0&lang.css';
 window.created=[];window.updates=0;
+window.readTaskLinks=()=>useTaskLinksStore().readTaskLinks();
 window.addEventListener('task-links-updated',()=>window.updates++);
 window.setAuth=state=>{const auth=useAuthStore();if(state==='logout')auth.$reset();else auth.$patch(state);};
 const source={id:'dataset',version:2,evaluatorId:'judge',targetVersion:'old-1',...(location.search.includes('selected')?{caseIds:['case-1']}: {})};
@@ -601,6 +603,7 @@ const sampleCases = [
 async function openForm(page: Page, selected = false, cases = sampleCases, mode: 'bank' | 'external' = 'bank') {
   const requests: { path: string; method: string; body: any; headers: Record<string, string> }[] =
     [];
+  let createdTask: Record<string, unknown> | undefined;
   await page.route('**/api/**', async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -646,6 +649,12 @@ async function openForm(page: Page, selected = false, cases = sampleCases, mode:
     if (path === '/api/local-targets') return reply(route, { targets: [], unavailable: [] });
     if (path === '/api/agent-platform/evaluations') {
       const count = req.postDataJSON().repetitions;
+      createdTask = {
+        id: 'task-1', name: req.postDataJSON().name,
+        kind: count > 1 ? 'stability' : 'single',
+        run_ids: Array.from({ length: count }, (_, i) => 'run-' + i),
+        static_report_ids: [],
+      };
       return reply(
         route,
         wrap({
@@ -655,11 +664,18 @@ async function openForm(page: Page, selected = false, cases = sampleCases, mode:
         }),
       );
     }
-    if (path === '/api/agent-platform/comparisons')
+    if (path === '/api/agent-platform/comparisons') {
+      createdTask = {
+        id: 'ab-a', name: req.postDataJSON().name, kind: 'ab',
+        run_ids: ['ab-a', 'ab-b'], static_report_ids: [],
+      };
       return reply(route, {
         baseline: { run_id: 'ab-a', status: 'pending' },
         candidate: { run_id: 'ab-b', status: 'pending' },
       });
+    }
+    if (createdTask && path === '/api/evaluation-tasks/' + createdTask.id)
+      return reply(route, createdTask);
     if (path === '/api/run-comparisons')
       return reply(route, { baseline: { run_id: 'a' }, candidate: { run_id: 'b' } });
     if (path === '/api/evaluation-tasks/a') return reply(route, {});
@@ -1098,6 +1114,79 @@ test('platform A/B submits both versions to the comparison endpoint', async ({
   await expect(page.locator('.task-summary')).toContainText('工作流');
 });
 
+for (const mode of ['bank', 'external'] as const)
+  for (const kind of ['single', 'ab'] as const)
+    test(`${mode} ${kind} submission waits only for the newly created task`, async ({ page }) => {
+      const requests = await openForm(page);
+      if (mode === 'bank') await selectFormTarget(page);
+      else {
+        await useExternalMode(page);
+        await choose(page, '选择智能体', '工作流 · workflow');
+        await choose(page, '智能体版本', 'v1');
+      }
+      if (kind === 'ab') {
+        await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+        await page.getByLabel('平台候选版本', { exact: true })
+          .selectOption(mode === 'bank' ? bankVersionTwo : 'v2');
+      }
+      let bulkReads = 0;
+      await page.route('**/api/evaluation-tasks', (route) => {
+        bulkReads++;
+        return reply(route, { detail: 'Historical tasks are unavailable' }, 503);
+      });
+      const taskId = kind === 'ab' ? 'ab-a' : 'task-1';
+      let taskReads = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      await page.route('**/api/evaluation-tasks/' + taskId, async (route) => {
+        taskReads++;
+        await gate;
+        await route.fallback();
+      });
+      await page.getByRole('button', {
+        name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
+      }).click();
+      try {
+        await expect.poll(() => taskReads).toBe(1);
+        expect(await page.evaluate(() => (window as any).created)).toEqual([]);
+        await expect(page.getByRole('button', { name: '正在处理…', exact: true })).toBeDisabled();
+      } finally {
+        release();
+      }
+      await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+      const runIds = kind === 'ab' ? ['ab-a', 'ab-b'] : ['run-0'];
+      expect(await page.evaluate(() => (window as any).readTaskLinks())).toEqual([
+        expect.objectContaining({ id: taskId, name: '版本固定测试', kind, runIds, staticReports: [] }),
+      ]);
+      await expect(page.getByText(kind === 'ab' ? 'A/B试验已提交' : '测评任务已提交', { exact: true }))
+        .toBeVisible();
+      expect(bulkReads).toBe(0);
+      expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+      expect(requests.some((request) => request.path.startsWith('/api/skill-analysis/reports/'))).toBe(false);
+      const read = requests.find((request) => request.path === '/api/evaluation-tasks/' + taskId)!;
+      expect(read.headers['x-agent-platform-token']).toBeUndefined();
+      expect(read.headers.token).toBe(mode === 'bank' ? 'form-secret' : undefined);
+      if (mode === 'bank') expect(read.headers['x-team-id']).toBe('team');
+    });
+
+test('A/B task refresh failure still emits creation without submitting twice', async ({ page }) => {
+  const requests = await openForm(page);
+  await selectFormTarget(page);
+  await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+  await page.getByLabel('平台候选版本', { exact: true }).selectOption(bankVersionTwo);
+  await page.route('**/api/evaluation-tasks/ab-a', (route) =>
+    reply(route, { detail: 'form-secret' }, 500),
+  );
+  await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).created)).toEqual([
+    { id: 'ab-a', kind: 'ab', runIds: ['ab-a', 'ab-b'], staticReports: [] },
+  ]);
+  await expect(page.getByText('实验已创建（ab-a），但列表刷新失败，请刷新任务列表；请勿重复提交。'))
+    .toBeVisible();
+  expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+  expect(await page.locator('body').innerText()).not.toContain('form-secret');
+});
+
 test('platform A/B requires a different candidate version before creating', async ({ page }) => {
   await openForm(page);
   await selectFormTarget(page);
@@ -1327,7 +1416,7 @@ for (const failure of ['reject', 'server', 'malformed', 'refresh'] as const)
     await selectFormTarget(page);
     let posts = 0;
     if (failure === 'refresh')
-      await page.route('**/api/evaluation-tasks', (route) =>
+      await page.route('**/api/evaluation-tasks/task-1', (route) =>
         reply(route, { detail: 'form-secret' }, 500),
       );
     else
