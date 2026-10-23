@@ -105,6 +105,7 @@ async function open(page: Page, options: { history?: boolean; status?: string; g
     if (path === '/api/overview') return respond({ total_runs: runs.length, completed_runs: 1, running_runs: 0, pending_runs: 0, failed_runs: 0, cancelled_runs: 0, dataset_count: 1, case_count: 1 });
     if (path === '/api/runs') return respond(runs.slice(0, 200));
     if (path === '/api/evaluation-tasks') return respond(tasks);
+    if (/^\/api\/evaluation-tasks\/[^/]+$/.test(path)) return respond(tasks.find(t=>t.id===path.split('/').pop()));
     if (path.endsWith('/manifest')) return respond(manifest);
     const id = path.split('/')[3], current = runs.find(r => r.id === id);
     if (path.endsWith('/status')) return respond({ run_id: id, status: current?.status ?? 'pending', completed_cases: current?.status === 'completed' ? 1 : 0, total_cases: 1 });

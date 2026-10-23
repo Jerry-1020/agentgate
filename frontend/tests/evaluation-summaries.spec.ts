@@ -19,6 +19,10 @@ async function setup(page: Page, rows = [row()], total = rows.length) {
     calls.push({path:url.pathname + url.search, method:route.request().method(),headers:route.request().headers()});
     if (url.pathname === '/api/evaluation-overview/summary') return route.fulfill({json:envelope(metrics)});
     if (url.pathname === '/api/evaluation-task-summaries') return route.fulfill({json:envelope({items:rows,total,page:Number(url.searchParams.get('page')||1),page_size:Number(url.searchParams.get('page_size')||20)})});
+    if (/^\/api\/evaluation-tasks\/[^/]+$/.test(url.pathname)) {
+      const id = url.pathname.split('/').pop()!;
+      return route.fulfill({json:envelope({id,kind:id==='ab'?'ab':'single',run_ids:id==='ab'?['ab-a','ab-b']:[id==='created'?'created-run':id+'-a'],static_report_ids:[]})});
+    }
     if (url.pathname === '/api/evaluation-tasks') return route.fulfill({json:envelope([
       { id:'task-1', kind:'single', run_ids:['task-1-a'],previous_run_ids:[],static_report_ids:[] },
       { id:'ab', kind:'ab', run_ids:['ab-a','ab-b'],previous_run_ids:[],static_report_ids:[] },

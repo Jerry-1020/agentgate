@@ -70,6 +70,10 @@ watch(
 );
 const taskLinks = ref(readTaskLinks()),
   detailDialog = ref('');
+watch(
+  () => currentRoute.fullPath,
+  () => (detailDialog.value = ''),
+);
 function syncTaskLinks() {
   taskLinks.value = readTaskLinks();
 }
@@ -82,9 +86,15 @@ function linkFor(id: string) {
 }
 const runId = computed(() => {
   const id = route.value.split('/')[1]?.split('?')[0] || '';
-  return /^(tasks|results)\//.test(route.value)
-    ? (taskLinks.value.find((t) => t.id === id)?.runIds[0] ?? id)
-    : id;
+  const link = taskLinks.value.find((t) => t.id === id);
+  const selectedRun = currentRoute.query.run;
+  if (
+    route.value.includes('/samples/') &&
+    typeof selectedRun === 'string' &&
+    link?.runIds.includes(selectedRun)
+  )
+    return selectedRun;
+  return /^(tasks|results)\//.test(route.value) ? (link?.runIds[0] ?? id) : id;
 });
 function go(value: string) {
   const id = value.split('/')[1];
@@ -110,6 +120,7 @@ const confirmNavigation: NavigationGuard = (to, from) => {
 onBeforeRouteUpdate(confirmNavigation);
 onBeforeRouteLeave(confirmNavigation);
 const runs = shallowRef<EvaluationRun[]>([]);
+const pairStatuses = ref<Record<string, string>>({});
 const overviewDays = ref(7);
 const auth = useAuthStore();
 const authLabel = computed(() => auth.modeLabel);
@@ -184,6 +195,8 @@ const detailReady = ref(false);
 function needsContext() {
   return (page.value === 'tasks' && !!route.value.split('/')[1]) || page.value === 'analysis';
 }
+// Moving between samples of the same task must not reload its context and report.
+const contextKey = computed(() => `${page.value}/${currentRoute.path.split('/')[2] ?? ''}`);
 async function refresh() {
   clearTimeout(contextTimer);
   const ticket = ++contextRequest;
@@ -198,12 +211,17 @@ async function refresh() {
   if (document.hidden || !auth.authenticated) return;
   loading.value = true;
   try {
-    // Legacy associations remain detail-only; summaries never depend on this cache.
-    const [r] = await Promise.all([api.runs(), refreshTaskLinks()]);
-    const records = await includeCurrentTaskRuns(r);
-    if (ticket !== contextRequest) return;
-    runs.value = records;
-    taskLinks.value = readTaskLinks();
+    if (page.value === 'tasks') {
+      const links = await refreshTaskLinks(currentRoute.path.split('/')[2]);
+      if (ticket !== contextRequest) return;
+      taskLinks.value = links;
+    } else {
+      const [r] = await Promise.all([api.runs(), refreshTaskLinks()]);
+      const records = await includeCurrentTaskRuns(r);
+      if (ticket !== contextRequest) return;
+      runs.value = records;
+      taskLinks.value = readTaskLinks();
+    }
     online.value = true;
     error.value = '';
     detailReady.value = true;
@@ -228,7 +246,7 @@ async function refresh() {
 }
 watch(
   [
-    route,
+    contextKey,
     ...[
       () => auth.loginMode,
       () => auth.teamId,
@@ -243,6 +261,7 @@ watch(
     loading.value = false;
     detailReady.value = false;
     runs.value = [];
+    pairStatuses.value = {};
     taskLinks.value = [];
     error.value = '';
     if (needsContext() && auth.authenticated) void refresh();
@@ -401,7 +420,7 @@ async function taskRerunCreated(taskId: string) {
                 class="link"
               >
                 实验 {{ index === 0 ? 'A' : 'B' }} ·
-                {{ statusLabel(runs.find((r) => r.id === id)?.status ?? 'pending') }}
+                {{ statusLabel(pairStatuses[id] ?? 'pending') }}
               </button>
             </div></template
           >
@@ -435,10 +454,11 @@ async function taskRerunCreated(taskId: string) {
           v-if="pairLink && taskDetailTab === 'results'"
           :key="pairLink.id"
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
-          embedded />
+          embedded
+          @status="pairStatuses = $event" />
         <RunDetail
           v-if="!pairLink"
-          :key="route + ':' + runId"
+          :key="runId"
           :id="runId"
           :task-id="currentLink?.id"
           :return-page="page"
