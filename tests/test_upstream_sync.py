@@ -37,7 +37,7 @@ def team_dataset(repo):
 def test_team_scope_covers_local_task_and_sample_endpoints(tmp_path, repetitions):
     app = create_app(tmp_path / "db", dispatcher=Dispatcher())
     ds_id = team_dataset(app.state.dependencies.repository)
-    headers = {"user_team_id": "alpha", "user_id": "user-a", "user_name": "Tester"}
+    headers = {"X-Team-Id": "alpha", "X-User-Id": "user-a", "X-User-Name": "Tester"}
     with TestClient(app) as client:
         body = {"version": "loan-agent-v2-fixed", "dataset_id": ds_id,
                 "dataset_version": 1, "evaluator_ids": ["final-state"], "max_parallel_cases": 3}
@@ -55,9 +55,9 @@ def test_team_scope_covers_local_task_and_sample_endpoints(tmp_path, repetitions
             for suffix in ("samples", "target-descriptor", "manifest", "status"):
                 path = f"/api/runs/{run_id}/{suffix}"
                 assert client.get(path, headers=headers).status_code == 200
-                assert client.get(path, headers={"user_team_id": "beta"}).status_code == 404
-            assert client.post(f"/api/runs/{run_id}/cancel", headers={"user_team_id": "beta"}).status_code == 404
-        for other in ({}, {"user_team_id": "beta"}):
+                assert client.get(path, headers={"X-Team-Id": "beta"}).status_code == 404
+            assert client.post(f"/api/runs/{run_id}/cancel", headers={"X-Team-Id": "beta"}).status_code == 404
+        for other in ({}, {"X-Team-Id": "beta"}):
             assert client.get("/api/evaluation-tasks", headers=other).json()["data"] == []
             assert client.get("/api/runs", headers=other).json()["data"] == []
             assert client.get(f"/api/evaluation-tasks/{ids[0]}", headers=other).status_code == 404

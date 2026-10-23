@@ -237,7 +237,7 @@ def test_api_error_paths(tmp_path):
         with repo._connect() as db:
             db.execute("DELETE FROM agentgate_run_summaries")
         for path in ["/api/evaluation-task-summaries", "/api/evaluation-overview/summary"]:
-            assert c.get(path, headers={"user_team_id": "a"}).status_code == 503
+            assert c.get(path, headers={"X-Team-Id": "a"}).status_code == 503
         assert c.get("/api/evaluation-task-summaries?start_at=2026-01-01").status_code == 422
         assert (
             c.post("/api/evaluation-tasks/x/rerun", json={"source_run_id": "   "}).status_code

@@ -56,8 +56,8 @@ def client_for(submitter=created, *, context=True):
         async def caller_context(request, call_next):
             token = set_user_info(
                 UserInfo(
-                    request.headers.get("user_team_id", "gate-team"),
-                    request.headers.get("user_id", "user"),
+                    request.headers.get("X-Team-Id", "gate-team"),
+                    request.headers.get("X-User-Id", "user"),
                     "User",
                 )
             )
@@ -336,8 +336,8 @@ def test_concurrent_requests_keep_caller_and_credentials_separate():
                 json=body,
                 headers={
                     "X-Agent-Platform-Token": f"secret-{index}",
-                    "user_id": f"user-{index}",
-                    "user_team_id": f"gate-{index}",
+                    "X-User-Id": f"user-{index}",
+                    "X-Team-Id": f"gate-{index}",
                 },
             )
 

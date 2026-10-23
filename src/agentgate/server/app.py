@@ -160,17 +160,15 @@ def create_app(
     class UserContextMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next):
             info = UserInfo(
-                user_team_id=request.headers.get("user_team_id", ""),
-                user_id=request.headers.get("user_id") or "anonymous",
-                user_name=request.headers.get("user_name") or "匿名用户",
+                user_team_id=request.headers.get("X-Team-Id", ""),
+                user_id=request.headers.get("X-User-Id") or "anonymous",
+                user_name=request.headers.get("X-User-Name") or "匿名用户",
             )
             LOGGER.info(
-                "Request team context: method=%s path=%s "
-                "user_team_id_present=%s user_team_id=%r",
-                request.method,
+                "Request identity: path=%s user_team_id=%r user_id=%r",
                 request.url.path,
-                "user_team_id" in request.headers,
-                request.headers.get("user_team_id"),
+                request.headers.get("X-Team-Id"),
+                request.headers.get("X-User-Id"),
             )
             token = set_user_info(info)
             try:
@@ -185,7 +183,7 @@ def create_app(
         async def dispatch(self, request: Request, call_next):
             if request.method == "POST" and request.url.path not in SKIP_ENVELOPE_PATHS:
                 client_ip = request.client.host if request.client else "unknown"
-                user_id = request.headers.get("user_id") or "anonymous"
+                user_id = request.headers.get("X-User-Id") or "anonymous"
                 LOGGER.info(
                     "API request: %s %s user_id=%s ip=%s",
                     request.method,
