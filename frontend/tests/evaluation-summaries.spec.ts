@@ -77,10 +77,80 @@ test('task pagination, debounce, selection, kind and local dates have no detail 
   await expect.poll(()=>calls.length).toBe(5);
   expect(calls[4].path).toContain('kind=ab');
   await page.getByRole('button',{name:'单任务',exact:true}).click();
-  await page.getByRole('button',{name:'全部',exact:true}).click();
+  await page.locator('.list-toolbar').getByRole('button',{name:'全部',exact:true}).click();
   await page.getByRole('button',{name:'今日',exact:true}).click();
   await expect.poll(()=>calls.length).toBe(8);
   expect(calls.every(c=>c.path.startsWith('/api/evaluation-task-summaries?'))).toBe(true);
+});
+
+test('overview all-time option removes date bounds and updates historical totals', async ({ page }) => {
+  await setup(page);
+  const queries: URLSearchParams[] = [];
+  await page.route('**/api/evaluation-overview/summary*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    queries.push(params);
+    return route.fulfill({ json: envelope({
+      ...metrics, task_count: params.has('start_at') ? 1 : 104,
+    }) });
+  });
+  await mount(page, '/overview');
+  const range = page.getByRole('group', { name: '总览时间范围' });
+  await expect(range.getByRole('button', { name: '近7天', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.metric-value').first()).toHaveText('1');
+
+  await range.getByRole('button', { name: '全部', exact: true }).click();
+  await expect(page.locator('.metric-value').first()).toHaveText('104');
+  expect(queries.at(-1)?.has('start_at')).toBe(false);
+  expect(queries.at(-1)?.has('end_at')).toBe(false);
+  await expect(range.getByRole('button', { name: '全部', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await range.getByRole('button', { name: '近30天', exact: true }).click();
+  await expect(page.locator('.metric-value').first()).toHaveText('1');
+  expect(queries.at(-1)?.has('start_at')).toBe(true);
+});
+
+test('all-time tasks include older rows and preserve filters and pagination', async ({ page }) => {
+  await setup(page);
+  const historical = { ...row('historical-task', 'ab'), created_at: '2000-01-01T00:00:00Z' };
+  const queries: URLSearchParams[] = [];
+  await page.route('**/api/evaluation-task-summaries?*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    queries.push(params);
+    const bounded = params.has('start_at');
+    return route.fulfill({ json: envelope({
+      items: bounded ? [row('recent-task', 'ab')] : [historical],
+      total: bounded ? 21 : 41,
+      page: Number(params.get('page')),
+      page_size: Number(params.get('page_size')),
+    }) });
+  });
+  await mount(page);
+  const range = page.getByRole('group', { name: '任务时间范围' });
+  await expect(range.getByRole('button', { name: '近7天', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toHaveCount(0);
+  await page.getByLabel('搜索任务名称').fill('task');
+  await expect.poll(() => queries.at(-1)?.get('keyword')).toBe('task');
+  await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.get('kind')).toBe('ab');
+  await page.getByRole('button', { name: '下一页' }).click();
+  await expect(page.locator('footer')).toContainText('2 / 2');
+  await page.getByLabel('选择本页任务').check();
+
+  await range.getByRole('button', { name: '全部', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toBeVisible();
+  await expect(page.locator('footer')).toContainText('1 / 3');
+  await expect(page.getByLabel('选择本页任务')).not.toBeChecked();
+  expect(Object.fromEntries(queries.at(-1)!)).toEqual({ page: '1', page_size: '20', keyword: 'task', kind: 'ab' });
+  await expect(range.getByRole('button', { name: '全部', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: '下一页' }).click();
+  await expect(page.locator('footer')).toContainText('2 / 3');
+  expect(Object.fromEntries(queries.at(-1)!)).toEqual({ page: '2', page_size: '20', keyword: 'task', kind: 'ab' });
+  await range.getByRole('button', { name: '今日', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'recent-task', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toHaveCount(0);
+  await expect(page.locator('footer')).toContainText('1 / 2');
+  expect(queries.at(-1)?.has('start_at')).toBe(true);
 });
 
 test('A/B scores, nulls, independent and stability rows preserve presentation and navigation',async({page})=>{

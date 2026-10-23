@@ -117,15 +117,15 @@ onUnmounted(() => clearTimeout(debounce));
   <div class="page-head">
     <div style="display: flex; align-items: flex-end; gap: 16px">
       <h1 class="page-title">测评任务</h1>
-      <div class="tabs">
+      <div class="tabs" role="group" aria-label="任务时间范围">
         <button
-          v-for="d in [1, 7, 30]"
+          v-for="d in [1, 7, 30, 0]"
           :key="d"
           :class="['tab', { active: days === d }]"
           :aria-pressed="days === d"
           @click="days = d"
         >
-          {{ d === 1 ? '今日' : '近' + d + '天' }}
+          {{ d === 0 ? '全部' : d === 1 ? '今日' : '近' + d + '天' }}
         </button>
       </div>
     </div>
