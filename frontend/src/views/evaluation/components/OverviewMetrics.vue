@@ -9,6 +9,12 @@ const emit = defineEmits<{ retry: [] }>();
     <p v-if="error" role="alert">
       {{ error }} <button class="link" @click="emit('retry')">重试</button>
     </p>
+    <p v-if="data?.pending_summary_task_count" role="status">
+      {{ data.pending_summary_task_count }} 条任务摘要待更新，评分和样本统计暂未包含这些任务。
+    </p>
+    <p v-if="data?.pending_dataset_count" role="status">
+      {{ data.pending_dataset_count }} 个测评集样本数待更新，暂未纳入测评集统计。
+    </p>
     <div class="overview-metrics">
       <article class="card">
         <div class="metric-label">测评任务总数</div>

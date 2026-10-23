@@ -3,6 +3,8 @@ export type TaskKind = 'single' | 'ab' | 'stability';
 export type RunState = 'pending' | 'scheduled' | 'running' | 'completed' | 'failed' | 'cancelled';
 export interface OverviewSummary {
   task_count: number;
+  pending_summary_task_count: number;
+  pending_dataset_count: number;
   average_score: number | null;
   scored_run_count: number;
   completed_sample_count: number;
@@ -12,14 +14,15 @@ export interface OverviewSummary {
 export interface RunListSummary {
   run_id: string;
   status: RunState;
-  target_name: string;
-  target_version: string;
-  dataset_name: string;
+  summary_pending: boolean;
+  target_name: string | null;
+  target_version: string | null;
+  dataset_name: string | null;
   dataset_version: number | null;
   evaluator_kinds: string[];
-  scoring_mode: string;
-  total_cases: number;
-  completed_cases: number;
+  scoring_mode: string | null;
+  total_cases: number | null;
+  completed_cases: number | null;
   overall_score: number | null;
   gate_reason: string | null;
 }
@@ -30,8 +33,9 @@ export interface TaskListSummary {
   kind: TaskKind;
   created_at: string;
   status: RunState;
-  total_cases: number;
-  completed_cases: number;
+  summary_pending: boolean;
+  total_cases: number | null;
+  completed_cases: number | null;
   previous_run_count: number;
   runs: RunListSummary[];
 }

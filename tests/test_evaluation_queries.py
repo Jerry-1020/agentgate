@@ -9,7 +9,6 @@ from agentgate.storage.sqlite import SQLiteRepository
 from agentgate.storage.evaluation_query_models import (
     EvaluationQuery,
     TaskSummaryQuery,
-    SummaryNotReady,
 )
 from agentgate.application.evaluation_summary_backfill import backfill
 from test_run_engine import pending_run, engine, StubTargetAdapter
@@ -67,8 +66,8 @@ def test_pagination_filter_and_unknown_summary(tmp_path):
     )
     with repo._connect() as db:
         db.execute("DELETE FROM agentgate_run_summaries")
-    with pytest.raises(SummaryNotReady):
-        repo.list_evaluation_task_summaries(q, user_team_id="a")
+    degraded = repo.list_evaluation_task_summaries(q, user_team_id="a")
+    assert degraded.total == 3 and degraded.items[0].summary_pending
     assert backfill(repo, apply=True)["failures"] == []
     assert repo.list_evaluation_task_summaries(q, user_team_id="a").total == 3
 

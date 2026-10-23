@@ -342,11 +342,11 @@ test('parent error and cancellation failure remain visible and recoverable',asyn
   await page.route('**/api/runs/task-1-a/cancel',r=>r.fulfill({status:500,json:{detail:'cancel failed'}}));
   await page.getByRole('button',{name:'取消',exact:true}).click();await page.getByRole('button',{name:'确认',exact:true}).click();
   await expect(page.getByText(/cancel failed/)).toBeVisible();
-  await page.route('**/api/runs?*',r=>r.fulfill({status:500,json:{detail:'context failed'}}));
+  await page.route('**/api/evaluation-tasks/task-1',r=>r.fulfill({status:500,json:{detail:'context failed'}}));
   await navigate(page,'/tasks/task-1');await expect(page.locator('.notice.error')).toContainText('context failed');
-  await page.unroute('**/api/runs?*');await page.getByRole('button',{name:'重试',exact:true}).click();
+  await page.unroute('**/api/evaluation-tasks/task-1');await page.getByRole('button',{name:'重试',exact:true}).click();
   await expect(page.getByText('Detail task-1-a task-1',{exact:false})).toBeVisible();
-  await navigate(page,'/optimizer/ab-a?tab=analysis');await expect(page.getByText('Tuning',{exact:true})).toBeVisible();
+  await navigate(page,'/optimizer/ab-a?tab=analysis');await expect(page.getByText('Detail ab-a',{exact:false})).toBeVisible();
   await navigate(page,'/results/task-1');await expect(page.getByText('Detail task-1-a task-1',{exact:false})).toBeVisible();
   await navigate(page,'/scoring-templates');await expect(page.getByText('Judges',{exact:false})).toBeVisible();
   await navigate(page,'/annotation-templates');await expect(page.getByText('待实现',{exact:true})).toBeVisible();
@@ -372,4 +372,44 @@ test('standalone bank mode keeps the full header and logout action', async ({pag
   await expect(page.locator('.mode-chip')).toContainText('Test team');
   await expect(page.locator('.logout-btn')).toBeVisible();
   await expect(page.locator('.sidebar')).toHaveCSS('top', '64px');
+});
+
+
+test('missing summaries keep task rows, real status, details and pagination', async ({page}) => {
+  const missing = row('missing-summary');
+  Object.assign(missing, {summary_pending:true,total_cases:null,completed_cases:null});
+  Object.assign(missing.runs[0], {summary_pending:true,total_cases:null,completed_cases:null,
+    target_name:null,target_version:null,dataset_name:null,dataset_version:null,
+    evaluator_kinds:[],scoring_mode:null,overall_score:null,gate_reason:null});
+  await setup(page, [missing], 21);
+  await mount(page);
+  await expect(page.getByText('共 21 个任务')).toBeVisible();
+  const task = page.locator('tbody tr').first();
+  await expect(task.getByText('摘要待更新', {exact:true})).toBeVisible();
+  await expect(task.locator('progress')).toHaveCount(0);
+  await expect(task.locator('.progress-cell')).toContainText('—');
+  await expect(task.locator('.progress-cell')).toContainText('运行完成');
+  await expect(task.locator('.task-score')).toHaveText('—');
+  await page.getByRole('button', {name:'下一页',exact:true}).click();
+  await expect(page.getByRole('button', {name:'上一页',exact:true})).toBeEnabled();
+  await page.getByRole('button', {name:'missing-summary',exact:true}).click();
+  await expect(page.getByText('Detail missing-summary-a missing-summary', {exact:false})).toBeVisible();
+});
+
+test('partial group and overview disclose excluded summary statistics', async ({page}) => {
+  const partial = row('partial-summary', 'ab');
+  Object.assign(partial, {summary_pending:true,total_cases:null,completed_cases:null});
+  await setup(page, [partial]);
+  await mount(page);
+  await expect(page.getByText('部分摘要待更新', {exact:true})).toBeVisible();
+  await expect(page.locator('.task-score')).toHaveText('—');
+  await page.route('**/api/evaluation-overview/summary?*', route => route.fulfill({json:envelope({
+    ...metrics,task_count:1,average_score:null,scored_run_count:0,completed_sample_count:0,
+    pending_summary_task_count:1,pending_dataset_count:1,
+  })}));
+  await navigate(page, '/overview');
+  await expect(page.getByText('1 条任务摘要待更新，评分和样本统计暂未包含这些任务。')).toBeVisible();
+  await expect(page.getByText('1 个测评集样本数待更新，暂未纳入测评集统计。')).toBeVisible();
+  await expect(page.locator('.metric-value').first()).toHaveText('1');
+  await expect(page.locator('.metric-value').nth(1)).toContainText('—');
 });
