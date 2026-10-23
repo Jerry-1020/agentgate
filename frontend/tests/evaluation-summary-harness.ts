@@ -19,7 +19,7 @@ const dirty = (name: string) => ({ template: `<section>${name}<button @click="$e
 const form = { template: `<section>Task form<button @click="$emit('created',{id:'created',kind:'single',runIds:['created-run'],staticReports:[]})">submit single</button><button @click="$emit('created',{id:'stable',kind:'stability',runIds:['s'],staticReports:[]})">submit stability</button><button @click="$emit('close')">close form</button></section>` };
 const detail = { props: ['id','taskId'], template: `<section>Detail {{id}} {{taskId}}<button @click="$emit('rerun-created', taskId)">detail rerun complete</button><button @click="$emit('navigate', 'tasks')">detail back</button></section>` };
 const rerun = { props: ['id','taskId'], template: `<section>Rerun {{id}} {{taskId}}<button @click="$emit('created',taskId || 'created')">rerun complete</button><button @click="$emit('close')">close rerun</button></section>` };
-const layout = { props: ['hideAuthControls'], template: `<main><button v-if="!hideAuthControls" @click="$emit('logout')">logout</button><slot/><slot name="dialogs"/></main>` };
+const layout = { props: ['hideHeader'], template: `<main><button v-if="!hideHeader" @click="$emit('logout')">logout</button><slot/><slot name="dialogs"/></main>` };
 (window as any).summaryHarness = {
   helpers,
   auth: (values: object) => auth.$patch(values),
