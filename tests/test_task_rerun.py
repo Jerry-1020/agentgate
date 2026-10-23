@@ -189,7 +189,7 @@ def test_missing_and_other_team_tasks_are_inaccessible(tmp_path):
         task, source = completed_task(client)
         assert rerun(client, "missing", source.id).status_code == 404
         response = client.post(f"/api/evaluation-tasks/{task.id}/rerun",
-                               json={"source_run_id": source.id}, headers={"user_team_id": "other"})
+                               json={"source_run_id": source.id}, headers={"X-Team-Id": "other"})
         assert response.status_code == 404
         assert dispatcher.ids == []
 
@@ -220,15 +220,15 @@ def test_delete_task_history_is_scoped_to_owning_team(tmp_path):
         task = EvaluationTask(kind="single", run_ids=(source.id,))
         repo.save_evaluation_task(task)
         response = client.post(f"/api/evaluation-tasks/{task.id}/rerun",
-                               json={"source_run_id": source.id}, headers={"user_team_id": "owner-team"})
+                               json={"source_run_id": source.id}, headers={"X-Team-Id": "owner-team"})
         assert response.status_code == 202, response.text
         current = response.json()["data"]["run_ids"][0]
         assert client.delete(f"/api/evaluation-tasks/{task.id}",
-                             headers={"user_team_id": "other-team"}).status_code == 404
+                             headers={"X-Team-Id": "other-team"}).status_code == 404
         assert repo.get_run(source.id, user_team_id="owner-team") is not None
         assert repo.get_run(current, user_team_id="owner-team") is not None
         assert client.delete(f"/api/evaluation-tasks/{task.id}",
-                             headers={"user_team_id": "owner-team"}).status_code == 200
+                             headers={"X-Team-Id": "owner-team"}).status_code == 200
         assert repo.get_run(source.id, user_team_id="owner-team") is None
         assert repo.get_run(current, user_team_id="owner-team") is None
 

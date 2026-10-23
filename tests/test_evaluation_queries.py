@@ -99,17 +99,17 @@ def test_http_contract(tmp_path):
     with TestClient(create_app(tmp_path / "api.db", dispatcher=Dispatcher())) as client:
         repo = client.app.state.dependencies.repository
         task, _ = seed(repo, "team-a")
-        a = client.get("/api/evaluation-task-summaries", headers={"user_team_id": "team-a"})
+        a = client.get("/api/evaluation-task-summaries", headers={"X-Team-Id": "team-a"})
         assert a.status_code == 200, a.text
         assert a.json()["data"]["items"][0]["id"] == task.id
         assert (
-            client.get("/api/evaluation-task-summaries", headers={"user_team_id": "team-b"}).json()[
+            client.get("/api/evaluation-task-summaries", headers={"X-Team-Id": "team-b"}).json()[
                 "data"
             ]["total"]
             == 0
         )
         overview = client.get(
-            "/api/evaluation-overview/summary", headers={"user_team_id": "team-a"}
+            "/api/evaluation-overview/summary", headers={"X-Team-Id": "team-a"}
         )
         assert overview.status_code == 200, overview.text
         assert overview.json()["data"]["task_count"] == 1

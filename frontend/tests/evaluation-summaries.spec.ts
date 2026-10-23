@@ -153,14 +153,14 @@ test('team change clears prior data and sends five headers; old delayed response
   const calls=await setup(page);await mount(page);
   await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
   await page.route('**/api/evaluation-task-summaries?*',async route=>{
-    const team=route.request().headers()['user_team_id'];
+    const team=route.request().headers()['x-team-id'];
     if(team==='a') await new Promise(resolve=>setTimeout(resolve,200));
     await route.fulfill({json:envelope({items:[row(team||'unknown')],total:1,page:1,page_size:20})}).catch(()=>{});
   });
-  const teamARequest=page.waitForRequest(r=>r.headers()['user_team_id']==='a');
+  const teamARequest=page.waitForRequest(r=>r.headers()['x-team-id']==='a');
   await page.evaluate(()=>(window as any).summaryHarness.auth({loginMode:'bank',token:'fake-token',teamId:'a',teamName:'团队',userId:'u',userName:'用户'}));
   const sent = await teamARequest;
-  expect(sent.headers()).toMatchObject({token:'fake-token',user_team_id:'a',user_team_name:encodeURIComponent('团队'),user_id:'u',user_name:encodeURIComponent('用户')});
+  expect(sent.headers()).toMatchObject({token:'fake-token','x-team-id':'a','x-team-name':encodeURIComponent('团队'),'x-user-id':'u','x-user-name':encodeURIComponent('用户')});
   await page.evaluate(()=>(window as any).summaryHarness.auth({teamId:'b'}));
   await expect(page.getByRole('button',{name:'b',exact:true})).toBeVisible();
   await page.waitForTimeout(300);
@@ -219,7 +219,7 @@ test('real integrated iframe sends all five identity headers and hides auth cont
   await expect(frame.getByRole('button',{name:'登出',exact:true})).toHaveCount(0);
   const summary=calls.filter(c=>c.path.startsWith('/api/evaluation-task-summaries'));
   expect(summary).toHaveLength(1);
-  expect(summary[0].headers).toMatchObject({token:'fake',user_team_id:'bank-team',user_team_name:'Bank',user_id:'bank-user',user_name:'User'});
+  expect(summary[0].headers).toMatchObject({token:'fake','x-team-id':'bank-team','x-team-name':'Bank','x-user-id':'bank-user','x-user-name':'User'});
   expect(calls.some(c=>/^\/api\/(runs|evaluation-tasks|overview)([/?]|$)/.test(c.path))).toBe(false);
   const footer=frame.locator('.tasks-list footer');await expect(footer).toBeVisible();
   await expect(footer.getByRole('button',{name:'下一页'})).toBeDisabled();
@@ -232,7 +232,7 @@ test('integrated iframe accepts empty identity fields without falling back to ol
   const frame=page.frameLocator('iframe');
   await expect(frame.locator('.metric-value').first()).toHaveText('104');
   expect(calls).toHaveLength(2);
-  for(const call of calls) expect(call.headers).toMatchObject({token:'',user_team_id:'',user_team_name:'',user_id:'',user_name:''});
+  for(const call of calls) expect(call.headers).toMatchObject({token:'','x-team-id':'','x-team-name':'','x-user-id':'','x-user-name':''});
 });
 
 test('real external page preserves layout and starts only summary requests',async({page})=>{

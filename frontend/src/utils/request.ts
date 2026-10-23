@@ -43,10 +43,10 @@ http.interceptors.request.use((config) => {
   config.headers = {
     ...config.headers,
     token: auth.token ?? '',
-    user_team_id: auth.teamId ?? '',
-    user_team_name: encodeURIComponent(auth.teamName ?? ''),
-    user_id: auth.userId ?? '',
-    user_name: encodeURIComponent(auth.userName ?? ''),
+    'X-Team-Id': auth.teamId ?? '',
+    'X-Team-Name': encodeURIComponent(auth.teamName ?? ''),
+    'X-User-Id': auth.userId ?? '',
+    'X-User-Name': encodeURIComponent(auth.userName ?? ''),
   };
   return config;
 });
