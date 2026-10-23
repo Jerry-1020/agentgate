@@ -44,6 +44,8 @@ class TaskSummaryQuery(EvaluationQuery):
 
 class OverviewSummary(BaseModel):
     task_count: int = Field(ge=0)
+    pending_summary_task_count: int = Field(default=0, ge=0)
+    pending_dataset_count: int = Field(default=0, ge=0)
     average_score: float | None = Field(default=None, ge=0, le=1)
     scored_run_count: int = Field(ge=0)
     completed_sample_count: int = Field(ge=0)
@@ -54,14 +56,15 @@ class OverviewSummary(BaseModel):
 class RunListSummary(BaseModel):
     run_id: str
     status: RunStatus
-    target_name: str
-    target_version: str
-    dataset_name: str
+    summary_pending: bool = False
+    target_name: str | None
+    target_version: str | None
+    dataset_name: str | None
     dataset_version: int | None
     evaluator_kinds: tuple[str, ...]
-    scoring_mode: str
-    total_cases: int = Field(ge=0)
-    completed_cases: int = Field(ge=0)
+    scoring_mode: str | None
+    total_cases: int | None = Field(default=None, ge=0)
+    completed_cases: int | None = Field(default=None, ge=0)
     overall_score: float | None = Field(default=None, ge=0, le=1)
     gate_reason: str | None = None
 
@@ -73,8 +76,9 @@ class TaskListSummary(BaseModel):
     kind: EvaluationTaskKind
     created_at: datetime
     status: RunStatus
-    total_cases: int = Field(ge=0)
-    completed_cases: int = Field(ge=0)
+    summary_pending: bool = False
+    total_cases: int | None = Field(default=None, ge=0)
+    completed_cases: int | None = Field(default=None, ge=0)
     previous_run_count: int = Field(default=0, ge=0)
     runs: tuple[RunListSummary, ...]
 

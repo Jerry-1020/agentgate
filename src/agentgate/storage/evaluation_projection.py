@@ -6,6 +6,7 @@ Callers own the transaction. No connection, configuration or scoring side effect
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import UTC
 from zoneinfo import ZoneInfo
@@ -18,11 +19,12 @@ from .evaluation_query_models import (
     SUMMARY_VERSION,
     OverviewSummary,
     RunListSummary,
-    SummaryNotReady,
     SummarySourceChanged,
     TaskListSummary,
     TaskSummaryPage,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def mysql(db):
@@ -193,11 +195,42 @@ def remove_run(db, run_id):
         execute(db, f"DELETE FROM agentgate_{table} WHERE {rk}=:k", {"k": key(db, run_id)})
 
 
+def valid_summary(db, run="r", summary="s"):
+    """Validate compact projection fields in SQL before aggregation, without reports."""
+
+    def kind(field):
+        path = "$." + field
+        if mysql(db):
+            return f"LOWER(JSON_TYPE(JSON_EXTRACT({summary}.display_payload,'{path}')))"
+        return f"json_type({summary}.display_payload,'{path}')"
+
+    string_type = "string" if mysql(db) else "text"
+    fields = [
+        f"{kind(field)}='{string_type}'"
+        for field in ("target_name", "target_version", "dataset_name", "scoring_mode")
+    ]
+    fields.extend(
+        [
+            f"{kind('evaluator_kinds')}='array'",
+            f"{kind('dataset_version')} IN ('integer','null')",
+            f"{summary}.total_cases>=0",
+            f"({summary}.overall_score IS NULL OR {summary}.overall_score BETWEEN 0 AND 1)",
+            f"({run}.status<>'completed' OR {summary}.summary_version={SUMMARY_VERSION})",
+        ]
+    )
+    # CASE guards JSON extraction on malformed text on both supported databases.
+    return (
+        f"CASE WHEN JSON_VALID({summary}.display_payload)=1 THEN "
+        f"CASE WHEN {' AND '.join(fields)} THEN 1 ELSE 0 END ELSE 0 END"
+    )
+
+
 def run_relation(db):
     pk, rk, _, _, _, team = keys(db)
     return f"""SELECT r.{pk} AS k,r.id AS run_id,r.{team} AS team,r.status,r.created_at,
         s.display_payload,s.fallback_name,s.total_cases,s.overall_score,s.gate_reason,
-        s.summary_version,COALESCE(p.completed_cases,0) AS completed_cases
+        s.summary_version,{valid_summary(db)} AS summary_valid,
+        COALESCE(p.completed_cases,0) AS completed_cases
         FROM agentgate_runs r LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
         LEFT JOIN (SELECT {rk},SUM(completed) AS completed_cases
                    FROM agentgate_run_case_progress GROUP BY {rk}) p ON p.{rk}=r.{pk}"""
@@ -206,8 +239,9 @@ def run_relation(db):
 def task_relation(db):
     pk, rk, tk, _, _, team = keys(db)
     first = "first_run_key" if mysql(db) else "first_run_id"
-    return f"""SELECT t.{pk} AS k,t.id,t.id AS task_id,COALESCE(t.name,s.fallback_name) AS name,
+    return f"""SELECT t.{pk} AS k,t.id,t.id AS task_id,COALESCE(t.name,s.fallback_name,t.id) AS name,
         t.kind,t.created_at,first_run.id AS search_run_id,
+        MAX(1-({valid_summary(db, "r", "member_summary")})) AS summary_pending,
         CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0 THEN 'failed'
              WHEN SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled'
              WHEN MIN(CASE WHEN r.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed'
@@ -216,6 +250,7 @@ def task_relation(db):
         FROM agentgate_evaluation_tasks t
         JOIN agentgate_evaluation_task_runs a ON a.{tk}=t.{pk} AND a.is_current=1
         JOIN agentgate_runs r ON r.{pk}=a.{rk}
+        LEFT JOIN agentgate_run_summaries member_summary ON member_summary.{rk}=r.{pk}
         JOIN agentgate_runs first_run ON first_run.{pk}=t.{first}
         LEFT JOIN agentgate_run_summaries s ON s.{rk}=t.{first}
         WHERE NOT EXISTS (
@@ -225,7 +260,8 @@ def task_relation(db):
                 AND (br.{pk} IS NULL OR br.{team}<>:team))
         GROUP BY t.{pk},t.id,t.name,s.fallback_name,t.kind,t.created_at,first_run.status,first_run.id
         UNION ALL
-        SELECT r.{pk},r.id,NULL,s.fallback_name,'single',r.created_at,r.id,r.status
+        SELECT r.{pk},r.id,NULL,COALESCE(s.fallback_name,r.id),'single',r.created_at,r.id,
+        1-({valid_summary(db)}),r.status
         FROM agentgate_runs r LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
         WHERE r.{team}=:team AND NOT EXISTS (
             SELECT 1 FROM agentgate_evaluation_task_runs a WHERE a.{rk}=r.{pk})"""
@@ -263,31 +299,7 @@ def filters(db, query, alias="q"):
     return " AND ".join(clauses) or "1=1", params
 
 
-def check_ready(db, team):
-    pk, rk, tk, _, _, team_col = keys(db)
-    p = {"team": key(db, team), "version": SUMMARY_VERSION}
-    bad = rows(
-        db,
-        f"""SELECT r.{pk} FROM agentgate_runs r
-        LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
-        WHERE r.{team_col}=:team AND (s.{rk} IS NULL OR
-            (r.status='completed' AND (s.summary_version IS NULL OR s.summary_version<>:version))) LIMIT 1""",
-        p,
-    )
-    pending = rows(
-        db,
-        f"""SELECT a.{rk} FROM agentgate_evaluation_task_runs a
-        JOIN agentgate_runs r ON r.{pk}=a.{rk}
-        JOIN agentgate_evaluation_tasks t ON t.{pk}=a.{tk}
-        WHERE r.{team_col}=:team AND (a.is_current IS NULL OR a.position IS NULL OR t.kind IS NULL) LIMIT 1""",
-        p,
-    )
-    if bad or pending:
-        raise SummaryNotReady("evaluation_summary_not_ready")
-
-
 def task_page(db, query, team):
-    check_ready(db, team)
     condition, p = filters(db, query)
     p["team"] = key(db, team)
     relation = task_relation(db)
@@ -331,15 +343,24 @@ def task_page(db, query, team):
     )
     bykey = {}
     for r in run_rows:
-        display = json.loads(r["display_payload"])
+        valid = bool(r["summary_valid"])
+        display = json.loads(r["display_payload"]) if valid else {}
         bykey[r["k"]] = RunListSummary(
-            **display,
+            target_name=display.get("target_name"),
+            target_version=display.get("target_version"),
+            dataset_name=display.get("dataset_name"),
+            dataset_version=display.get("dataset_version"),
+            evaluator_kinds=tuple(
+                k for k in display.get("evaluator_kinds", []) if isinstance(k, str)
+            ),
+            scoring_mode=display.get("scoring_mode"),
             run_id=r["run_id"],
             status=r["status"],
-            total_cases=r["total_cases"],
-            completed_cases=r["completed_cases"],
-            overall_score=r["overall_score"] if r["status"] == "completed" else None,
-            gate_reason=r["gate_reason"],
+            summary_pending=not valid,
+            total_cases=r["total_cases"] if valid else None,
+            completed_cases=r["completed_cases"] if valid else None,
+            overall_score=r["overall_score"] if valid and r["status"] == "completed" else None,
+            gate_reason=r["gate_reason"] if valid else None,
         )
     items = []
     for row in page:
@@ -357,9 +378,21 @@ def task_page(db, query, team):
                 **{k: row[k] for k in ("id", "task_id", "name", "kind", "created_at", "status")},
                 previous_run_count=historical.get(row["k"], 0) if row["task_id"] else 0,
                 runs=children,
-                total_cases=sum(r.total_cases for r in children),
-                completed_cases=sum(r.completed_cases for r in children),
+                summary_pending=any(r.summary_pending for r in children),
+                total_cases=None
+                if any(r.summary_pending for r in children)
+                else sum(r.total_cases for r in children),
+                completed_cases=None
+                if any(r.summary_pending for r in children)
+                else sum(r.completed_cases for r in children),
             )
+        )
+    pending_ids = [item.id for item in items if item.summary_pending]
+    if pending_ids:
+        LOGGER.warning(
+            "Evaluation summaries pending: scope=task_page count=%d task_ids=%s reason=missing_or_invalid_summary",
+            len(pending_ids),
+            pending_ids[:10],
         )
     return TaskSummaryPage(
         items=tuple(items), total=total, page=query.page, page_size=query.page_size
@@ -367,17 +400,25 @@ def task_page(db, query, team):
 
 
 def overview(db, query, team):
-    check_ready(db, team)
     condition, p = filters(db, query)
     p["team"] = key(db, team)
-    tasks = rows(db, f"SELECT COUNT(*) AS n FROM ({task_relation(db)}) q WHERE {condition}", p)[0][
-        "n"
-    ]
+    tasks = rows(
+        db,
+        f"SELECT COUNT(*) AS n,COALESCE(SUM(summary_pending),0) AS pending FROM ({task_relation(db)}) q WHERE {condition}",
+        p,
+    )[0]
+    pk, rk, tk, _, _, _ = keys(db)
     stats = rows(
         db,
         f"""SELECT AVG(overall_score) AS score,COUNT(overall_score) AS scored,
         COALESCE(SUM(total_cases),0) AS samples FROM ({run_relation(db)}) q
-        WHERE team=:team AND status='completed' AND {condition}""",
+        WHERE team=:team AND status='completed' AND summary_valid=1 AND {condition}
+        AND NOT EXISTS (
+            SELECT 1 FROM agentgate_evaluation_task_runs own
+            JOIN agentgate_evaluation_task_runs member ON member.{tk}=own.{tk} AND member.is_current=1
+            LEFT JOIN agentgate_runs mr ON mr.{pk}=member.{rk}
+            LEFT JOIN agentgate_run_summaries ms ON ms.{rk}=member.{rk}
+            WHERE own.{rk}=q.k AND (mr.{pk} IS NULL OR {valid_summary(db, "mr", "ms")}=0))""",
         p,
     )[0]
     pk, _, _, _, _, tc = keys(db)
@@ -392,14 +433,20 @@ def overview(db, query, team):
         WHERE d.{tc}=:team AND d.archived=0""",
         p,
     )[0]
-    if datasets["missing"]:
-        raise SummaryNotReady("dataset_summary_not_ready")
+    if tasks["pending"] or datasets["missing"]:
+        LOGGER.warning(
+            "Evaluation summaries pending: scope=overview task_count=%d dataset_count=%d reason=missing_or_invalid_summary",
+            tasks["pending"],
+            datasets["missing"] or 0,
+        )
     return OverviewSummary(
-        task_count=tasks,
+        task_count=tasks["n"],
+        pending_summary_task_count=tasks["pending"],
+        pending_dataset_count=datasets["missing"] or 0,
         average_score=stats["score"],
         scored_run_count=stats["scored"],
         completed_sample_count=stats["samples"],
-        dataset_count=datasets["n"],
+        dataset_count=datasets["n"] - (datasets["missing"] or 0),
         dataset_sample_count=datasets["samples"],
     )
 

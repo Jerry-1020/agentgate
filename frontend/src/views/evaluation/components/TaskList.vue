@@ -83,16 +83,17 @@ function comparisonSides(row: TaskListSummary, column: (typeof identityColumns)[
   return row.runs.map((run, index) => ({
     id: run.run_id,
     label: index === 0 ? 'A' : 'B',
-    name: column === 'target' ? run.target_name : run.dataset_name,
+    name: (column === 'target' ? run.target_name : run.dataset_name) ?? '—',
     version:
       column === 'target'
-        ? run.target_version
+        ? (run.target_version ?? '—')
         : run.dataset_version === null
           ? '—'
           : `v${run.dataset_version}`,
   }));
 }
-const done = (row: TaskListSummary) => ({ done: row.completed_cases, total: row.total_cases });
+const done = (row: TaskListSummary) => row.total_cases === null || row.completed_cases === null
+  ? null : ({ done: row.completed_cases, total: row.total_cases });
 async function deleteTask(id: string) {
   try {
     await ElMessageBox.confirm(
@@ -207,6 +208,7 @@ onUnmounted(() => clearTimeout(debounce));
               <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
                 {{ r.name }}</button
               ><small>{{ new Date(r.created_at).toLocaleString() }}</small>
+              <small v-if="r.summary_pending" role="status">{{ r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新' }}</small>
               <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
             </td>
             <td>
@@ -251,11 +253,11 @@ onUnmounted(() => clearTimeout(debounce));
               <template v-else>
                 <span
                   class="primary-text"
-                  :title="column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name"
-                  >{{ column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name }}</span
+                  :title="(column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ?? undefined"
+                  >{{ (column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ?? '—' }}</span
                 ><small>{{
                   column === 'target'
-                    ? r.runs[0].target_version
+                    ? (r.runs[0].target_version ?? '—')
                     : r.runs[0].dataset_version === null
                       ? '—'
                       : `v${r.runs[0].dataset_version}`
@@ -263,7 +265,7 @@ onUnmounted(() => clearTimeout(debounce));
               </template>
             </td>
             <td>
-              <span>{{ evaluatorStrategy(r.runs[0].evaluator_kinds) }}</span>
+              <span>{{ evaluatorStrategy(r.runs[0].evaluator_kinds) || '—' }}</span>
             </td>
             <td class="progress-cell">
               <template v-if="done(r)"
@@ -279,10 +281,10 @@ onUnmounted(() => clearTimeout(debounce));
                   :value="done(r)!.done"
                   :max="done(r)!.total || 1"
                   :class="{ failed: r.status === 'failed' }" /></template
-              ><small>{{ statusLabel(r.status) }}</small>
+              ><span v-else>—</span><small>{{ statusLabel(r.status) }}</small>
             </td>
             <td class="task-score">
-              <template v-if="r.kind === 'ab'"
+              <template v-if="r.summary_pending">—</template><template v-else-if="r.kind === 'ab'"
                 ><p v-for="(id, i) in r.runs.map((run) => run.run_id)" :key="id">
                   {{ i === 0 ? 'A' : 'B' }}
                   {{ score(r.runs.find((run) => run.run_id === id)?.overall_score ?? null) }}

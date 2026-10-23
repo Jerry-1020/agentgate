@@ -7,7 +7,6 @@ from agentgate.storage.sqlite import SQLiteRepository
 from agentgate.storage.evaluation_query_models import (
     EvaluationQuery,
     TaskSummaryQuery,
-    SummaryNotReady,
     SummarySourceChanged,
 )
 from agentgate.result.summary import build_completed_run_summary, result_source_digest
@@ -68,8 +67,8 @@ def test_old_completion_backfill_and_delete(tmp_path):
     running = repo.claim_pending_run(runs[0].id, utcnow())
     completed = transition_run(running, RunStatus.COMPLETED)
     repo.save_run(completed)
-    with pytest.raises(SummaryNotReady):
-        repo.get_evaluation_overview_summary(EvaluationQuery(), user_team_id="a")
+    degraded = repo.get_evaluation_overview_summary(EvaluationQuery(), user_team_id="a")
+    assert degraded.task_count == 1 and degraded.pending_summary_task_count == 1
     assert backfill(repo, apply=False)["rebuilt"] == 0
     assert not backfill(repo, apply=True)["failures"]
     assert (
@@ -237,7 +236,7 @@ def test_api_error_paths(tmp_path):
         with repo._connect() as db:
             db.execute("DELETE FROM agentgate_run_summaries")
         for path in ["/api/evaluation-task-summaries", "/api/evaluation-overview/summary"]:
-            assert c.get(path, headers={"X-Team-Id": "a"}).status_code == 503
+            assert c.get(path, headers={"X-Team-Id": "a"}).status_code == 200
         assert c.get("/api/evaluation-task-summaries?start_at=2026-01-01").status_code == 422
         assert (
             c.post("/api/evaluation-tasks/x/rerun", json={"source_run_id": "   "}).status_code
