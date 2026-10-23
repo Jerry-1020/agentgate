@@ -67,17 +67,21 @@ const progress = ref<RunProgress | null>(null),
     detailTabs.find(([key]) => key === router.currentRoute.value.query.tab)?.[0] ?? 'results',
   ),
   rerun = ref(false);
-const sampleId = ref(location.hash.match(/\/samples\/([^?]+)/)?.[1] ?? ''),
+const sampleId = computed(() =>
+    decodeURIComponent(router.currentRoute.value.path.match(/\/samples\/([^/]+)/)?.[1] ?? ''),
+  ),
   turnIndex = ref(0),
   continuous = ref(false),
   status = ref(''),
   range = ref(''),
   scenario = ref('');
 const traces = ref<Record<string, Trace>>({}),
-  traceErrors = ref<Record<string, string>>({});
+  traceErrors = ref<Record<string, string>>({}),
+  exporting = ref(false),
+  exportError = ref('');
+const traceRequests = new Map<string, Promise<boolean>>();
 let timer: ReturnType<typeof setTimeout> | undefined,
-  disposed = false,
-  traceTicket = 0;
+  disposed = false;
 const manifest = computed<any>(() => data.value?.run.manifest);
 const associatedTask = computed(() => readTaskLinks().find((t) => t.runIds.includes(props.id)));
 const canRerun = computed(
@@ -161,15 +165,16 @@ const currentPosition = computed(() =>
 const formatTime = (n: number | null) =>
   n === null ? '—' : n < 0.01 ? '< 0.01s' : n.toFixed(2) + 's';
 function openSample(id: string) {
-  sampleId.value = id;
   turnIndex.value = 0;
   void router.replace({
-    path: `/tasks/${props.taskId ?? associatedTask.value?.id ?? props.id}/samples/${id}`,
-    query: tab.value === 'low-samples' ? { tab: 'low-samples' } : {},
+    path: `/tasks/${props.taskId ?? associatedTask.value?.id ?? props.id}/samples/${encodeURIComponent(id)}`,
+    query: {
+      ...(tab.value === 'low-samples' ? { tab: 'low-samples' } : {}),
+      ...(associatedTask.value?.kind === 'ab' ? { run: props.id } : {}),
+    },
   });
 }
 function back() {
-  sampleId.value = '';
   void router.replace({
     path: `/tasks/${props.taskId ?? associatedTask.value?.id ?? props.id}`,
     query: tab.value === 'low-samples' ? { tab: 'low-samples' } : {},
@@ -195,26 +200,33 @@ function toolsFor(id: string) {
   }
   return spans.filter((s) => s.operation_type === 'tool' && ids.has(s.span_id));
 }
-async function loadTraces() {
-  const ticket = ++traceTicket;
-  const pending = cases.value.filter(
-    (c: any) => data.value?.results.some((r) => r.case_id === c.id) && !traces.value[c.id],
-  );
-  for (let i = 0; i < pending.length; i += 4) {
-    if (disposed || ticket !== traceTicket) return;
-    await Promise.all(
-      pending.slice(i, i + 4).map(async (c: any) => {
-        try {
-          const t = await api.trace(props.id, c.id);
-          if (!disposed) traces.value[c.id] = t;
-        } catch (e) {
-          if (!disposed) traceErrors.value[c.id] = String(e);
-        }
-      }),
-    );
-  }
+function loadTrace(id: string): Promise<boolean> {
+  if (disposed) return Promise.resolve(false);
+  if (traces.value[id]) return Promise.resolve(true);
+  const pending = traceRequests.get(id);
+  if (pending) return pending;
+  delete traceErrors.value[id];
+  const request = (async () => {
+    try {
+      const value = await api.trace(props.id, id);
+      if (disposed) return false;
+      traces.value[id] = value;
+      return true;
+    } catch (e) {
+      if (!disposed) traceErrors.value[id] = String(e);
+      return false;
+    } finally {
+      traceRequests.delete(id);
+    }
+  })();
+  traceRequests.set(id, request);
+  return request;
+}
+function loadSelectedTrace() {
+  if (sample.value && caseResults(sample.value.id).length) void loadTrace(sample.value.id);
 }
 async function load() {
+  clearTimeout(timer);
   try {
     const p = await api.status(props.id),
       r = p.status === 'completed' ? await api.report(props.id) : null,
@@ -224,9 +236,9 @@ async function load() {
     report.value = r;
     data.value = s;
     error.value = '';
-    void loadTraces();
+    loadSelectedTrace();
   } catch (e) {
-    error.value = String(e);
+    if (!disposed) error.value = String(e);
   } finally {
     if (
       !disposed &&
@@ -235,31 +247,53 @@ async function load() {
       timer = setTimeout(load, 3000);
   }
 }
-function exportRows() {
-  downloadCsv(
-    [
-      ['用户输入', '场景', '状态', '综合分', ...columns.value.map((c) => c.name), '耗时（秒）'],
-      ...filtered.value.map((c: any) => [
-        displayValue(c.turns[0]?.input),
-        c.tags.join('、'),
-        statusLabel(summary(c.id).outcome),
-        score(summary(c.id).score),
-        ...columns.value.map((col) => score(columnScore(caseResults(c.id), col))),
-        traceSeconds(traces.value[c.id]),
-      ]),
-    ],
-    `测评结果-${props.id}.csv`,
-  );
+async function exportRows() {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportError.value = '';
+  const rows = [...filtered.value];
+  const ids = rows.filter((c: any) => caseResults(c.id).length).map((c: any) => c.id);
+  try {
+    for (let start = 0; start < ids.length; start += 4) {
+      if (disposed) return;
+      const loaded = await Promise.all(ids.slice(start, start + 4).map(loadTrace));
+      if (loaded.some((success) => !success)) {
+        exportError.value = '部分样本执行轨迹读取失败，未导出；请重试，以免遗漏耗时数据。';
+        return;
+      }
+    }
+    if (disposed) return;
+    downloadCsv(
+      [
+        ['用户输入', '场景', '状态', '综合分', ...columns.value.map((c) => c.name), '耗时（秒）'],
+        ...rows.map((c: any) => [
+          displayValue(c.turns[0]?.input),
+          c.tags.join('、'),
+          statusLabel(summary(c.id).outcome),
+          score(summary(c.id).score),
+          ...columns.value.map((col) => score(columnScore(caseResults(c.id), col))),
+          traceSeconds(traces.value[c.id]),
+        ]),
+      ],
+      `测评结果-${props.id}.csv`,
+    );
+  } finally {
+    exporting.value = false;
+  }
 }
 onMounted(load);
 onUnmounted(() => {
   disposed = true;
   clearTimeout(timer);
-  traceTicket++;
 });
+watch(
+  () => router.currentRoute.value.query.tab,
+  (value) => (tab.value = detailTabs.find(([key]) => key === value)?.[0] ?? 'results'),
+);
 watch(sampleId, () => {
   turnIndex.value = 0;
   continuous.value = false;
+  loadSelectedTrace();
 });
 </script>
 <template>
@@ -370,8 +404,11 @@ watch(sampleId, () => {
             ><select class="input" v-model="scenario" aria-label="样本场景">
               <option value="">全部场景</option>
               <option v-for="(s, rowIndex1) in scenarios" :key="rowIndex1">{{ s }}</option></select
-            ><button class="secondary export" @click="exportRows">导出 CSV</button>
+            ><button class="secondary export" :disabled="exporting" @click="exportRows">
+              {{ exporting ? '正在准备导出…' : '导出 CSV' }}
+            </button>
           </div>
+          <p v-if="exportError" class="notice error" role="alert">{{ exportError }}</p>
           <div
             class="table-wrap sample-results-scroll"
             role="region"
@@ -644,6 +681,7 @@ watch(sampleId, () => {
           <h2>执行轨迹追踪</h2>
           <p v-if="traceErrors[sample.id]" class="notice error" role="alert">
             Trace 读取失败：{{ traceErrors[sample.id] }}
+            <button class="link" @click="loadSelectedTrace">重试读取轨迹</button>
           </p>
           <p v-else class="muted" role="status">
             {{ caseResults(sample.id).length ? '正在读取完整 Trace…' : '尚无执行轨迹' }}

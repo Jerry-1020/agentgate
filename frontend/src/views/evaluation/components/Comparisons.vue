@@ -21,6 +21,7 @@ import {
 } from '../utils/comparison-compatibility';
 
 const props = defineProps<{ initialPair?: { a: string; b: string }; embedded?: boolean }>();
+const emit = defineEmits<{ status: [statuses: Record<string, string>] }>();
 const mode = ref('history'),
   submitted = ref<{ a: string; b: string } | null>(null);
 const pairStatus = ref<Record<string, string>>({}),
@@ -40,6 +41,7 @@ async function checkPair(ticket: number) {
     );
     if (ticket !== pairTicket) return;
     pairStatus.value = Object.fromEntries(results.map((r) => [r.run_id, r.status]));
+    emit('status', pairStatus.value);
     pairError.value = '';
   } catch {
     if (ticket === pairTicket) pairError.value = '暂未取得执行进度，正在重试；也可打开任务查看。';
@@ -97,7 +99,7 @@ async function loadHistory() {
   }
 }
 onMounted(() => {
-  void loadHistory();
+  if (!props.embedded) void loadHistory();
   if (props.initialPair) {
     created(props.initialPair.a, props.initialPair.b);
   }
@@ -106,7 +108,7 @@ watch(pairReady, (ready) => {
   if (ready && props.initialPair) showCreatedPair();
 });
 watch(mode, (value) => {
-  if (value === 'history') void loadHistory();
+  if (value === 'history' && !props.embedded) void loadHistory();
 });
 
 const snapshotLoading = ref(false),

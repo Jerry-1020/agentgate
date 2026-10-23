@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { defineStore } from 'pinia';
 import { request } from '../../api/evaluations';
+import { ApiError } from '../../utils/request';
 export interface TaskLink {
   id: string;
   name?: string;
@@ -27,10 +28,21 @@ export const useTaskLinksStore = defineStore('task-links', () => {
   function readTaskLinks(): TaskLink[] {
     return cache.value;
   }
-  function refreshTaskLinks(): Promise<TaskLink[]> {
+  function refreshTaskLinks(taskId?: string): Promise<TaskLink[]> {
     const current = ++generation;
     const refresh = (async () => {
-      const tasks = await request<StoredTask[]>('/evaluation-tasks');
+      let tasks: StoredTask[];
+      if (taskId) {
+        try {
+          tasks = [await request<StoredTask>('/evaluation-tasks/' + encodeURIComponent(taskId))];
+        } catch (error) {
+          // Standalone execution links have no task association; the run endpoint still checks access.
+          if (!(error instanceof ApiError) || error.status !== 404) throw error;
+          tasks = [];
+        }
+      } else {
+        tasks = await request<StoredTask[]>('/evaluation-tasks');
+      }
       const ids = [...new Set(tasks.flatMap((t) => t.static_report_ids))];
       const versions = new Map(
         await Promise.all(
