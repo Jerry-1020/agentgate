@@ -1248,29 +1248,6 @@ onMounted(() => void openCreate(props.source));
             :max="bankTarget || localBankSelected ? 300 : 3600"
             step="1"
         /></label>
-        <label class="field"
-          >稳定性测试<input
-            class="input"
-            type="number"
-            v-model.number="repetitions"
-            min="1"
-            max="20"
-            step="1"
-            title="1–20 次，最大 20 次；各轮独立执行"
-            aria-label="稳定性测试"
-        /></label>
-        <label class="field"
-          >失败重试次数<input
-            class="input"
-            v-model.number="retries"
-            :disabled="taskKind === 'ab' || localBankSelected"
-            title="最多 5 次；仅重试可安全重试的执行错误"
-            aria-label="失败重试次数"
-            type="number"
-            min="0"
-            max="5"
-            step="1"
-        /></label>
       </div>
 
       <p v-if="taskKind === 'ab'" class="muted full">
