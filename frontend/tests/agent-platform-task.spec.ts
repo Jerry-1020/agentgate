@@ -718,6 +718,26 @@ async function useExternalMode(page: Page) {
 }
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
 
+for (const mode of ['bank', 'external'] as const)
+  test(`${mode} execution settings hide repetition and retry controls without empty layout cells`, async ({ page }) => {
+    await openForm(page, false, sampleCases, mode);
+    const settings = page.getByLabel('执行参数', { exact: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await expect(settings.locator(':scope > .field')).toHaveCount(3);
+      await expect(settings.getByLabel('执行时间', { exact: true })).toBeVisible();
+      await expect(settings.getByLabel('并发样本数', { exact: true })).toBeVisible();
+      await expect(settings.getByLabel('执行超时（秒）', { exact: true })).toBeVisible();
+      await expect(settings.getByText('稳定性测试', { exact: true })).toHaveCount(0);
+      await expect(settings.getByText('失败重试次数', { exact: true })).toHaveCount(0);
+    }
+    await settings.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
+    await expect(settings.getByLabel('预约时间', { exact: true })).toBeVisible();
+    await expect(settings.locator(':scope > .field')).toHaveCount(4);
+    await settings.getByLabel('执行时间', { exact: true }).selectOption('now');
+    await expect(settings.locator(':scope > .field')).toHaveCount(3);
+  });
+
 test('bank workflow accepts business JSON while cloudshrimp retains its native input contract', async ({ page }) => {
   const cases = [{ ...sampleCases[0], initial_state: { config_variables: [{ name: 'centreId', value: '810000' }] },
     turns: [{ input: { user_input_text: '翻译', menuId: 'TRANSLATE', form: { enabled: false } }, expectations: [{ kind: 'output' }] },
@@ -1093,7 +1113,7 @@ test('platform A/B requires a different candidate version before creating', asyn
 });
 
 for (const target of ['workflow', 'base', 'claw'] as const)
-  for (const kind of ['single', 'stability', 'ab'] as const)
+  for (const kind of ['single', 'ab'] as const)
     test(`bank ${target} ${kind} submits the editable Case concurrency`, async ({ page }) => {
       const requests = await openForm(page);
       await page.getByLabel('并发样本数', { exact: true }).fill('4');
@@ -1114,8 +1134,6 @@ for (const target of ['workflow', 'base', 'claw'] as const)
       const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
       await expect(concurrencyInput).toBeEnabled();
       await expect(concurrencyInput).toHaveValue('4');
-      if (kind === 'stability')
-        await page.getByLabel('稳定性测试', { exact: true }).fill('3');
       if (kind === 'ab') {
         await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
         await page.getByLabel('平台候选版本', { exact: true })
@@ -1125,6 +1143,8 @@ for (const target of ['workflow', 'base', 'claw'] as const)
         await expect(concurrencyInput).toHaveValue('4');
         await concurrencyInput.fill('5');
       }
+      await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
+      await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
       await page.getByRole('button', {
         name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
       }).click();
@@ -1138,7 +1158,10 @@ for (const target of ['workflow', 'base', 'claw'] as const)
       expect(directoryRequests.every((request) =>
         request.origin === new URL(url).origin && request.authorization === 'Bearer form-secret',
       )).toBe(true);
-      if (kind !== 'ab') expect(submission.body.repetitions).toBe(kind === 'stability' ? 3 : 1);
+      if (kind !== 'ab') {
+        expect(submission.body.repetitions).toBe(1);
+        expect(submission.body.max_retries).toBe(0);
+      }
     });
 
 for (const invalid of ['0', '31', '1.5'])
@@ -1173,7 +1196,7 @@ test('switching from bank A/B to external restores its fixed concurrency', async
   expect(submission.headers['x-agent-platform-token']).toBe('local');
 });
 
-for (const kind of ['single', 'stability', 'ab'] as const)
+for (const kind of ['single', 'ab'] as const)
   test(`external platform ${kind} retains its existing concurrency and token routing`, async ({ page }) => {
     const requests = await openForm(page);
     await useExternalMode(page);
@@ -1188,7 +1211,6 @@ for (const kind of ['single', 'stability', 'ab'] as const)
     const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
     await expect(concurrencyInput).toBeVisible();
     await concurrencyInput.fill('4');
-    if (kind === 'stability') await page.getByLabel('稳定性测试', { exact: true }).fill('3');
     if (kind === 'ab') {
       await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
       await page.getByLabel('平台候选版本', { exact: true }).selectOption('v2');
@@ -1196,6 +1218,8 @@ for (const kind of ['single', 'stability', 'ab'] as const)
       await expect(concurrencyInput).toBeDisabled();
       await expect(page.getByText('A/B 两侧沿用固定执行参数：并发 1，失败重试 0。')).toBeVisible();
     }
+    await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
     await page.getByRole('button', {
       name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
     }).click();
@@ -1204,7 +1228,11 @@ for (const kind of ['single', 'stability', 'ab'] as const)
       ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
     const submission = requests.find((request) => request.path === endpoint)!;
     if (kind === 'ab') expect(submission.body).not.toHaveProperty('max_parallel_cases');
-    else expect(submission.body.max_parallel_cases).toBe(4);
+    else {
+      expect(submission.body.max_parallel_cases).toBe(4);
+      expect(submission.body.repetitions).toBe(1);
+      expect(submission.body.max_retries).toBe(0);
+    }
     expect(submission.headers['x-agent-platform-token']).toBe('local');
     expect(directoryRequests.length).toBeGreaterThan(0);
     expect(directoryRequests.every((request) =>
@@ -1236,13 +1264,13 @@ test('personal space submits without a team_id field', async ({ page }) => {
   expect('team_id' in submission.body.target).toBe(false);
 });
 
-test('abcclaw stability sends original branchId and exact settings', async ({ page }) => {
+test('abcclaw single sends original branchId and keeps hidden execution defaults', async ({ page }) => {
   const requests = await openForm(page);
   await selectFormTarget(page, true);
-  await page.getByLabel('稳定性测试', { exact: true }).fill('3');
   await page.getByLabel('并发样本数', { exact: true }).fill('4');
   await page.getByLabel('执行超时（秒）', { exact: true }).fill('1200');
-  await page.getByLabel('失败重试次数', { exact: true }).fill('2');
+  await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
   await start(page).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   expect(requests.find((r) => r.path === '/api/agent-platform/evaluations')?.body).toEqual({
@@ -1259,8 +1287,8 @@ test('abcclaw stability sends original branchId and exact settings', async ({ pa
     evaluator_refs: [{ evaluator_id: 'judge', evaluator_version: '1' }],
     max_parallel_cases: 4,
     timeout_seconds: 1200,
-    max_retries: 2,
-    repetitions: 3,
+    max_retries: 0,
+    repetitions: 1,
   });
 });
 
@@ -1341,7 +1369,8 @@ test('external A/B keeps legacy endpoint and association, returning to single re
   await expect(page.getByRole('button', { name: '创建 A/B试验', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Skill 静态分析', exact: true })).toBeEnabled();
   await expect(page.getByLabel('并发样本数', { exact: true })).toBeDisabled();
-  await expect(page.getByLabel('失败重试次数', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   expect(requests.find((r) => r.path === '/api/run-comparisons')?.body).toEqual({
