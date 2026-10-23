@@ -1,5 +1,6 @@
 import io
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ def configured_logging(tmp_path, monkeypatch):
     output = io.StringIO()
     monkeypatch.setenv("AGENTGATE_LOG_PATH", str(tmp_path))
     monkeypatch.setattr(logging_config, "sys", SimpleNamespace(stdout=output))
+    monkeypatch.setattr(logging_config, "monotonic", lambda: 0.0)
     for name in ("", "agentgate", "uvicorn", "uvicorn.access"):
         logger = logging.getLogger(name)
         monkeypatch.setattr(logger, "handlers", [])
@@ -38,14 +40,18 @@ def configured_logging(tmp_path, monkeypatch):
 @pytest.mark.parametrize("path", POLLING_PATHS)
 @pytest.mark.parametrize("status", [200, 204, 299])
 @pytest.mark.parametrize("query", ["", "?limit=200&page=1"])
-def test_successful_polling_access_is_not_written(configured_logging, path, status, query):
+def test_first_success_is_written_and_repeated_polling_is_suppressed(
+    configured_logging, path, status, query
+):
     output, log_dir = configured_logging
-    logging.getLogger("uvicorn.access").info(
-        ACCESS_FORMAT, "127.0.0.1:1234", "GET", path + query, "1.1", status
-    )
+    for _ in range(3):
+        logging.getLogger("uvicorn.access").info(
+            ACCESS_FORMAT, "127.0.0.1:1234", "GET", path + query, "1.1", status
+        )
 
-    assert '"GET ' not in output.getvalue()
-    assert '"GET ' not in (log_dir / "agentgate.log").read_text()
+    expected = f'"GET {path}{query} HTTP/1.1" {status}'
+    assert output.getvalue().count(expected) == 1
+    assert (log_dir / "agentgate.log").read_text().count(expected) == 1
 
 
 @pytest.mark.parametrize("path", POLLING_PATHS)
@@ -114,8 +120,60 @@ def test_repeated_setup_does_not_duplicate_or_disable_logs(configured_logging):
     logging_config.setup_logging()
     access_logger = logging.getLogger("uvicorn.access")
     access_logger.info(ACCESS_FORMAT, "127.0.0.1:1234", "GET", "/api/overview", "1.1", 200)
+    access_logger.info(ACCESS_FORMAT, "127.0.0.1:1234", "GET", "/api/overview", "1.1", 200)
     access_logger.info(ACCESS_FORMAT, "127.0.0.1:1234", "GET", "/api/overview", "1.1", 503)
 
     for content in (output.getvalue(), (log_dir / "agentgate.log").read_text()):
-        assert '"GET /api/overview HTTP/1.1" 200' not in content
+        assert content.count('"GET /api/overview HTTP/1.1" 200') == 1
         assert content.count('"GET /api/overview HTTP/1.1" 503') == 1
+
+
+def test_success_summary_uses_60_second_windows_and_resets_counts(configured_logging, monkeypatch):
+    output, log_dir = configured_logging
+    now = [0.0]
+    monkeypatch.setattr(logging_config, "monotonic", lambda: now[0])
+    logger = logging.getLogger("uvicorn.access")
+    for timestamp in (0.0, 10.0, 59.99, 60.0, 120.0):
+        now[0] = timestamp
+        logger.info(ACCESS_FORMAT, "client", "GET", "/api/runs?limit=200", "1.1", 200)
+
+    for content in (output.getvalue(), (log_dir / "agentgate.log").read_text()):
+        assert content.count('"GET /api/runs?limit=200 HTTP/1.1" 200') == 3
+        assert "polling_success_count=3 suppressed_success=2 elapsed_seconds=60.0" in content
+        assert "polling_success_count=1 suppressed_success=0 elapsed_seconds=60.0" in content
+
+
+def test_paths_are_independent_but_queries_share_a_window(configured_logging, monkeypatch):
+    output, log_dir = configured_logging
+    logger = logging.getLogger("uvicorn.access")
+    for path, status in (
+        ("/api/runs?limit=200", 200),
+        ("/api/runs?limit=10", 200),
+        ("/api/overview", 200),
+        ("/api/runs?limit=10", 503),
+        ("/api/runs?limit=10", 503),
+    ):
+        logger.info(ACCESS_FORMAT, "client", "GET", path, "1.1", status)
+    monkeypatch.setattr(logging_config, "monotonic", lambda: 60.0)
+    logger.info(ACCESS_FORMAT, "client", "GET", "/api/runs", "1.1", 200)
+    for content in (output.getvalue(), (log_dir / "agentgate.log").read_text()):
+        assert '"GET /api/overview HTTP/1.1" 200' in content
+        assert '"GET /api/runs?limit=10 HTTP/1.1" 200' not in content
+        assert content.count('"GET /api/runs?limit=10 HTTP/1.1" 503') == 2
+        assert "polling_success_count=2 suppressed_success=1" in content
+
+
+def test_concurrent_successes_are_counted_once(configured_logging, monkeypatch):
+    output, log_dir = configured_logging
+    logger = logging.getLogger("uvicorn.access")
+
+    def emit(index):
+        logger.info(ACCESS_FORMAT, f"client-{index}", "GET", "/api/overview", "1.1", 200)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(emit, range(64)))
+    monkeypatch.setattr(logging_config, "monotonic", lambda: 60.0)
+    emit(64)
+    for content in (output.getvalue(), (log_dir / "agentgate.log").read_text()):
+        assert content.count('"GET /api/overview HTTP/1.1" 200') == 2
+        assert "polling_success_count=64 suppressed_success=63" in content

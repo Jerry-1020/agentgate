@@ -19,23 +19,44 @@ const items = ref<Experiment[]>([]),
   data = ref<Summary | null>(null),
   error = ref('');
 let timer: ReturnType<typeof setTimeout> | undefined,
-  disposed = false;
+  disposed = false,
+  loadTicket = 0;
 async function load() {
+  clearTimeout(timer);
+  if (disposed || document.hidden) return;
+  const ticket = ++loadTicket;
   try {
-    if (props.id)
-      data.value = await request<Summary>('/stability-experiments/' + encodeURIComponent(props.id));
-    else items.value = await request<Experiment[]>('/stability-experiments');
+    if (props.id) {
+      const summary = await request<Summary>('/stability-experiments/' + encodeURIComponent(props.id));
+      if (disposed || ticket !== loadTicket) return;
+      data.value = summary;
+    } else {
+      const experiments = await request<Experiment[]>('/stability-experiments');
+      if (disposed || ticket !== loadTicket) return;
+      items.value = experiments;
+    }
     error.value = '';
   } catch (e) {
-    error.value = String(e);
+    if (!disposed && ticket === loadTicket) error.value = String(e);
   } finally {
-    if (!disposed && !data.value?.complete) timer = setTimeout(load, 3000);
+    if (!disposed && ticket === loadTicket && !document.hidden && !data.value?.complete)
+      timer = setTimeout(load, 5000);
   }
 }
-onMounted(load);
+function visibilityChanged() {
+  loadTicket++;
+  clearTimeout(timer);
+  if (!document.hidden) void load();
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', visibilityChanged);
+  void load();
+});
 onUnmounted(() => {
   disposed = true;
+  loadTicket++;
   clearTimeout(timer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
 });
 </script>
 <template>
