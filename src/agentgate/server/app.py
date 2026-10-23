@@ -164,6 +164,14 @@ def create_app(
                 user_id=request.headers.get("user_id") or "anonymous",
                 user_name=request.headers.get("user_name") or "匿名用户",
             )
+            LOGGER.info(
+                "Request team context: method=%s path=%s "
+                "user_team_id_present=%s user_team_id=%r",
+                request.method,
+                request.url.path,
+                "user_team_id" in request.headers,
+                request.headers.get("user_team_id"),
+            )
             token = set_user_info(info)
             try:
                 return await call_next(request)
