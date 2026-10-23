@@ -560,7 +560,7 @@ const templateLabels1: Record<string, string> = {
           >
           <span v-if="e.has_draft" class="asset-chip preview">草稿</span>
           <h2>{{ displayName(e) }}</h2>
-          <p>{{ e.description || e.metric }}</p>
+          <p v-if="e.source !== 'builtin'">{{ e.description || e.metric }}</p>
           <div class="asset-card-actions">
             <button class="asset-link" :disabled="busy" @click="open(e)">查看详情</button
             ><span class="asset-small">{{
@@ -800,10 +800,7 @@ const templateLabels1: Record<string, string> = {
       <details v-if="Object.keys(evaluatorDetails[rule.id]?.latest?.config ?? {}).length">
         <summary>规则配置</summary>
         <pre>{{ JSON.stringify(evaluatorDetails[rule.id]?.latest?.config, null, 2) }}</pre>
-      </details>
-      <p class="asset-small">
-        执行实现：{{ rule.implementation_id }} @ {{ rule.implementation_version }}
-      </p></template
+      </details> </template
     ><template #footer
       ><button class="asset-secondary" @click="rule = null">关闭</button></template
     ></el-dialog

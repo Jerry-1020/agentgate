@@ -8,10 +8,10 @@ withDefaults(defineProps<{
 defineEmits<{ logout: [] }>();
 const navigation = [
   ['overview', '测评总览'],
-  ['evaluators', '评估器'],
   ['datasets', '测评集'],
   ['annotations', '标注'],
   ['tasks', '测评任务'],
+  ['evaluators', '评估器'],
 ];
 </script>
 <template>

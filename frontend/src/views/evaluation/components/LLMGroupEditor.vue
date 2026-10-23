@@ -817,13 +817,6 @@ onUnmounted(() => {
       <aside class="template-sidebar">
         <h3>类型</h3>
         <span class="selected-type">LLM</span>
-        <h3>场景</h3>
-        <p>评估对象</p>
-        <span class="filter-tag">文本</span>
-        <p>评估目标</p>
-        <span class="filter-tag">内容质量</span>
-        <p>业务场景</p>
-        <span class="filter-tag">AIGC</span>
       </aside>
       <div class="template-main">
         <div class="template-search">
@@ -1414,14 +1407,6 @@ h3 {
 .template-sidebar h3 {
   margin: 6px 0 18px;
 }
-.template-sidebar h3:not(:first-child) {
-  margin-top: 30px;
-}
-.template-sidebar p {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  margin: 20px 0 10px;
-}
 .selected-type {
   display: block;
   padding: 10px;
@@ -1429,13 +1414,6 @@ h3 {
   border-radius: 7px;
   background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
-}
-.filter-tag {
-  font-size: 12px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  padding: 7px 12px;
-  display: inline-block;
 }
 .template-main {
   padding: 10px 0 0 22px;

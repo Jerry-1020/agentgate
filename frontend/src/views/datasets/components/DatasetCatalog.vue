@@ -17,12 +17,8 @@ const filtered = computed(() =>
     .filter(
       (item) =>
         !item.archived &&
-        (['all', 'archived'].includes(status.value) ||
-          (status.value === 'unpublished'
-            ? item.version === null
-            : status.value === 'changes'
-              ? item.version !== null && item.has_draft
-              : !item.has_draft && item.version !== null)) &&
+        (status.value === 'all' ||
+          (status.value === 'published' ? item.version !== null : item.has_draft)) &&
         `${item.name} ${item.description} ${item.id}`
           .toLowerCase()
           .includes(query.value.trim().toLowerCase()),
@@ -47,13 +43,16 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
       />
       <select v-model="status" class="input" aria-label="测评集状态">
         <option value="all">全部测评集</option>
-        <option value="unpublished">未发布</option>
-        <option value="changes">有待发布修改</option>
+        <option value="published">已发布</option>
+        <option value="draft">草稿</option>
       </select>
       <div v-if="$slots.actions" class="catalog-actions">
         <slot name="actions" />
       </div>
     </div>
+    <p v-if="status !== 'all'" class="filter-hint">
+      已发布后仍有编辑草稿的测评集，会同时出现在“已发布”和“草稿”中。
+    </p>
     <div class="catalog-grid">
       <article
         v-for="item in rows"
@@ -144,6 +143,12 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
   flex: 1;
   color: inherit;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.tile-open .el-tag {
+  align-self: flex-start;
 }
 .tile-top {
   display: flex;
@@ -164,13 +169,23 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
 .tile-bottom {
   border-top: 1px solid #e4eaf3;
   padding-top: 14px;
-  margin-top: 24px;
+  margin-top: auto;
   font-size: 11px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   justify-content: space-between;
   color: #3975dc;
+  width: 100%;
+  box-sizing: border-box;
+}
+.tile-open > p:last-of-type {
+  margin-bottom: 24px;
+}
+.filter-hint {
+  color: #64748b;
+  font-size: 13px;
+  margin: -6px 0 20px;
 }
 .tile-open h2 {
   font-size: 18px;

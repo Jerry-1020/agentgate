@@ -172,7 +172,7 @@ test('single evaluator cards display their actual scoring dimensions and prefer 
     draft: null,
   };
   expect(llmEvaluatorCardContent(single)).toMatchObject({
-    itemLabel: '评分维度',
+    itemLabel: '子评估器',
     children: [{ id: child.evaluator.id, name: child.evaluator.name, weight: 100 }],
   });
   const dimensions = [

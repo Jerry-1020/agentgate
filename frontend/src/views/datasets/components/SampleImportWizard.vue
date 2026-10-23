@@ -4,11 +4,46 @@ import SampleEditor from './SampleEditor.vue';
 import { datasetApi } from '../../../api/datasets';
 import { request } from '../../../api/evaluations';
 import { annotationTasks } from '../../../stores/review-assets';
-import { parseSampleFile, blankSample } from '../utils/sample-import';
+import { parseSampleFile, blankSample, sampleFileFormats } from '../utils/sample-import';
+import importTemplateUrl from '../../../assets/dataset-import-template.xlsx?url';
+import jsonTemplateUrl from '../../../assets/dataset-import-template.json?url';
+import csvTemplateUrl from '../../../assets/dataset-import-template.csv?url';
 import type { EvaluationCase } from '../types/index';
 import type { Trace } from '../../../api/client';
 import type { EvaluationRun } from '../../evaluation/types/run';
 const props = defineProps<{ datasetId: string; datasetName: string }>();
+const acceptedFiles = sampleFileFormats.map((format) => '.' + format.value).join(',');
+const formatDescription = sampleFileFormats.map((format) => format.label).join(' / ');
+const jsonExample = JSON.stringify(
+  {
+    cases: [
+      {
+        name: '单轮问答示例',
+        category: 'positive',
+        difficulty: 'medium',
+        tags: ['示例'],
+        notes: '',
+        initial_state: {},
+        turns: [
+          {
+            input: { txt: '你好' },
+            expectations: [
+              {
+                name: '回答内容',
+                kind: 'output',
+                path: null,
+                condition: { kind: 'equals', expected: '你好，请问有什么可以帮您？' },
+              },
+            ],
+            notes: '',
+          },
+        ],
+      },
+    ],
+  },
+  null,
+  2,
+);
 const emit = defineEmits<{ close: []; manual: []; imported: [] }>();
 const method = ref('manual'),
   step = ref(1),
@@ -27,6 +62,21 @@ const sessions = computed(() => [
   ),
 ]);
 const done = new Set<string>();
+async function downloadTemplate(url: string, format: string) {
+  error.value = '';
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw Error('模板下载失败，请稍后重试');
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = '测评集导入模板.' + format;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 function reset() {
   items.value = [];
   error.value = '';
@@ -187,10 +237,96 @@ function close() {
         ><b :class="{ active: step === 3 }">3 完成</b>
       </div>
       <h3>{{ datasetName }} · 新增样本</h3>
+      <section v-if="method === 'file' && step === 2" class="import-template">
+        <div class="template-downloads">
+          <a
+            :href="importTemplateUrl"
+            download="测评集导入模板.xlsx"
+            class="template-download"
+            @click.prevent="downloadTemplate(importTemplateUrl, 'xlsx')"
+          >
+            下载测评集模板（Excel）
+          </a>
+          <a
+            :href="jsonTemplateUrl"
+            download="测评集导入模板.json"
+            class="template-download"
+            @click.prevent="downloadTemplate(jsonTemplateUrl, 'json')"
+          >
+            下载测评集模板（JSON）
+          </a>
+          <a
+            :href="csvTemplateUrl"
+            download="测评集导入模板.csv"
+            class="template-download"
+            @click.prevent="downloadTemplate(csvTemplateUrl, 'csv')"
+          >
+            下载测评集模板（CSV）
+          </a>
+        </div>
+        <p>
+          三个模板均包含相同的单轮、多轮及多种测评项示例。Excel
+          另附“填写说明”和“测评项示例”工作表，说明表不会导入。
+        </p>
+        <p>测评集名称和关联 Agent 在创建页面填写；模板中的输入和测评项需与所选 Agent 匹配。</p>
+        <details>
+          <summary>JSON 格式说明与示例</summary>
+          <p>
+            使用 UTF-8 编码，顶层为 {"cases": [...]}，cases
+            中每项是一个样本。使用双引号，不要添加注释或末尾多余逗号。
+          </p>
+          <p>
+            必填：name（样本名称）、turns（至少一轮）。每轮必填 input（输入对象）和
+            expectations（测评项数组，无规则检查时填 []）。多轮对话按 turns 数组顺序执行。
+          </p>
+          <p>
+            选填：category 为 positive / negative / boundary，默认 positive；difficulty 为 easy /
+            medium / hard，默认 medium；tags 为标签数组，initial_state 为初始状态对象，notes
+            为备注。轮次也可填写 notes。
+          </p>
+          <p>
+            expectations 的 kind 支持
+            output（输出）、state（状态）、tool_argument（工具参数）、tool_call（工具调用）、skill_route（技能路由）、policy（策略）、execution_path（执行路径）。各类型所需字段可参考下载模板和
+            Excel 的“测评项示例”。
+          </p>
+          <p>
+            JSON 中 input、initial_state 直接填写对象，expectations、tags
+            直接填写数组，不要转成字符串。示例中的 txt 应替换为 Agent 实际接收的字段；LLM
+            评估器在测评任务中单独选择。
+          </p>
+          <pre>{{ jsonExample }}</pre>
+        </details>
+        <details>
+          <summary>Excel / CSV 字段填写说明</summary>
+          <p>
+            Excel 填写 Cases 表；CSV 使用 UTF-8 编码和英文逗号分列。每行一轮对话，相同 case_id
+            合并为一个样本，case_name 必须一致；turn_order 填不重复的正整数并决定轮次顺序。
+          </p>
+          <p>
+            必填：case_name（样本名称）、input_json（输入对象的 JSON 文本）。case_id
+            留空时每行创建独立样本。
+          </p>
+          <p>
+            测评项：expectations_json 填 JSON 数组，无规则检查时填
+            []。一轮可包含多个不同类型的测评项。
+          </p>
+          <p>
+            选填：category（positive / negative / boundary，默认 positive）、difficulty（easy /
+            medium / hard，默认
+            medium）、tags_json（标签数组）、case_notes（样本备注）、initial_state_json（初始状态对象）、turn_id（轮次标识）、turn_notes（轮次备注）。同一样本的这些样本级字段请保持一致。
+          </p>
+          <p>
+            CSV
+            字段包含逗号、换行或双引号时，用双引号包裹整个字段，内部双引号写成两个双引号。建议用表格软件编辑后保存为
+            CSV UTF-8；也支持简易列 case_name、query、expected（可选）。
+          </p>
+          <p>导入时会生成新的样本、轮次和测评项 ID；重复导入会新增样本。</p>
+        </details>
+      </section>
       <div v-if="step === 1" class="methods">
         <button
           v-for="m in [
-            { id: 'file', name: '⇧ 导入测评集', description: 'JSON / Excel (.xlsx) / CSV / ZIP' },
+            { id: 'file', name: '⇧ 导入测评集', description: formatDescription },
             { id: 'manual', name: '＋ 手动创建', description: '多轮对话、期望输出与工具调用' },
             {
               id: 'annotation',
@@ -224,15 +360,14 @@ function close() {
           ><label
             >选择文件<input
               type="file"
-              accept=".json,.csv,.xlsx,.zip"
+              :accept="acceptedFiles"
               aria-label="样本导入文件"
               :disabled="busy || saved > 0"
               @change="fileChanged"
           /></label>
           <p>
-            CSV 使用 UTF-8，列名：case_name、query、expected（可选）；相同 case_id
-            合并为多轮。也支持后端 Cases 表结构（input_json、expectations_json 等）和导出的
-            JSON。ZIP 内只能包含上述格式，不含附件；最多1000个样本。
+            支持 Excel (.xlsx)、JSON、CSV，也可直接上传导出的样本文件。文件不超过 10MB，最多 1000
+            个样本；Excel / CSV 最多 2000 行数据。
           </p></template
         >
         <template v-else
@@ -297,7 +432,12 @@ function close() {
                       n +
                       t.expectations.length +
                       t.required_tools.length +
-                      t.forbidden_tools.length,
+                      t.forbidden_tools.length +
+                      t.policy_rules.length +
+                      Number(Boolean(t.expected_skill)) +
+                      (t.preserved_skill_routes?.length ?? 0) +
+                      (t.original_expectations?.filter((e) => e.kind === 'execution_path').length ??
+                        0),
                     0,
                   )
                 }}
@@ -340,6 +480,43 @@ function close() {
   </el-dialog>
 </template>
 <style scoped>
+.import-template {
+  padding: 14px 18px;
+  margin: 14px 0;
+  border: 1px solid #cce9e3;
+  border-radius: 8px;
+  background: #f2faf7;
+}
+.template-download {
+  color: #008b76;
+  font-weight: 600;
+}
+.template-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+.import-template details {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.import-template summary {
+  cursor: pointer;
+  color: #008b76;
+  font-weight: 600;
+}
+.import-template pre {
+  max-height: 300px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: #fff;
+}
+.import-template p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
 .wizard-actions {
   display: flex;
   justify-content: flex-end;
