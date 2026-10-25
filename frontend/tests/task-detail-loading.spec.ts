@@ -18,8 +18,9 @@ const auth = useAuthStore(pinia);
 if (new URL(location.href).searchParams.get('bank')) auth.loginBank('test-token', 'team-a', 'Team A');
 else auth.loginExternal();
 const router = createRouter({history:createWebHashHistory(),routes:[{path:'/:pathMatch(.*)*',component:Root}]});
-window.detailHarness = {router, auth};
-createApp({render:()=>h(RouterView)}).use(pinia).use(router).use(ElementPlus).mount('#app');
+const app = createApp({render:()=>h(RouterView)}).use(pinia).use(router).use(ElementPlus);
+window.detailHarness = {router, auth, unmount: () => app.unmount()};
+app.mount('#app');
 </script></body></html>`;
 
 test.beforeAll(async () => {
@@ -136,6 +137,14 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
     calls.push({ path, headers: route.request().headers() });
     const reply = (data: unknown) =>
       route.fulfill({ json: { code: '0', message: 'success', data } });
+    if (path.startsWith('/api/stability-experiments/'))
+      return reply({
+        experiment: { id: 'stable', run_ids: ['stable-run'], created_at: now },
+        runs: [{ progress: { run_id: 'stable-run', status, total_cases: 7, completed_cases: 1 },
+          score: null, outcome: null }],
+        measured_runs: 0, mean: null, sample_variance: null, sample_stddev: null,
+        min: null, max: null, complete: ['completed', 'failed', 'cancelled'].includes(status),
+      });
     // Bulk reads are deliberately unavailable: detail rendering must not depend on them.
     if (path === '/api/runs' || path === '/api/evaluation-tasks')
       return route.fulfill({
@@ -214,6 +223,12 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
 }
 const count = (calls: { path: string }[], path: string) =>
   calls.filter((c) => c.path === path).length;
+async function visibility(page: Page, hidden: boolean) {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
 const traces = (calls: { path: string }[]) => calls.filter((c) => c.path.includes('/traces/'));
 async function open(page: Page, path = '/tasks/task', bank = false) {
   await page.goto(`${url}${bank ? '?bank=1' : ''}#${path}`);
@@ -339,7 +354,7 @@ test('running task keeps polling current run and stops when completed', async ({
   await expect(page.getByRole('heading', { name: '任务 task', exact: true })).toBeVisible();
   expect(count(state.calls, '/api/runs/task-run/samples')).toBe(1);
   state.setStatus('completed');
-  await page.clock.fastForward(3100);
+  await page.clock.fastForward(5100);
   await expect(page.getByText('100%', { exact: true }).first()).toBeVisible();
   const requests = state.calls.length;
   await page.clock.fastForward(15000);
@@ -348,6 +363,77 @@ test('running task keeps polling current run and stops when completed', async ({
   expect(traces(state.calls)).toHaveLength(0);
   expect(state.errors).toEqual([]);
 });
+
+for (const detail of [
+  { name: 'single', route: '/tasks/task', endpoint: '/api/runs/task-run/status' },
+  { name: 'ab', route: '/tasks/ab', endpoint: '/api/runs/run-a/status' },
+  { name: 'stability', route: '/stability/stable', endpoint: '/api/stability-experiments/stable' },
+]) {
+  for (const bank of [false, true]) {
+    test(`${detail.name} polls at 5s, pauses hidden, resumes, stops and cleans up (${bank ? 'bank' : 'external'})`, async ({ page }) => {
+      const state = await setup(page, { status: 'running' });
+      await page.clock.install();
+      await open(page, detail.route, bank);
+      await expect.poll(() => count(state.calls, detail.endpoint)).toBe(1);
+      await page.clock.fastForward(4000);
+      expect(count(state.calls, detail.endpoint)).toBe(1);
+      await page.clock.fastForward(1100);
+      await expect.poll(() => count(state.calls, detail.endpoint)).toBe(2);
+      await visibility(page, true);
+      await page.clock.fastForward(30000);
+      expect(count(state.calls, detail.endpoint)).toBe(2);
+      await visibility(page, false);
+      await expect.poll(() => count(state.calls, detail.endpoint)).toBe(3);
+      state.setStatus('completed');
+      await page.clock.fastForward(5100);
+      await expect.poll(() => count(state.calls, detail.endpoint)).toBe(4);
+      await page.clock.fastForward(30000);
+      expect(count(state.calls, detail.endpoint)).toBe(4);
+      if (bank) expect(state.calls.every(c => c.headers['token'] === 'test-token')).toBe(true);
+      else expect(state.calls.every(c => !c.headers['token'])).toBe(true);
+      await page.evaluate(() => (window as any).detailHarness.unmount());
+      await visibility(page, true);
+      await visibility(page, false);
+      await page.clock.fastForward(30000);
+      expect(count(state.calls, detail.endpoint)).toBe(4);
+      expect(state.errors).toEqual([]);
+    });
+  }
+
+  test(`${detail.name} ignores a response from before the tab was hidden`, async ({ page }) => {
+    const state = await setup(page, { status: 'running' });
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    let delayed = false;
+    await page.route(`**${detail.endpoint}`, async route => {
+      if (delayed) return route.fallback();
+      delayed = true;
+      await hold;
+      const data = detail.name === 'stability'
+        ? { experiment: { id: 'stable', run_ids: [], created_at: now }, runs: [],
+            measured_runs: 0, mean: null, min: null, max: null, complete: true }
+        : { run_id: detail.name === 'ab' ? 'run-a' : 'task-run', status: 'completed',
+            total_cases: 7, completed_cases: 7, progress: 1, created_at: now };
+      await route.fulfill({ json: { code: '0', message: 'success', data } });
+    });
+    await page.clock.install();
+    await open(page, detail.route);
+    await expect.poll(() => delayed).toBe(true);
+    await visibility(page, true);
+    await page.clock.fastForward(30000);
+    expect(count(state.calls, detail.endpoint)).toBe(0);
+    await visibility(page, false);
+    await expect.poll(() => count(state.calls, detail.endpoint)).toBe(1);
+    release();
+    await page.clock.fastForward(5100);
+    await expect.poll(() => count(state.calls, detail.endpoint)).toBe(2);
+    await page.clock.fastForward(5100);
+    await expect.poll(() => count(state.calls, detail.endpoint)).toBe(3);
+    if (detail.name === 'single') expect(count(state.calls, '/api/runs/task-run')).toBe(0);
+    await page.evaluate(() => (window as any).detailHarness.unmount());
+    expect(state.errors).toEqual([]);
+  });
+}
 
 test('embedded A/B reads only the two associated runs and both side details still open', async ({
   page,

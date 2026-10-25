@@ -34,7 +34,8 @@ const pairReady = computed(
     [submitted.value.a, submitted.value.b].every((id) => pairStatus.value[id] === 'completed'),
 );
 async function checkPair(ticket: number) {
-  if (!submitted.value) return;
+  clearTimeout(pairTimer);
+  if (!submitted.value || document.hidden) return;
   try {
     const results = await Promise.all(
       [submitted.value.a, submitted.value.b].map((id) => api.status(id)),
@@ -48,10 +49,16 @@ async function checkPair(ticket: number) {
   }
   if (
     ticket === pairTicket &&
+    !document.hidden &&
     !Object.values(pairStatus.value).some((s) => ['failed', 'cancelled'].includes(s)) &&
     !pairReady.value
   )
-    pairTimer = setTimeout(() => void checkPair(ticket), 2500);
+    pairTimer = setTimeout(() => void checkPair(ticket), 5000);
+}
+function visibilityChanged() {
+  pairTicket++;
+  clearTimeout(pairTimer);
+  if (!document.hidden && submitted.value) void checkPair(pairTicket);
 }
 function created(a: string, b: string) {
   clearTimeout(pairTimer);
@@ -99,6 +106,7 @@ async function loadHistory() {
   }
 }
 onMounted(() => {
+  document.addEventListener('visibilitychange', visibilityChanged);
   if (!props.embedded) void loadHistory();
   if (props.initialPair) {
     created(props.initialPair.a, props.initialPair.b);
@@ -203,6 +211,7 @@ onUnmounted(() => {
   snapshotTicket++;
   comparisonTicket++;
   clearTimeout(pairTimer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
 });
 const templateLabels1: Record<string, string> = {
   overall: '整体',

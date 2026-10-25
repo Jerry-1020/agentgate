@@ -60,6 +60,32 @@ test('overview uses two summaries, keeps values and recent tasks, day controls a
   await expect(page.locator('.metric-value').first()).toHaveText('104');
 });
 
+test('overview polls every 10 seconds and resumes immediately after visibility changes', async ({ page }) => {
+  const calls = await setup(page);
+  await page.clock.install();
+  await mount(page, '/overview');
+  await expect(page.locator('.metric-value').first()).toHaveText('104');
+  expect(calls).toHaveLength(2);
+  await page.clock.fastForward(9900);
+  expect(calls).toHaveLength(2);
+  await page.clock.fastForward(200);
+  await expect.poll(() => calls.length).toBe(4);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.clock.fastForward(30000);
+  expect(calls).toHaveLength(4);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => calls.length).toBe(6);
+  await page.evaluate(() => (window as any).summaryHarness.unmount());
+  await page.clock.fastForward(30000);
+  expect(calls).toHaveLength(6);
+});
+
 test('task pagination, debounce, selection, kind and local dates have no detail reads',async({page})=>{
   const calls=await setup(page,[row()],104); await mount(page);
   await expect(page.getByText('共 104 个任务')).toBeVisible();

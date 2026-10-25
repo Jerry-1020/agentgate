@@ -81,7 +81,8 @@ const traces = ref<Record<string, Trace>>({}),
   exportError = ref('');
 const traceRequests = new Map<string, Promise<boolean>>();
 let timer: ReturnType<typeof setTimeout> | undefined,
-  disposed = false;
+  disposed = false,
+  loadTicket = 0;
 const manifest = computed<any>(() => data.value?.run.manifest);
 const associatedTask = computed(() => readTaskLinks().find((t) => t.runIds.includes(props.id)));
 const canRerun = computed(
@@ -227,25 +228,35 @@ function loadSelectedTrace() {
 }
 async function load() {
   clearTimeout(timer);
+  if (disposed || document.hidden) return;
+  const ticket = ++loadTicket;
   try {
-    const p = await api.status(props.id),
-      r = p.status === 'completed' ? await api.report(props.id) : null,
+    const p = await api.status(props.id);
+    if (disposed || ticket !== loadTicket) return;
+    const r = p.status === 'completed' ? await api.report(props.id) : null,
       s = r ? { run: r.run, results: r.results, complete: true } : await api.samples(props.id);
-    if (disposed) return;
+    if (disposed || ticket !== loadTicket) return;
     progress.value = p;
     report.value = r;
     data.value = s;
     error.value = '';
     loadSelectedTrace();
   } catch (e) {
-    if (!disposed) error.value = String(e);
+    if (!disposed && ticket === loadTicket) error.value = String(e);
   } finally {
     if (
       !disposed &&
+      ticket === loadTicket &&
+      !document.hidden &&
       (error.value || !['completed', 'failed', 'cancelled'].includes(progress.value?.status ?? ''))
     )
-      timer = setTimeout(load, 3000);
+      timer = setTimeout(load, 5000);
   }
+}
+function visibilityChanged() {
+  loadTicket++;
+  clearTimeout(timer);
+  if (!document.hidden) void load();
 }
 async function exportRows() {
   if (exporting.value) return;
@@ -281,10 +292,15 @@ async function exportRows() {
     exporting.value = false;
   }
 }
-onMounted(load);
+onMounted(() => {
+  document.addEventListener('visibilitychange', visibilityChanged);
+  void load();
+});
 onUnmounted(() => {
   disposed = true;
+  loadTicket++;
   clearTimeout(timer);
+  document.removeEventListener('visibilitychange', visibilityChanged);
 });
 watch(
   () => router.currentRoute.value.query.tab,

@@ -181,6 +181,7 @@ const overviewQuery = useSummaryQuery({
     return { summary, recent };
   },
   poll: () => true,
+  intervalMs: 10000,
 });
 const overviewData = overviewQuery.data;
 const overviewError = overviewQuery.error;
@@ -240,7 +241,7 @@ async function refresh() {
           ['pending', 'scheduled', 'running'].includes(run.status),
       );
       if (!error.value && active && !document.hidden && needsContext())
-        contextTimer = setTimeout(() => void refresh(), 5000);
+        contextTimer = setTimeout(() => void refresh(), page.value === 'tasks' ? 10000 : 5000);
     }
   }
 }

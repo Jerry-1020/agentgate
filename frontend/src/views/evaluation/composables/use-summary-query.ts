@@ -8,6 +8,7 @@ export function useSummaryQuery<T>(options: {
   ready: () => boolean;
   load: (signal: AbortSignal) => Promise<T>;
   poll?: (value: T) => boolean;
+  intervalMs?: number;
 }) {
   const data = shallowRef<T | null>(null);
   const error = ref('');
@@ -45,7 +46,7 @@ export function useSummaryQuery<T>(options: {
       if (ticket === generation && !disposed) {
         loading.value = false;
         if (!error.value && data.value !== null && options.poll?.(data.value) && !document.hidden)
-          timer = setTimeout(() => void reload(), 5000);
+          timer = setTimeout(() => void reload(), options.intervalMs ?? 5000);
       }
     }
   }
