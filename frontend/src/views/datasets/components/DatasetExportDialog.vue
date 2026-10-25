@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { datasetApi } from '../../../api/datasets';
 import type { DatasetVersion } from '../types/index';
 import { sampleExportBlob } from '../utils/sample-export';
+import { sampleFileFormats, type SampleFileFormat } from '../utils/sample-import';
 const props = defineProps<{
   datasetId: string;
   initialVersionId?: string;
@@ -13,7 +14,7 @@ const versions = ref<DatasetVersion[]>([]),
   versionId = ref(''),
   ids = ref<string[]>([]);
 const scope = ref<'all' | 'selected'>('all'),
-  format = ref<'json' | 'xlsx'>('xlsx');
+  format = ref<SampleFileFormat>('xlsx');
 const loading = ref(true),
   busy = ref(false),
   error = ref(''),
@@ -95,10 +96,12 @@ async function download() {
         ><label
           ><input v-model="scope" type="radio" value="selected" :disabled="busy" />选择样本</label
         ><select v-model="format" class="input" aria-label="导出格式" :disabled="busy">
-          <option value="xlsx">Excel (.xlsx)</option>
-          <option value="json">JSON</option>
+          <option v-for="item in sampleFileFormats" :key="item.value" :value="item.value">
+            {{ item.label }}
+          </option>
         </select>
       </div>
+      <p>三种格式均可重新导入，保留多轮对话、初始状态和测评项。Excel、CSV 每行对应一轮对话。</p>
       <div v-if="scope === 'selected'" class="export-samples">
         <button class="link" :disabled="busy" @click="ids = version?.cases.map((c) => c.id) ?? []">
           全选
@@ -131,6 +134,7 @@ async function download() {
 }
 .export-options {
   display: flex;
+  flex-wrap: wrap;
   gap: 24px;
   align-items: center;
   margin: 24px 0;

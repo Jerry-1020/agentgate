@@ -1,5 +1,6 @@
 import { toApiCase } from '../../../api/datasets';
 import type { DatasetVersion } from '../types/index';
+import type { SampleFileFormat } from './sample-import';
 
 export function exportSamples(version: DatasetVersion, ids?: string[]) {
   const selected = ids ? new Set(ids) : null;
@@ -32,16 +33,24 @@ export function sampleRows(
 export async function sampleExportBlob(
   version: DatasetVersion,
   ids: string[] | undefined,
-  format: 'json' | 'xlsx',
+  format: SampleFileFormat,
 ): Promise<Blob> {
   if (format === 'json')
     return new Blob([JSON.stringify(exportSamples(version, ids), null, 2)], {
       type: 'application/json',
     });
+  const rows = sampleRows(version, ids);
+  if (format === 'csv') {
+    const headers = Object.keys(rows[0]);
+    const cell = (value: string | number) => '"' + String(value).replace(/"/g, '""') + '"';
+    const lines = [headers, ...rows.map((row) => headers.map((key) => row[key]))];
+    return new Blob(['\uFEFF' + lines.map((line) => line.map(cell).join(',')).join('\r\n')], {
+      type: 'text/csv;charset=utf-8',
+    });
+  }
   const ExcelJS = await import('exceljs');
   const book = new ExcelJS.default.Workbook();
   const sheet = book.addWorksheet('Cases');
-  const rows = sampleRows(version, ids);
   sheet.columns = Object.keys(rows[0]).map((key) => ({
     header: key,
     key,

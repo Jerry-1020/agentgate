@@ -61,7 +61,7 @@ export function llmEvaluatorCardContent(value: EvaluatorDetail | LLMGroupDetail)
   return {
     name: value.evaluator.name,
     description: value.evaluator.description,
-    itemLabel: '评分维度',
+    itemLabel: '子评估器',
     children: hasDimensionScoring(definition)
       ? readEvaluatorDesign(value.evaluator, definition).dimensions.map((dimension) => ({
           id: dimension.id,

@@ -703,11 +703,6 @@ watch(sampleId, () => {
             {{ caseResults(sample.id).length ? '正在读取完整 Trace…' : '尚无执行轨迹' }}
           </p>
         </section>
-        <footer class="sample-footer">
-          <span>耗时 {{ formatTime(traceSeconds(trace)) }}</span
-          ><span>轮次 {{ sample.turns.length }}</span
-          ><span>Trace {{ trace?.trace_id ?? '—' }}</span>
-        </footer>
       </template>
       <p v-else class="empty">
         样本不存在 <button class="link" @click="back">返回任务详情</button>
@@ -1035,18 +1030,6 @@ watch(sampleId, () => {
   padding: 22px;
   max-height: calc(75vh + 80px);
   overflow: auto;
-}
-.sample-footer {
-  display: flex;
-  gap: 24px;
-  flex-wrap: wrap;
-  background: white;
-  border: 1px solid #e0e8e4;
-  border-radius: 10px;
-  margin-top: 22px;
-  padding: 16px;
-  font-size: 12px;
-  color: #718478;
 }
 .secondary.selected {
   background: #e4f7ee;

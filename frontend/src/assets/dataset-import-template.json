@@ -1,0 +1,291 @@
+{
+  "cases": [
+    {
+      "id": "sample-001",
+      "name": "低风险申请：状态与工具",
+      "turns": [
+        {
+          "id": "sample-001-t1",
+          "input": {
+            "txt": "我要申请8万元贷款，用途是购买农机。"
+          },
+          "expectations": [
+            {
+              "name": "最终状态",
+              "kind": "state",
+              "path": "status",
+              "condition": {
+                "kind": "equals",
+                "expected": "approved"
+              }
+            },
+            {
+              "name": "必须调用 submit_application",
+              "kind": "tool_call",
+              "tool": "submit_application",
+              "mode": "required"
+            },
+            {
+              "name": "必须调用 credit_inquiry",
+              "kind": "tool_call",
+              "tool": "credit_inquiry",
+              "mode": "required"
+            },
+            {
+              "name": "必须调用 approve_loan",
+              "kind": "tool_call",
+              "tool": "approve_loan",
+              "mode": "required"
+            },
+            {
+              "name": "工具顺序、次数及禁止额外调用",
+              "kind": "execution_path",
+              "scope": "tool",
+              "expected": [
+                "submit_application",
+                "credit_inquiry",
+                "approve_loan"
+              ],
+              "allowed_tools": null
+            },
+            {
+              "name": "申请金额正确",
+              "kind": "tool_argument",
+              "tool": "submit_application",
+              "path": "arguments.amount",
+              "occurrence": "all",
+              "condition": {
+                "kind": "equals",
+                "expected": 80000
+              }
+            }
+          ],
+          "notes": "核心检查：submit_application → credit_inquiry → approve_loan"
+        }
+      ],
+      "initial_state": {
+        "customer": "test-low"
+      },
+      "category": "positive",
+      "difficulty": "medium",
+      "tags": [
+        "导入模板",
+        "低风险",
+        "基础编排"
+      ],
+      "notes": "本地贷款测试 Agent 示例；test-policy-v1；发布后在测评任务中选择基础编排 Agent 和相应评估器。"
+    },
+    {
+      "id": "sample-002",
+      "name": "高风险申请：禁止直接审批",
+      "turns": [
+        {
+          "id": "sample-002-t1",
+          "input": {
+            "txt": "申请8万元贷款，用途是购买农机。"
+          },
+          "expectations": [
+            {
+              "name": "最终状态",
+              "kind": "state",
+              "path": "status",
+              "condition": {
+                "kind": "equals",
+                "expected": "pending_review"
+              }
+            },
+            {
+              "name": "必须调用 submit_application",
+              "kind": "tool_call",
+              "tool": "submit_application",
+              "mode": "required"
+            },
+            {
+              "name": "必须调用 credit_inquiry",
+              "kind": "tool_call",
+              "tool": "credit_inquiry",
+              "mode": "required"
+            },
+            {
+              "name": "禁止调用 approve_loan",
+              "kind": "tool_call",
+              "tool": "approve_loan",
+              "mode": "forbidden"
+            },
+            {
+              "name": "必须调用 request_human_review",
+              "kind": "tool_call",
+              "tool": "request_human_review",
+              "mode": "required"
+            },
+            {
+              "name": "工具顺序、次数及禁止额外调用",
+              "kind": "execution_path",
+              "scope": "tool",
+              "expected": [
+                "submit_application",
+                "credit_inquiry",
+                "request_human_review"
+              ],
+              "allowed_tools": null
+            },
+            {
+              "name": "申请金额正确",
+              "kind": "tool_argument",
+              "tool": "submit_application",
+              "path": "arguments.amount",
+              "occurrence": "all",
+              "condition": {
+                "kind": "equals",
+                "expected": 80000
+              }
+            }
+          ],
+          "notes": "核心检查：submit_application → credit_inquiry → request_human_review"
+        }
+      ],
+      "initial_state": {
+        "customer": "test-high"
+      },
+      "category": "negative",
+      "difficulty": "medium",
+      "tags": [
+        "导入模板",
+        "高风险",
+        "基础编排"
+      ],
+      "notes": "本地贷款测试 Agent 示例；test-policy-v1；发布后在测评任务中选择基础编排 Agent 和相应评估器。"
+    },
+    {
+      "id": "sample-003",
+      "name": "多轮申请：先追问再补齐",
+      "turns": [
+        {
+          "id": "sample-003-t1",
+          "input": {
+            "txt": "我想申请贷款。"
+          },
+          "expectations": [
+            {
+              "name": "最终状态",
+              "kind": "state",
+              "path": "status",
+              "condition": {
+                "kind": "equals",
+                "expected": "no_application"
+              }
+            },
+            {
+              "name": "禁止调用 submit_application",
+              "kind": "tool_call",
+              "tool": "submit_application",
+              "mode": "forbidden"
+            },
+            {
+              "name": "工具顺序、次数及禁止额外调用",
+              "kind": "execution_path",
+              "scope": "tool",
+              "expected": [],
+              "allowed_tools": null
+            }
+          ],
+          "notes": "核心检查：不得调用任何业务工具"
+        },
+        {
+          "id": "sample-003-t2",
+          "input": {
+            "txt": "金额8万元，用途是购买农机。"
+          },
+          "expectations": [
+            {
+              "name": "最终状态",
+              "kind": "state",
+              "path": "status",
+              "condition": {
+                "kind": "equals",
+                "expected": "approved"
+              }
+            },
+            {
+              "name": "必须调用 submit_application",
+              "kind": "tool_call",
+              "tool": "submit_application",
+              "mode": "required"
+            },
+            {
+              "name": "必须调用 credit_inquiry",
+              "kind": "tool_call",
+              "tool": "credit_inquiry",
+              "mode": "required"
+            },
+            {
+              "name": "必须调用 approve_loan",
+              "kind": "tool_call",
+              "tool": "approve_loan",
+              "mode": "required"
+            },
+            {
+              "name": "工具顺序、次数及禁止额外调用",
+              "kind": "execution_path",
+              "scope": "tool",
+              "expected": [
+                "submit_application",
+                "credit_inquiry",
+                "approve_loan"
+              ],
+              "allowed_tools": null
+            },
+            {
+              "name": "申请金额正确",
+              "kind": "tool_argument",
+              "tool": "submit_application",
+              "path": "arguments.amount",
+              "occurrence": "all",
+              "condition": {
+                "kind": "equals",
+                "expected": 80000
+              }
+            }
+          ],
+          "notes": "核心检查：submit_application → credit_inquiry → approve_loan"
+        }
+      ],
+      "initial_state": {
+        "customer": "test-low"
+      },
+      "category": "positive",
+      "difficulty": "medium",
+      "tags": [
+        "导入模板",
+        "多轮",
+        "基础编排"
+      ],
+      "notes": "本地贷款测试 Agent 示例；test-policy-v1；发布后在测评任务中选择基础编排 Agent 和相应评估器。"
+    },
+    {
+      "id": "sample-004",
+      "name": "贷款咨询：LLM 回答质量",
+      "category": "positive",
+      "difficulty": "easy",
+      "tags": [
+        "导入模板",
+        "LLM",
+        "咨询"
+      ],
+      "notes": "规则期望留空；任务中选择回答质量 LLM 评估器，提示词、评分维度和权重在评估器配置中设置。",
+      "initial_state": {
+        "customer": "test-low"
+      },
+      "turns": [
+        {
+          "id": "sample-004-t1",
+          "input": {
+            "txt": "申请贷款时需要提供哪些基本信息？请简洁说明。"
+          },
+          "expectations": [],
+          "notes": "此样本演示仅评估回答质量。"
+        }
+      ]
+    }
+  ]
+}

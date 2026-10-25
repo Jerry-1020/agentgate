@@ -1,6 +1,13 @@
 import { toEditorCase } from '../../../api/datasets';
 import type { EvaluationCase, JsonObject } from '../types/index';
 
+export const sampleFileFormats = [
+  { value: 'xlsx', label: 'Excel (.xlsx)' },
+  { value: 'json', label: 'JSON' },
+  { value: 'csv', label: 'CSV' },
+] as const;
+export type SampleFileFormat = (typeof sampleFileFormats)[number]['value'];
+
 export function blankSample(name = '新样本'): EvaluationCase {
   return {
     id: crypto.randomUUID(),
@@ -292,29 +299,7 @@ export async function parseSampleFile(file: {
       });
       return rowsToSamples(rows);
     }
-    throw Error('仅支持 JSON、CSV、Excel(.xlsx)，或包含这些文件的ZIP');
+    throw Error('仅支持 Excel (.xlsx)、JSON、CSV');
   }
-  if (!/\.zip$/i.test(file.name)) return parse(file.name, bytes);
-  const { unzipSync } = await import('fflate');
-  let size = 0,
-    count = 0;
-  const files = unzipSync(bytes, {
-    filter(entry) {
-      if (entry.name.endsWith('/')) return false;
-      if (
-        entry.name.startsWith('/') ||
-        entry.name.split('/').includes('..') ||
-        !/\.(json|csv|xlsx)$/i.test(entry.name)
-      )
-        throw Error('ZIP 包含不支持的文件或非法路径');
-      size += entry.originalSize;
-      if (++count > 20 || size > 20 * 1024 * 1024 || entry.originalSize > 10 * 1024 * 1024)
-        throw Error('ZIP 解压大小或文件数量超限');
-      return true;
-    },
-  });
-  const result: EvaluationCase[] = [];
-  for (const [name, data] of Object.entries(files)) result.push(...(await parse(name, data)));
-  if (!result.length || result.length > 1000) throw Error('ZIP 样本总数须为1—1000');
-  return result;
+  return parse(file.name, bytes);
 }

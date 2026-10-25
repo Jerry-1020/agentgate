@@ -7,8 +7,6 @@ import {
   type NavigationGuard,
 } from 'vue-router';
 import EvaluationLayout from '../../layout/EvaluationLayout.vue';
-import TaskStaticAnalysis from './components/TaskStaticAnalysis.vue';
-import TaskTuning from './components/TaskTuning.vue';
 import EvaluationTaskForm from './components/EvaluationTaskForm.vue';
 import {
   readTaskLinks,
@@ -57,17 +55,6 @@ const page = computed(() => {
         ? 'annotations'
         : base;
 });
-const taskDetailTab = ref('results');
-watch(
-  route,
-  (value) =>
-    (taskDetailTab.value =
-      value.startsWith('optimizer/') ||
-      new URLSearchParams(value.split('?')[1] ?? '').get('tab') === 'analysis'
-        ? 'analysis'
-        : 'results'),
-  { immediate: true },
-);
 const taskLinks = ref(readTaskLinks()),
   detailDialog = ref('');
 watch(
@@ -426,33 +413,8 @@ async function taskRerunCreated(taskId: string) {
             </div></template
           >
         </section>
-        <div v-if="pairLink" class="tabs" aria-label="实验详情内容">
-          <button
-            :class="['tab', { active: taskDetailTab === 'results' }]"
-            @click="taskDetailTab = 'results'"
-          >
-            实验对比</button
-          ><button
-            :class="['tab', { active: taskDetailTab === 'analysis' }]"
-            @click="taskDetailTab = 'analysis'"
-          >
-            调优分析</button
-          ><button
-            :class="['tab', { active: taskDetailTab === 'static' }]"
-            @click="taskDetailTab = 'static'"
-          >
-            Skill 静态分析
-          </button>
-        </div>
-        <TaskStaticAnalysis
-          v-if="pairLink && taskDetailTab === 'static'"
-          :run-ids="pairLink.runIds" />
-        <TaskTuning
-          v-if="pairLink && taskDetailTab === 'analysis'"
-          :key="pairLink.id"
-          :run-ids="pairLink.runIds" />
         <Comparisons
-          v-if="pairLink && taskDetailTab === 'results'"
+          v-if="pairLink"
           :key="pairLink.id"
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
           embedded

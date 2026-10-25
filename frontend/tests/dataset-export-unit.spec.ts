@@ -1,81 +1,258 @@
-import { test, expect } from '@playwright/test'
-import { webcrypto } from 'node:crypto'
-import { blankSample, parseSampleFile } from '../src/views/datasets/utils/sample-import'
-import { exportSamples, sampleExportBlob } from '../src/views/datasets/utils/sample-export'
-import type { DatasetVersion } from '../src/views/datasets/types/index'
-import { http, httpRequest, ApiError } from '../src/utils/request'
-if (!globalThis.crypto) Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
-const a=blankSample('样本甲'), b=blankSample('样本乙')
-a.turns[0].input={query:'输入甲'}; a.turns[0].required_tools=['lookup']
-b.turns[0].input={query:'输入乙'}
-const version={dataset_name:'导出测试',version:3,status:'published',cases:[a,b],content_sha256:'original'} as DatasetVersion
-for (const format of ['json', 'xlsx'] as const) test('workflow initialization and typed multi-turn inputs survive ' + format, async () => {
- const sample = blankSample('Workflow business inputs');
- sample.initial_state = { config_variables: [{ name: 'centreId', value: '810000' }, { name: 'options', value: { enabled: false, count: 0 } }] };
- sample.turns[0].input = { user_input_text: '请翻译', menuId: 'TRANSLATE', form: { values: [0, false, null, { amount: 12.5 }] } };
- sample.turns.push({ ...structuredClone(sample.turns[0]), id: crypto.randomUUID(), input: { user_input_text: '第二轮', collected_data: {} } });
- const before = JSON.stringify(sample);
- const blob = await sampleExportBlob({ ...version, cases: [sample] }, undefined, format);
- const parsed = await parseSampleFile({ name: 'workflow.' + format, size: blob.size, arrayBuffer: () => blob.arrayBuffer() });
- expect(parsed[0].initial_state).toEqual(sample.initial_state);
- expect(parsed[0].turns.map(turn => turn.input)).toEqual(sample.turns.map(turn => turn.input));
- expect(JSON.stringify(sample)).toBe(before);
+import { test, expect } from '@playwright/test';
+import { webcrypto } from 'node:crypto';
+import {
+  blankSample,
+  parseSampleFile,
+  sampleFileFormats,
+} from '../src/views/datasets/utils/sample-import';
+import { exportSamples, sampleExportBlob } from '../src/views/datasets/utils/sample-export';
+import type { DatasetVersion } from '../src/views/datasets/types/index';
+import { http, httpRequest, ApiError } from '../src/utils/request';
+if (!globalThis.crypto)
+  Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
+const a = blankSample('样本甲'),
+  b = blankSample('样本乙');
+a.turns[0].input = { query: '输入甲' };
+a.turns[0].required_tools = ['lookup'];
+b.turns[0].input = { query: '输入乙' };
+const version = {
+  dataset_name: '导出测试',
+  version: 3,
+  status: 'published',
+  cases: [a, b],
+  content_sha256: 'original',
+} as DatasetVersion;
+for (const { value: format } of sampleFileFormats)
+  test('workflow initialization and typed multi-turn inputs survive ' + format, async () => {
+    const sample = blankSample('Workflow business inputs');
+    sample.initial_state = {
+      config_variables: [
+        { name: 'centreId', value: '810000' },
+        { name: 'options', value: { enabled: false, count: 0 } },
+      ],
+    };
+    sample.turns[0].input = {
+      user_input_text: '请翻译',
+      menuId: 'TRANSLATE',
+      form: { values: [0, false, null, { amount: 12.5 }] },
+    };
+    sample.turns.push({
+      ...structuredClone(sample.turns[0]),
+      id: crypto.randomUUID(),
+      input: { user_input_text: '第二轮', collected_data: {} },
+    });
+    const before = JSON.stringify(sample);
+    const blob = await sampleExportBlob({ ...version, cases: [sample] }, undefined, format);
+    const parsed = await parseSampleFile({
+      name: 'workflow.' + format,
+      size: blob.size,
+      arrayBuffer: () => blob.arrayBuffer(),
+    });
+    expect(parsed[0].initial_state).toEqual(sample.initial_state);
+    expect(parsed[0].turns.map((turn) => turn.input)).toEqual(
+      sample.turns.map((turn) => turn.input),
+    );
+    expect(JSON.stringify(sample)).toBe(before);
+  });
+test('selected exports preserve expectations and never impersonate published version hashes', () => {
+  const before = JSON.stringify(version),
+    data = exportSamples(version, [a.id]);
+  expect(data.cases).toHaveLength(1);
+  expect(data.cases[0].turns[0].expectations).toEqual([
+    expect.objectContaining({ kind: 'tool_call', tool: 'lookup' }),
+  ]);
+  expect(data).not.toHaveProperty('content_sha256');
+  expect(JSON.stringify(version)).toBe(before);
+  expect(exportSamples(version).cases).toHaveLength(2);
+  expect(() => exportSamples(version, [])).toThrow('至少');
+  expect(() => exportSamples(version, ['unknown'])).toThrow('至少');
 });
-test('selected exports preserve expectations and never impersonate published version hashes',()=>{
- const before=JSON.stringify(version), data=exportSamples(version,[a.id])
- expect(data.cases).toHaveLength(1)
- expect(data.cases[0].turns[0].expectations).toEqual([expect.objectContaining({kind:'tool_call',tool:'lookup'})])
- expect(data).not.toHaveProperty('content_sha256')
- expect(JSON.stringify(version)).toBe(before)
- expect(exportSamples(version).cases).toHaveLength(2)
- expect(()=>exportSamples(version,[])).toThrow('至少')
- expect(()=>exportSamples(version,['unknown'])).toThrow('至少')
-})
-for(const format of ['json','xlsx'] as const) test(format+' export can be imported preserving samples and tool checks',async()=>{
- const blob=await sampleExportBlob(version,[a.id],format)
- const parsed=await parseSampleFile({name:'export.'+format,size:blob.size,arrayBuffer:()=>blob.arrayBuffer()})
- expect(parsed).toHaveLength(1);expect(parsed[0].name).toBe(a.name)
- expect(parsed[0].turns[0].input).toEqual(a.turns[0].input)
- expect(parsed[0].turns[0].required_tools).toEqual(['lookup'])
-})
-test('shared Axios handles raw/envelope/204 responses and does not double the API prefix',async()=>{
- const previous=http.defaults.adapter
- try{
-  let data:unknown={value:3}
-  http.defaults.adapter=async config=>{expect(config.url).toBe('/datasets');return {data,status:200,statusText:'OK',headers:{},config}}
-  expect(await httpRequest('/api/datasets')).toEqual({value:3})
-  data={code:'0',message:'ok',data:[1]};expect(await httpRequest('/datasets')).toEqual([1])
-  http.defaults.adapter=async config=>({data:'',status:204,statusText:'No Content',headers:{},config})
-  expect(await httpRequest('/datasets')).toBe('')
-  http.defaults.adapter=async config=>({data,status:200,statusText:'OK',headers:{},config})
-  data={code:'error',message:'blocked',data:null};await expect(httpRequest('/datasets')).rejects.toBeInstanceOf(ApiError)
- }finally{http.defaults.adapter=previous}
-})
-test('shared Axios preserves validation details and never retries a timed-out write',async()=>{
- const previous=http.defaults.adapter
- try{
-  let calls=0
-  http.defaults.adapter=async()=>{calls++;throw {isAxiosError:true,code:'ECONNABORTED',message:'timeout'}}
-  await expect(httpRequest('/datasets',{method:'POST',data:{name:'test'}})).rejects.toMatchObject({status:0})
-  expect(calls).toBe(1)
-  const detail=[{message:'version conflict'}]
-  http.defaults.adapter=async()=>{throw {isAxiosError:true,response:{status:422,data:{detail}}}}
-  await expect(httpRequest('/datasets')).rejects.toMatchObject({status:422,detail})
- }finally{http.defaults.adapter=previous}
-})
+for (const { value: format } of sampleFileFormats)
+  test(format + ' export can be imported preserving samples and tool checks', async () => {
+    const blob = await sampleExportBlob(version, [a.id], format);
+    const parsed = await parseSampleFile({
+      name: 'export.' + format,
+      size: blob.size,
+      arrayBuffer: () => blob.arrayBuffer(),
+    });
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].name).toBe(a.name);
+    expect(parsed[0].turns[0].input).toEqual(a.turns[0].input);
+    expect(parsed[0].turns[0].required_tools).toEqual(['lookup']);
+  });
+test('shared Axios handles raw/envelope/204 responses and does not double the API prefix', async () => {
+  const previous = http.defaults.adapter;
+  try {
+    let data: unknown = { value: 3 };
+    http.defaults.adapter = async (config) => {
+      expect(config.url).toBe('/datasets');
+      return { data, status: 200, statusText: 'OK', headers: {}, config };
+    };
+    expect(await httpRequest('/api/datasets')).toEqual({ value: 3 });
+    data = { code: '0', message: 'ok', data: [1] };
+    expect(await httpRequest('/datasets')).toEqual([1]);
+    http.defaults.adapter = async (config) => ({
+      data: '',
+      status: 204,
+      statusText: 'No Content',
+      headers: {},
+      config,
+    });
+    expect(await httpRequest('/datasets')).toBe('');
+    http.defaults.adapter = async (config) => ({
+      data,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    });
+    data = { code: 'error', message: 'blocked', data: null };
+    await expect(httpRequest('/datasets')).rejects.toBeInstanceOf(ApiError);
+  } finally {
+    http.defaults.adapter = previous;
+  }
+});
+test('shared Axios preserves validation details and never retries a timed-out write', async () => {
+  const previous = http.defaults.adapter;
+  try {
+    let calls = 0;
+    http.defaults.adapter = async () => {
+      calls++;
+      throw { isAxiosError: true, code: 'ECONNABORTED', message: 'timeout' };
+    };
+    await expect(
+      httpRequest('/datasets', { method: 'POST', data: { name: 'test' } }),
+    ).rejects.toMatchObject({ status: 0 });
+    expect(calls).toBe(1);
+    const detail = [{ message: 'version conflict' }];
+    http.defaults.adapter = async () => {
+      throw { isAxiosError: true, response: { status: 422, data: { detail } } };
+    };
+    await expect(httpRequest('/datasets')).rejects.toMatchObject({ status: 422, detail });
+  } finally {
+    http.defaults.adapter = previous;
+  }
+});
 
+test('execution expectations survive editing and every supported export-import format', async () => {
+  const { toEditorCase, toApiCase } = await import('../src/api/datasets');
+  const raw: any = {
+    ...blankSample('路径专项'),
+    turns: [
+      {
+        id: 'turn-path',
+        input: { txt: '测试' },
+        notes: '',
+        expectations: [
+          {
+            id: 'path-1',
+            name: '完整节点',
+            kind: 'execution_path',
+            scope: 'workflow',
+            expected: ['extract', 'end'],
+            allowed_tools: null,
+          },
+          {
+            id: 'path-2',
+            name: '实际技能',
+            kind: 'execution_path',
+            scope: 'skill',
+            expected: ['general_help'],
+            allowed_tools: [],
+          },
+        ],
+      },
+    ],
+  };
+  const edited = toEditorCase(raw);
+  edited.turns[0].notes = '修改备注';
+  expect(toApiCase(edited).turns[0].expectations).toEqual(raw.turns[0].expectations);
+  for (const { value: format } of sampleFileFormats) {
+    const blob = await sampleExportBlob({ ...version, cases: [edited] }, [edited.id], format);
+    const imported = await parseSampleFile({
+      name: 'path.' + format,
+      size: blob.size,
+      arrayBuffer: () => blob.arrayBuffer(),
+    });
+    expect(toApiCase(imported[0]).turns[0].expectations).toEqual(
+      raw.turns[0].expectations.map((e: any) => ({ ...e, id: expect.any(String) })),
+    );
+  }
+});
 
-test('execution expectations survive editing and JSON/Excel export-import', async () => {
- const { toEditorCase, toApiCase } = await import('../src/api/datasets');
- const raw:any={...blankSample('路径专项'),turns:[{id:'turn-path',input:{txt:'测试'},notes:'',expectations:[
-  {id:'path-1',name:'完整节点',kind:'execution_path',scope:'workflow',expected:['extract','end'],allowed_tools:null},
-  {id:'path-2',name:'实际技能',kind:'execution_path',scope:'skill',expected:['general_help'],allowed_tools:[]},
- ]}]};
- const edited=toEditorCase(raw);edited.turns[0].notes='修改备注';
- expect(toApiCase(edited).turns[0].expectations).toEqual(raw.turns[0].expectations);
- for (const format of ['json','xlsx'] as const) {
-  const blob=await sampleExportBlob({...version,cases:[edited]},[edited.id],format);
-  const imported=await parseSampleFile({name:'path.'+format,size:blob.size,arrayBuffer:()=>blob.arrayBuffer()});
-  expect(toApiCase(imported[0]).turns[0].expectations).toEqual(raw.turns[0].expectations.map((e:any)=>({...e,id:expect.any(String)})));
- }
+test('CSV preserves Chinese text, commas, quotes, multiline notes and every expectation type', async () => {
+  const { toApiCase, toEditorCase } = await import('../src/api/datasets');
+  const raw = {
+    ...toApiCase(blankSample('中文, "引号"\n多行样本')),
+    notes: '第一行\r\n第二行,备注',
+    turns: [
+      {
+        id: 'turn',
+        input: { txt: '你好, "世界"\n下一行', empty: '', zero: 0, flag: false, missing: null },
+        notes: '轮次\n备注',
+        expectations: [
+          {
+            id: 'output',
+            name: '回答',
+            kind: 'output',
+            path: null,
+            condition: { kind: 'equals', expected: '你好, "世界"\n下一行' },
+          },
+          {
+            id: 'state',
+            name: null,
+            kind: 'state',
+            path: 'status',
+            condition: { kind: 'one_of', allowed: ['approved', 'review'] },
+          },
+          {
+            id: 'arg',
+            name: null,
+            kind: 'tool_argument',
+            tool: 'lookup',
+            path: 'amount',
+            occurrence: 'all',
+            condition: { kind: 'within_range', minimum: 0, maximum: 10 },
+          },
+          { id: 'required', name: null, kind: 'tool_call', tool: 'lookup', mode: 'required' },
+          { id: 'forbidden', name: null, kind: 'tool_call', tool: 'delete', mode: 'forbidden' },
+          {
+            id: 'skill',
+            name: null,
+            kind: 'skill_route',
+            condition: { kind: 'equals', expected: 'help' },
+          },
+          { id: 'policy', name: null, kind: 'policy', policy_id: 'safe' },
+          {
+            id: 'path',
+            name: null,
+            kind: 'execution_path',
+            scope: 'tool',
+            expected: ['lookup'],
+            allowed_tools: null,
+          },
+        ],
+      },
+    ],
+  };
+  const sample = toEditorCase(raw as any);
+  const blob = await sampleExportBlob({ ...version, cases: [sample, b] }, [sample.id], 'csv');
+  expect(blob.type).toBe('text/csv;charset=utf-8');
+  expect([...new Uint8Array(await blob.arrayBuffer()).slice(0, 3)]).toEqual([239, 187, 191]);
+  const parsed = await parseSampleFile({
+    name: 'samples.csv',
+    size: blob.size,
+    arrayBuffer: () => blob.arrayBuffer(),
+  });
+  expect(parsed).toHaveLength(1);
+  const normalized = (item: ReturnType<typeof toApiCase>) => ({
+    ...item,
+    id: 'case',
+    turns: item.turns.map((t) => ({
+      ...t,
+      id: 'turn',
+      expectations: t.expectations.map((e) => ({ ...e, id: 'expectation' })),
+    })),
+  });
+  expect(normalized(toApiCase(parsed[0]))).toEqual(normalized(toApiCase(sample)));
 });

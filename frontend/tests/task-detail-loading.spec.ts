@@ -134,6 +134,7 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
   let rerunCreated = false;
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith('/api/')) return route.continue();
     calls.push({ path, headers: route.request().headers() });
     const reply = (data: unknown) =>
       route.fulfill({ json: { code: '0', message: 'success', data } });
@@ -355,7 +356,7 @@ test('running task keeps polling current run and stops when completed', async ({
   expect(count(state.calls, '/api/runs/task-run/samples')).toBe(1);
   state.setStatus('completed');
   await page.clock.fastForward(5100);
-  await expect(page.getByText('100%', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('运行完成', { exact: true })).toBeVisible();
   const requests = state.calls.length;
   await page.clock.fastForward(15000);
   expect(state.calls).toHaveLength(requests);

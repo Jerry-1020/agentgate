@@ -81,7 +81,6 @@ function activate() {
     </div>
     <h2 class="group-template-title">{{ card.name }}</h2>
     <p>{{ card.description || '暂无备注描述' }}</p>
-    <div class="group-template-tags"><span>LLM</span><span>文本</span><span>内容质量</span></div>
     <p v-if="loading" role="status">正在读取评估配置…</p>
     <p v-else-if="error" role="alert">
       {{ error }} <button class="asset-link" @click="load">重试</button>
@@ -125,18 +124,6 @@ function activate() {
 }
 .llm-group-template-card .asset-card-actions {
   min-height: 54px;
-}
-.group-template-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.group-template-tags span {
-  color: var(--el-text-color-secondary);
-  background: var(--el-fill-color);
-  border-radius: 3px;
-  padding: 3px 6px;
-  font-size: 10px;
 }
 .llm-group-template-card h4 {
   margin: 0;

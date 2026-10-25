@@ -274,9 +274,8 @@ test('team change clears prior data and sends five headers; old delayed response
 test('parent route context, A/B tabs, creation, dirty guard, logout and unknown route',async({page})=>{
   await setup(page);await mount(page,'/tasks/ab');
   await expect(page.getByText('Comparisons',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'调优分析',exact:true}).click();await expect(page.getByText('Tuning',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'Skill 静态分析',exact:true}).click();await expect(page.getByText('Static',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'实验对比',exact:true}).click();
+  await expect(page.getByRole('button',{name:'调优分析',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Skill 静态分析',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:/实验 A/}).click();
   await navigate(page,'/tasks');
   await page.getByRole('button',{name:'新建测评任务'}).click();await page.getByRole('button',{name:'close form'}).click();

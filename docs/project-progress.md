@@ -1031,3 +1031,21 @@ TargetStructure.vue 对工作流按有向层级展示，标注LLM/规则/工具/
 ### 2026-10-08 — 提交至 integration/baibo
 
 用户授权将当前恢复分支成果提交并推送到远程baibo分支，实际目标为origin/integration/baibo。包含标注v2恢复、完整Trace展示、贷款图谱与Skill分析、核心专项规则与v3种子数据，以及样本详情结果栏加宽与单轮轮次目录统一。主工作区另存的EvaluationTaskForm.vue与agent-topology.ts未纳入本次提交；不包含运行数据库、依赖软链接或凭据。提交前后端1381通过/35跳过，前端82通过，贷款运行时29通过；前端lint及生产构建通过。
+
+### 2026-10-23 — Evaluator and dataset interface cleanup
+
+Implemented the requested interface changes on `feature/ui-evaluator-dataset-polish`, based on updated `refactor-1`. Built-in rule cards hide the English subtitle, rule details omit execution implementation metadata, and LLM cards omit the fixed category tags and consistently label their listed items as child evaluators. The LLM template picker omits the scenario sidebar section. Evaluators now appear last in the main navigation. A/B result pages show comparisons without tuning or static-analysis tabs; sample details omit the footer below the trace explorer.
+
+Dataset cards anchor their divider and update time to the bottom of each grid row. Status filters are All, Published, and Draft: published means a published version exists; draft means an editable draft exists. A dataset with both belongs to both filters. The expected-Skill input remains unchanged, as requested after clarification.
+
+The import wizard links to a bundled Excel template with Cases, field instructions, and expectation examples. It reuses the previously verified synthetic loan template: four samples, five turns, and 22 expectations. Only Cases is imported; the instructions cover every import column, multi-turn grouping, JSON syntax, and selecting evaluators separately. The preview now counts preserved execution-path and Skill/policy checks as well as editable checks. The download uses Vite asset URLs so the `/agentgate/` deployment base is respected.
+
+Validation: all 28 focused import/export and evaluator-group tests passed (including a new test that reads the shipped Excel file through the actual importer); frontend typecheck, changed-file lint, and production build passed. The existing bundle-size warning remains. Local UI checks covered rule details, LLM cards/template selection, both status filters, template upload preview, A/B comparison, and trace detail. Downloaded bytes match the bundled template; production output includes the Excel asset. No backend contracts or in-bank/external Agent routing changed. No commit, push, or merge was performed.
+
+### 2026-10-23 — Align sample import, templates, and export formats
+
+Continued the same interface feature branch. Import templates now appear only on the file-import configuration step, after Next. The wizard offers Excel, JSON, and CSV downloads, expandable JSON syntax/examples and Excel/CSV field instructions. JSON and CSV reuse the Excel template's four synthetic samples, five turns, and 22 expectations. Template links download blobs so JSON and CSV are saved reliably in the app browser. ZIP is no longer accepted or advertised; XLSX decompression limits remain intact.
+
+The export dialog uses the same supported-format list and adds UTF-8 CSV with a BOM, quoted fields, and the complete 12-column sample schema. Both full and selected exports retain the existing version/scope controls. CSV preserves multi-turn grouping, initial state, structured input, all expectation kinds, and multiline text. No tested-Agent directory or token routing was changed.
+
+Validation: 32 focused import/export and evaluator-group tests passed, including three-format round trips, all seven expectation kinds, CSV quoting/Unicode, ZIP rejection, and equality of the three shipped templates. Typechecking, changed-source lint, and production build passed; the existing bundle-size warning remains. Local browser checks confirmed no template links on step one, all three downloads on step two, JSON guidance, CSV export selection/download, and reimport preview of that actual exported file (four samples, five turns, 22 checks). Preview was cancelled without adding duplicate records. No commit, push, or merge was performed.
