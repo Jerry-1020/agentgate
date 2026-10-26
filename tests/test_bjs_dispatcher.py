@@ -77,6 +77,91 @@ def test_submit_rejects_unsuccessful_bjs_responses(payload, message: str) -> Non
         dispatcher.submit("run-123")
 
 
+@pytest.mark.parametrize("result,error_code", [(1, "0"), ("1", 0)])
+def test_submit_accepts_native_bjs_response_and_logs_batch(caplog, result, error_code):
+    payload = {
+        "data": {
+            "result": result,
+            "errorCode": error_code,
+            "trCode": "onlineBatchRequest_BJTD",
+            "data": {
+                "onlineBatchSeqNum": "00362",
+                "jobTemplateID": "XJ04",
+                "requestResult": "提交成功",
+            },
+            "private": "response-secret",
+        }
+    }
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", "ai11",
+        opener=lambda *_args, **_kwargs: Response(payload),
+    )
+    with caplog.at_level("INFO"):
+        dispatcher.submit("run-123")
+    assert "BJS submission accepted: run_id=run-123 onlineBatchSeqNum='00362'" in caplog.text
+    assert "response-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("data", [
+    None, "success", [], {},
+    {"result": 0, "errorCode": "作业计划号不存在！"},
+    {"result": 0, "errorCode": "0"},
+    {"result": 1, "errorCode": "failure"},
+    {"result": 1}, {"errorCode": "0"},
+    {"result": True, "errorCode": "0"},
+])
+def test_submit_rejects_failed_or_incomplete_native_response(caplog, data):
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", "ai11",
+        opener=lambda *_args, **_kwargs: Response({"data": data}),
+    )
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError, match="submission rejected"):
+        dispatcher.submit("run-123")
+    assert "BJS submission accepted" not in caplog.text
+
+
+@pytest.mark.parametrize("outer", [
+    {"code": "1", "message": "failure"},
+    {"code": "0"}, {"message": "success"},
+])
+def test_native_success_does_not_override_gateway_failure(outer):
+    payload = {**outer, "data": {"result": 1, "errorCode": "0"}}
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", "ai11",
+        opener=lambda *_args, **_kwargs: Response(payload),
+    )
+    with pytest.raises(RuntimeError, match="submission rejected"):
+        dispatcher.submit("run-123")
+
+
+@pytest.mark.parametrize("details", [None, [], {}, {"onlineBatchSeqNum": None}])
+def test_native_success_without_batch_number_is_accepted(caplog, details):
+    payload = {"data": {"result": 1, "errorCode": "0", "data": details}}
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", "ai11",
+        opener=lambda *_args, **_kwargs: Response(payload),
+    )
+    with caplog.at_level("INFO"):
+        dispatcher.submit("run-123")
+    assert "BJS submission accepted: run_id=run-123" in caplog.text
+    assert "onlineBatchSeqNum=" not in caplog.text
+
+
+def test_batch_number_cannot_inject_log_lines(caplog):
+    payload = {"data": {"result": 1, "errorCode": "0", "data": {
+        "onlineBatchSeqNum": "00362\nforged-log",
+    }}}
+    dispatcher = BjsJobDispatcher(
+        "https://bjs.example/submit", "ai11",
+        opener=lambda *_args, **_kwargs: Response(payload),
+    )
+    with caplog.at_level("INFO"):
+        dispatcher.submit("run-123")
+    accepted = next(r.getMessage() for r in caplog.records if "accepted" in r.getMessage())
+    assert "\n" not in accepted
+    assert "00362\\nforged-log" in accepted
+
+
 def test_submit_rejects_invalid_json() -> None:
     dispatcher = BjsJobDispatcher(
         "https://bjs.example/web/eval/job/bjs/submit",

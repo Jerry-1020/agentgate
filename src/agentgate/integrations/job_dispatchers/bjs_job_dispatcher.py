@@ -97,11 +97,31 @@ class BjsJobDispatcher:
         if not isinstance(payload, dict):
             raise RuntimeError("BJS submission returned an invalid response")  # noqa: TRY004
 
-        code = str(payload.get("code", ""))
-        message = str(payload.get("message", ""))
-        if code != "0" or message != "success":
+        data = payload.get("data")
+        if "code" in payload or "message" in payload:
+            # Gateway status takes precedence over any nested BJS response.
+            accepted = (
+                str(payload.get("code", "")) == "0"
+                and str(payload.get("message", "")) == "success"
+            )
+        else:
+            accepted = (
+                isinstance(data, dict)
+                and str(data.get("result", "")) == "1"
+                and str(data.get("errorCode", "")) == "0"
+            )
+        if not accepted:
             raise RuntimeError("BJS submission rejected")
-        LOGGER.info("BJS submission accepted: run_id=%s", run_id)
+        details = data.get("data") if isinstance(data, dict) else None
+        batch_number = details.get("onlineBatchSeqNum") if isinstance(details, dict) else None
+        if isinstance(batch_number, str) and batch_number:
+            # Escape control characters and bound the external value in logs.
+            LOGGER.info(
+                "BJS submission accepted: run_id=%s onlineBatchSeqNum=%r",
+                run_id, batch_number[:128],
+            )
+        else:
+            LOGGER.info("BJS submission accepted: run_id=%s", run_id)
 
     def cancel(self, run_id: str) -> None:
         """Validate a Run ID; the documented BJS API has no cancellation endpoint."""
