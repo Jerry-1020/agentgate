@@ -273,8 +273,9 @@ async function addInitializationVariable(page: Page, name: string, value: string
 
 test('workflow Case initialization and complete JSON turns persist and publish', async ({ page }) => {
   const datasetId = await open(page);
-  const variables = [{ name: 'centreId', value: '810000' }, { name: 'userId', value: 'hk_yat' },
-    { name: 'bankNo', value: '810000' }];
+  const variables = [{ name: 'centreId', value: '810000', type: 'str' },
+    { name: 'userId', value: 'hk_yat', type: 'str' },
+    { name: 'bankNo', value: '810000', type: 'str' }];
   const first = { user_input_text: '我们行的年休假政策是什么', menuId: 'KNOWLEDGE_QUERY' };
   const second = { user_input_text: '第二轮', collected_data: {},
     form: { values: [0, false, null, { amount: 12.5 }] } };
@@ -282,6 +283,10 @@ test('workflow Case initialization and complete JSON turns persist and publish',
   await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(0);
   for (const variable of variables) {
     await addInitializationVariable(page, variable.name, variable.value);
+  }
+  for (const index of variables.keys()) {
+    await expect(page.getByLabel(`初始化变量类型 ${index + 1}`, { exact: true })).toHaveText('str');
+    await expect(page.getByLabel(`初始化变量是否必填 ${index + 1}`, { exact: true })).toHaveText('-');
   }
   await expect(page.locator('details.case-initialization select')).toHaveCount(0);
   await expect(page.getByTestId('dirty')).toHaveText('true');
@@ -292,12 +297,17 @@ test('workflow Case initialization and complete JSON turns persist and publish',
   await page.getByRole('textbox', { name: '用户输入 JSON', exact: true }).fill(JSON.stringify(second));
   const saved = await save(page, datasetId, 'POST');
   expect(saved.initial_state).toEqual({ config_variables: variables });
+  for (const variable of saved.initial_state.config_variables) {
+    expect(variable).not.toHaveProperty('required');
+  }
   expect(saved.turns.map((turn: any) => turn.input)).toEqual([first, second]);
   await page.reload();
   await expandInitialization(page);
   for (const [index, variable] of variables.entries()) {
     await expect(page.getByLabel(`初始化变量名 ${index + 1}`, { exact: true })).toHaveValue(variable.name);
     await expect(page.getByLabel(`初始化变量值 ${index + 1}`, { exact: true })).toHaveValue(variable.value);
+    await expect(page.getByLabel(`初始化变量类型 ${index + 1}`, { exact: true })).toHaveText('str');
+    await expect(page.getByLabel(`初始化变量是否必填 ${index + 1}`, { exact: true })).toHaveText('-');
   }
   await expect(page.getByRole('button', { name: '对话预览', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('初始化变量值 1', { exact: true })).toBeEnabled();
@@ -312,6 +322,9 @@ test('workflow Case initialization and complete JSON turns persist and publish',
   await expect(page.getByRole('button', { name: /^删除初始化变量 \d+$/ })).toHaveCount(0);
   const response = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
   expect((await response.json()).data.cases[0].initial_state).toEqual({ config_variables: variables });
+  const exported = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1/export`);
+  expect(exported.ok()).toBeTruthy();
+  expect((await exported.json()).data.version.cases[0].initial_state).toEqual({ config_variables: variables });
   await test.info().attach('workflow-case-inputs', {
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
   });
@@ -345,7 +358,7 @@ test('workflow initialization starts collapsed and keeps values when collapsed a
     body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
   });
   expect((await save(page, datasetId)).initial_state).toEqual({
-    ...sample('state').initial_state, config_variables: [{ name: 'centreId', value: '810000' }],
+    ...sample('state').initial_state, config_variables: [{ name: 'centreId', value: '810000', type: 'str' }],
   });
   await page.reload();
   await expect(summary).toBeVisible();
@@ -371,7 +384,7 @@ test('workflow initialization is optional and ignores completely blank rows', as
   await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(0);
   await addInitializationVariable(page, 'optionalText', '');
   expect((await save(page, datasetId)).initial_state).toEqual({
-    config_variables: [{ name: 'optionalText', value: '' }],
+    config_variables: [{ name: 'optionalText', value: '', type: 'str' }],
   });
 });
 
@@ -430,11 +443,16 @@ test('workflow initialization keeps text and JSON value types after save and rel
   });
   expect(seeded.ok()).toBeTruthy();
   await page.reload();
+  await expandInitialization(page);
+  for (const index of existingVariables.keys()) {
+    await expect(page.getByLabel(`初始化变量类型 ${index + 1}`, { exact: true })).toHaveText('—');
+    await expect(page.getByLabel(`初始化变量是否必填 ${index + 1}`, { exact: true })).toHaveText('-');
+  }
   for (const variable of textVariables) {
     await addInitializationVariable(page, variable.name, variable.value);
   }
   await expect(page.locator('details.case-initialization select')).toHaveCount(0);
-  const variables = [...existingVariables, ...textVariables];
+  const variables = [...existingVariables, ...textVariables.map(variable => ({ ...variable, type: 'str' }))];
   expect((await save(page, datasetId)).initial_state.config_variables).toEqual(variables);
   await page.reload();
   await expandInitialization(page);
@@ -466,12 +484,12 @@ test('only workflow initialization is shown and hidden imported state survives m
   await expect(page.getByRole('button', { name: '基础编排', exact: true })).toHaveCount(0);
   await addInitializationVariable(page, 'centreId', '810000');
   expect((await save(page, datasetId)).initial_state).toEqual({ ...initial,
-    config_variables: [{ name: 'centreId', value: '810000' }] });
+    config_variables: [{ name: 'centreId', value: '810000', type: 'str' }] });
   await expandInitialization(page);
   await page.getByLabel('初始化变量名 1', { exact: true }).fill('userId');
   await page.getByLabel('初始化变量值 1', { exact: true }).fill('user-1');
   expect((await save(page, datasetId)).initial_state).toEqual({ ...initial,
-    config_variables: [{ name: 'userId', value: 'user-1' }] });
+    config_variables: [{ name: 'userId', value: 'user-1', type: 'str' }] });
   await expandInitialization(page);
   await page.getByRole('button', { name: '删除初始化变量 1', exact: true }).click();
   expect((await save(page, datasetId)).initial_state).toEqual(initial);
@@ -573,8 +591,8 @@ for (const mode of ['external', 'bank'] as const) {
     await addInitializationVariable(page, 'userId', 'manual-value');
     await expect(page.locator('.variable-columns')).toContainText('类型');
     await expect(page.locator('.variable-columns')).toContainText('是否必填');
-    await expect(page.getByLabel('初始化变量类型 1', { exact: true })).toHaveText('—');
-    await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('—');
+    await expect(page.getByLabel('初始化变量类型 1', { exact: true })).toHaveText('str');
+    await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('-');
     await fetchButton.click();
     await expect(page.getByRole('status').filter({ hasText: '已获取 5 个初始化变量' })).toBeVisible();
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('manual-value');
@@ -766,7 +784,7 @@ for (const failure of ['http', 'business', 'json', 'network'] as const) {
     await expect(page.getByRole('status').filter({ hasText: '获取变量失败' })).toBeVisible();
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('keep-me');
     await expect(fetchButton).toBeEnabled();
-    expect((await save(page, datasetId)).initial_state.config_variables).toEqual([{ name: 'userId', value: 'keep-me' }]);
+    expect((await save(page, datasetId)).initial_state.config_variables).toEqual([{ name: 'userId', value: 'keep-me', type: 'str' }]);
     failed = false;
     await fetchButton.click();
     await expect(page.getByRole('status').filter({ hasText: '已获取 5 个' })).toBeVisible();
@@ -1202,7 +1220,7 @@ test('all three expectation kinds are created through the editor, reloaded and p
   const saved = await save(page, datasetId, 'POST');
   expect(saved.name).toBe('完整期望手动创建');
   expect(saved.category).toBe('boundary');
-  expect(saved.initial_state).toEqual({ config_variables: [{ name: 'centreId', value: '810000' }] });
+  expect(saved.initial_state).toEqual({ config_variables: [{ name: 'centreId', value: '810000', type: 'str' }] });
   expect(saved.turns[0].input).toEqual({ txt: '检查完整期望' });
   expect(saved.turns[0].expectations).toEqual(expect.arrayContaining([
     expect.objectContaining({ kind: 'state', name: '状态确认', path: 'status', condition: { kind: 'equals', expected: 'done' } }),

@@ -248,7 +248,7 @@ function addConfigVariable(key: InitializationField) {
     name: '',
     value: '',
     format: 'text',
-    extra: {},
+    extra: { type: 'str' },
   });
 }
 function emptyOutputRule(): Extract<Expectation, { kind: 'output' }> {
@@ -341,7 +341,9 @@ function save() {
               if (
                 !variable.name.trim() &&
                 variable.value === '' &&
-                !Object.keys(variable.extra).length
+                Object.entries(variable.extra).every(
+                  ([key, value]) => key === 'type' && value === 'str',
+                )
               )
                 return [];
               let value: unknown = variable.value;
@@ -529,7 +531,11 @@ defineExpose({ save, fetchingVariables });
                 {{ variable.extra.type || '—' }}
               </span>
               <span class="variable-metadata" :aria-label="`${group.label}是否必填 ${i + 1}`">
-                {{ typeof variable.extra.required === 'boolean' ? (variable.extra.required ? '是' : '否') : '—' }}
+                {{
+                  typeof variable.extra.required === 'boolean'
+                    ? (variable.extra.required ? '是' : '否')
+                    : '-'
+                }}
               </span>
               <div class="variable-value">
                 <textarea

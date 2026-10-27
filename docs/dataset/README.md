@@ -29,6 +29,11 @@ The sample editor's **初始变量** section exposes only the **工作流** tab.
 manually add, edit, and delete `initial_state.config_variables`; published samples
 remain read-only. Other imported initial-state fields are preserved on save.
 
+Manually added variables default to text (`type: "str"`), displayed as **str**.
+Their required status is **-** until retrieved from the selected agent; no
+`required` field is invented or required for import/save. Existing imported entries
+without type metadata remain unchanged. Completely blank new rows are still ignored.
+
 The agent, branch, and version selectors reuse the evaluation task's
 `AgentTargetPicker`. External login uses `localAgentDirectory` and the `local`
 token; in-bank login uses `agentDirectory` with the current session token and
