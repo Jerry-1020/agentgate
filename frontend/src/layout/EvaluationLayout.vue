@@ -11,7 +11,6 @@ const navigation = [
   ['evaluators', '评估器'],
   ['datasets', '测评集'],
   ['tasks', '测评任务'],
-  ['annotations', '标注'],
 ];
 </script>
 <template>
