@@ -45,8 +45,9 @@ directory provider supplies the origin and token for the active login mode. Read
 `config.variables` from nodes whose `type` is `Start`; map `BOT_USER_INPUT` to
 `user_input` as specified by the customer. Display type and required metadata
 without adding required-value checks. Returned definitions replace the current
-variable list; matching text values are retained. File variables (`image`, `doc`,
-`audio`) remain empty and have no upload control. Saved values use the existing
+variable list; matching values are retained, including file variable values. File
+variables (`image`, `doc`, `audio`) can be filled in as initialization values, but
+there is no file picker, local file access, or upload. Saved values use the existing
 `initial_state.config_variables` contract. Before the in-bank workflow `init_session`
 request, the existing ChatABC client forwards only each variable's `name`, `value`,
 and `type`, matching the customer script's variable entries. `required` remains
@@ -56,6 +57,10 @@ script's variable collection, nulls and blank/whitespace-only strings are omitte
 from the outgoing initialization list. Their definitions and required markers
 remain in the saved Case and editor; this does not add required-value validation.
 Valid `0` and `false` values are retained.
+File variable values are forwarded to `init_session` in the same way as other
+nonempty initialization values. This does not guarantee the customer will accept
+initialization or successfully run nodes that need the actual files. Chat keeps
+the existing `files: []` behavior; nonempty per-turn attachments remain unsupported.
 There is no database change or file upload.
 
 Failed queries leave the current form unchanged and allow retry or manual editing.

@@ -151,12 +151,16 @@ def test_init_uses_customer_variables_and_timeout(mode):
     sleep.assert_not_called()
 
 
-def test_workflow_init_sends_customer_variable_fields_without_editor_metadata():
+@pytest.mark.parametrize("file_values", [False, True], ids=["empty-files", "file-names-only"])
+def test_workflow_init_sends_customer_variable_fields_without_editor_metadata(tmp_path, file_values):
+    image = str(tmp_path / "missing-image.png") if file_values else ""
+    doc = str(tmp_path / "missing-report.pdf") if file_values else ""
+    audio = str(tmp_path / "missing-audio.wav") if file_values else ""
     variables = [
         {"name": "b", "value": "810000", "type": "str", "required": True},
-        {"name": "image", "value": "", "type": "image", "required": True},
-        {"name": "doc", "value": "", "type": "doc", "required": False},
-        {"name": "audio", "value": "", "type": "audio", "required": False},
+        {"name": "image", "value": image, "type": "image", "required": True},
+        {"name": "doc", "value": doc, "type": "doc", "required": False},
+        {"name": "audio", "value": audio, "type": "audio", "required": False},
         {"name": "user_input", "value": "你好", "type": "str", "required": True},
     ]
     before = deepcopy(variables)
@@ -165,6 +169,7 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata():
     request_json, request_bytes = peer.request_json, peer.request_bytes
 
     def capture_json(method, url, **kwargs):
+        assert not url.endswith("/upload_file")
         if url.endswith("/init_session"):
             observed_init.append(deepcopy(kwargs["payload"]))
         return request_json(method, url, **kwargs)
@@ -178,7 +183,7 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata():
     case = Case(
         name="Fetched workflow variables",
         initial_state={"config_variables": variables},
-        turns=[CaseTurn(input={"txt": "本轮问题"})],
+        turns=[CaseTurn(input={"txt": text}) for text in ("本轮问题", "后续问题")],
     )
     adapter = _adapter("workflow", peer, _TraceServer())
     try:
@@ -191,14 +196,20 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata():
     assert observed_init[0]["data"] == {
         "config_variables": [
             {"name": "b", "value": "810000", "type": "str"},
+            *([
+                {"name": "image", "value": image, "type": "image"},
+                {"name": "doc", "value": doc, "type": "doc"},
+                {"name": "audio", "value": audio, "type": "audio"},
+            ] if file_values else []),
             {"name": "user_input", "value": "你好", "type": "str"},
         ]
     }
     assert set(observed_init[0]) == {
         "appId", "trCode", "trVersion", "timestamp", "requestId", "data",
     }
-    assert observed_chat[0]["data"]["txt"] == "本轮问题"
-    assert observed_chat[0]["data"]["files"] == []
+    assert [payload["data"]["txt"] for payload in observed_chat] == ["本轮问题", "后续问题"]
+    assert all(payload["data"]["files"] == [] for payload in observed_chat)
+    assert not list(tmp_path.iterdir())  # File values are metadata; no files need to exist locally.
     assert case.initial_state.to_dict() == {"config_variables": before}
     assert variables == before
 

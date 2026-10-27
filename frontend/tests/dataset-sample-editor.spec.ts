@@ -575,7 +575,7 @@ async function selectVariableWorkflow(page: Page | Locator) {
 }
 
 for (const mode of ['external', 'bank'] as const) {
-  test(`${mode} fetches workflow variables with matching credentials and persists text and empty file values`, async ({ page }) => {
+  test(`${mode} fetches workflow variables with matching credentials and preserves file variable values through refresh and publication`, async ({ page }) => {
     const calls = await mockVariableDirectory(page, route => route.fulfill({ json: workflowConfig() }));
     const datasetId = await open(page, 'state');
     if (mode === 'bank') await page.getByRole('button', { name: 'Switch to bank' }).click();
@@ -601,17 +601,34 @@ for (const mode of ['external', 'bank'] as const) {
     await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('是');
     await expect(page.getByLabel('初始化变量类型 3', { exact: true })).toHaveText('doc');
     await expect(page.getByLabel('初始化变量是否必填 3', { exact: true })).toHaveText('否');
-    for (const index of [2, 3, 4]) {
-      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toBeDisabled();
-      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toHaveValue('');
+    const fileValues: Record<string, string> = {
+      image: 'customer-image.png',
+      doc: 'customer-document.pdf',
+      audio: 'customer-audio.wav',
+    };
+    for (const [name, value] of Object.entries(fileValues)) {
+      const index = workflowVariables.findIndex(variable => variable.name === name) + 1;
+      const input = page.getByLabel(`初始化变量值 ${index}`, { exact: true });
+      await expect(input).toBeEnabled();
+      await expect(input).toHaveValue('');
+      await expect(input).toHaveAttribute('placeholder', '填写变量值');
+      await input.fill(value);
     }
-    await expect(page.getByText('暂不支持文件上传，值留空', { exact: false })).toHaveCount(3);
     expect(calls.filter(call => call.path === configPath)).toMatchObject([
       { agent: 'workflow-test', version: variableVersion },
     ]);
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === configPath);
+    await fetchButton.click();
+    expect((await refreshed).ok()).toBeTruthy();
+    await expect(fetchButton).toBeEnabled();
+    for (const [name, value] of Object.entries(fileValues)) {
+      const index = workflowVariables.findIndex(variable => variable.name === name) + 1;
+      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toHaveValue(value);
+      await expect(page.getByLabel(`初始化变量类型 ${index}`, { exact: true })).toHaveText(name);
+    }
     const expectedVariables = workflowVariables.map(variable => ({ ...variable,
       name: variable.name === 'BOT_USER_INPUT' ? 'user_input' : variable.name,
-      value: variable.name === 'userId' ? 'manual-value' : '',
+      value: variable.name === 'userId' ? 'manual-value' : (fileValues[variable.name] ?? ''),
     }));
     expect((await save(page, datasetId)).initial_state).toEqual({ ...sample('state').initial_state,
       config_variables: expectedVariables });
@@ -622,7 +639,7 @@ for (const mode of ['external', 'bank'] as const) {
     await chooseVariableAgent(page, '智能体版本', 'v2');
     await expect(fetchButton).toBeDisabled();
     expect(calls.map(call => call.path)).toEqual([
-      '/web/agent/agents', '/web/agent/getAgentVersionList', configPath, '/web/agent/agents',
+      '/web/agent/agents', '/web/agent/getAgentVersionList', configPath, configPath, '/web/agent/agents',
       '/web/abcclaw/v2/branchTree', '/web/abcclaw/v2/listVersions',
     ]);
     expect(calls.every(call => call.origin === (mode === 'bank' ? 'http://bank.invalid' : 'http://127.0.0.1:8119'))).toBeTruthy();
@@ -636,7 +653,22 @@ for (const mode of ['external', 'bank'] as const) {
     await page.reload();
     await expandInitialization(page);
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('manual-value');
-    await expect(page.getByLabel('初始化变量值 2', { exact: true })).toBeDisabled();
+    for (const [name, value] of Object.entries(fileValues)) {
+      const index = workflowVariables.findIndex(variable => variable.name === name) + 1;
+      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toBeEnabled();
+      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toHaveValue(value);
+    }
+    const published = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
+    await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
+    expect((await published).ok()).toBeTruthy();
+    for (const [name, value] of Object.entries(fileValues)) {
+      const index = workflowVariables.findIndex(variable => variable.name === name) + 1;
+      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toBeDisabled();
+      await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toHaveValue(value);
+    }
+    const publishedVersion = await page.request.get(baseUrl + `/api/datasets/${datasetId}/versions/1`);
+    expect(publishedVersion.ok()).toBeTruthy();
+    expect((await publishedVersion.json()).data.cases[0].initial_state.config_variables).toEqual(expectedVariables);
   });
 }
 

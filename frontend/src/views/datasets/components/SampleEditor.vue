@@ -77,18 +77,17 @@ async function requestVariables() {
     const existing = configVariables.value.config_variables;
     configVariables.value.config_variables = variables.map((variable) => {
       const previous = existing.find((row) => row.name === variable.name);
-      const file = ['image', 'doc', 'audio'].includes(variable.type);
       return {
         id: previous?.id ?? crypto.randomUUID(),
         name: variable.name,
-        value: file ? '' : (previous?.value ?? ''),
-        format: file ? 'text' : (previous?.format ?? 'text'),
+        value: previous?.value ?? '',
+        format: previous?.format ?? 'text',
         extra: { type: variable.type, required: variable.required },
       };
     });
     configVariablesRaw.value.config_variables = null;
     variableFetchNotice.value = variables.length
-      ? `已获取 ${variables.length} 个初始化变量，请填写文本变量值。`
+      ? `已获取 ${variables.length} 个初始化变量，请填写变量值。`
       : '该工作流没有初始化变量。';
   } catch (cause) {
     if (ticket !== variableFetchSequence) return;
@@ -550,16 +549,11 @@ defineExpose({ save, fetchingVariables });
                 <input
                   v-else
                   v-model="variable.value"
-                  :disabled="
-                    !editable || ['image', 'doc', 'audio'].includes(String(variable.extra.type))
-                  "
+                  :disabled="!editable"
                   :aria-label="`${group.label}值 ${i + 1}`"
                   placeholder="填写变量值"
                   autocomplete="off"
                 />
-                <p v-if="['image', 'doc', 'audio'].includes(String(variable.extra.type))">
-                  暂不支持文件上传，值留空
-                </p>
               </div>
               <button
                 v-if="editable"
