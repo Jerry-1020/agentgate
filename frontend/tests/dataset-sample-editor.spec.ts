@@ -27,6 +27,8 @@ test.afterEach(async ({ page }) => {
 const fixture = `<!doctype html><html><head><title>Sample editor acceptance</title></head>
 <body><div id="app"></div><script type="module">
 import { createApp, h, ref, onMounted } from 'vue';
+import { createPinia } from 'pinia';
+import { useAuthStore } from '/src/stores/modules/auth.ts';
 import ElementPlus from 'element-plus';
 import SampleEditor from '/src/views/datasets/components/SampleEditor.vue';
 import SampleImportWizard from '/src/views/datasets/components/SampleImportWizard.vue';
@@ -36,6 +38,8 @@ import '/node_modules/element-plus/dist/index.css';
 import '/src/styles/revision.scss';
 const datasetId = new URLSearchParams(location.search).get('dataset');
 createApp({ setup() {
+  const auth = useAuthStore();
+  auth.loginExternal();
   const item = ref(null), draft = ref(null), editable = ref(true), error = ref(''), dirty = ref(false), wizardOpen = ref(false);
   async function load() {
     draft.value = new URLSearchParams(location.search).has('published')
@@ -61,6 +65,8 @@ createApp({ setup() {
   onMounted(() => load().catch(e => error.value = String(e)));
   return () => h('main', { class: 'revision-app' }, [
     h('h1', 'Sample editor acceptance'),
+    h('button', { onClick: () => auth.loginBank('sample-test-token', 'team-test', '测试团队') }, 'Switch to bank'),
+    h('button', { onClick: () => auth.loginExternal() }, 'Switch to external'),
     h('span', { 'data-testid': 'dirty' }, String(dirty.value)),
     h('p', { role: 'alert' }, error.value),
     h('button', { onClick: load }, 'Reload server sample'),
@@ -71,7 +77,7 @@ createApp({ setup() {
     wizardOpen.value ? h(SampleImportWizard, { datasetId, datasetName: 'Acceptance dataset',
       onClose: () => wizardOpen.value = false, onImported: load }) : null,
   ]);
-} }).use(ElementPlus).mount('#app');
+} }).use(createPinia()).use(ElementPlus).mount('#app');
 </script></body></html>`;
 
 test.beforeAll(async () => {
@@ -112,7 +118,12 @@ uvicorn.Server(uvicorn.Config(app, log_level='warning')).run(sockets=[sock])`;
   }).toBe(200);
   server = await createServer({
     configFile: false, root: frontendRoot, cacheDir: join(temporaryDirectory, 'vite-cache'),
-    define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/api') },
+    define: {
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/api'),
+      'import.meta.env.VITE_AGENT_PLATFORM_ORIGIN': JSON.stringify('http://bank.invalid'),
+      'import.meta.env.VITE_ABCCLAW_PLATFORM_ORIGIN': JSON.stringify('http://bank.invalid'),
+      'import.meta.env.VITE_LOCAL_PLATFORM_ORIGIN': JSON.stringify('http://127.0.0.1:8119'),
+    },
     plugins: [vue(), { name: 'sample-editor-acceptance', configureServer(instance) {
       instance.middlewares.use('/__sample-editor', async (_req, res, next) => {
         try {
@@ -310,6 +321,13 @@ test('workflow initialization starts collapsed and keeps values when collapsed a
   const summary = section.locator('summary');
   await expect(summary).toHaveText('初始变量');
   await expect(section).toHaveJSProperty('open', false);
+  const spacing = await section.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const heading = element.querySelector('summary')!.getBoundingClientRect();
+    return { top: heading.top - bounds.top, bottom: bounds.bottom - heading.bottom - 1 };
+  });
+  expect(spacing.top).toBeGreaterThanOrEqual(12);
+  expect(Math.abs(spacing.top - spacing.bottom)).toBeLessThanOrEqual(1);
   await expect(summary).toHaveCSS('color', 'rgb(0, 127, 105)');
   await expect(summary).toHaveCSS('font-size', '12px');
   await expect(summary).toHaveCSS('font-weight', '400');
@@ -428,78 +446,124 @@ test('workflow initialization keeps text and JSON value types after save and rel
   expect((await save(page, datasetId)).initial_state.config_variables).toEqual(variables);
 });
 
-test('base initialization saves both variable groups and excludes workflow fields', async ({ page }) => {
-  const datasetId = await open(page, 'state');
-  await addInitializationVariable(page, 'centreId', '810000');
-  const types = page.getByRole('group', { name: '初始化类型', exact: true });
-  await types.getByRole('button', { name: '基础编排', exact: true }).click();
-  await expect(page.getByLabel('初始化变量名 1', { exact: true })).toHaveCount(0);
-  for (const [label, name, value] of [['提示词变量', 'userId', 'hk_yat'], ['工具变量', 'bankNo', '810000']]) {
-    await page.getByRole('button', { name: `添加${label}`, exact: true }).click();
-    await page.getByLabel(`${label}名 1`, { exact: true }).fill(name);
-    await page.getByLabel(`${label}值 1`, { exact: true }).fill(value);
-  }
-  const initial = { ...sample('state').initial_state,
-    prompt_variables: [{ name: 'userId', value: 'hk_yat' }],
-    tool_variables: [{ name: 'bankNo', value: '810000' }] };
-  expect((await save(page, datasetId)).initial_state).toEqual(initial);
-  await page.reload();
-  await expandInitialization(page);
-  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByLabel('提示词变量值 1', { exact: true })).toHaveValue('hk_yat');
-  await expect(page.getByLabel('工具变量值 1', { exact: true })).toHaveValue('810000');
-  const publication = page.waitForResponse(response => response.url().endsWith('/drafts/publish'));
-  await page.getByRole('button', { name: 'Publish acceptance draft' }).click();
-  expect((await publication).ok()).toBeTruthy();
-  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toBeDisabled();
-  await expect(page.getByLabel('工具变量值 1', { exact: true })).toBeDisabled();
-  await test.info().attach('base-initialization', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
-});
-
-test('switching initialization types only saves the selected fields without a confirmation dialog', async ({ page }) => {
+test('only workflow initialization is shown and hidden imported state survives manual edits', async ({ page }) => {
   const datasetId = await open(page, 'state');
   const original = sample('state');
+  const initial = { ...original.initial_state,
+    prompt_variables: [{ name: 'prompt', value: 'retained' }],
+    tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] };
   const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
-    data: { ...original, initial_state: { ...original.initial_state,
-      prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
-      tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] } },
+    data: { ...original, initial_state: initial },
   });
   expect(seeded.ok()).toBeTruthy();
   await page.reload();
   await expandInitialization(page);
   const types = page.getByRole('group', { name: '初始化类型', exact: true });
-  await expect(types.getByRole('button', { name: '基础编排', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  const dialogs: string[] = [];
-  page.on('dialog', async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await types.getByRole('button', { name: '工作流', exact: true }).click();
+  await expect(types.getByRole('button')).toHaveCount(1);
+  await expect(types.getByRole('button', { name: '工作流', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: '基础编排', exact: true })).toHaveCount(0);
   await addInitializationVariable(page, 'centreId', '810000');
-  await types.getByRole('button', { name: '基础编排', exact: true }).click();
-  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
-    prompt_variables: [{ name: 'prompt', value: 'old prompt' }],
-    tool_variables: [{ name: 'tool', value: { enabled: false }, type: 'custom' }] });
-  await types.getByRole('button', { name: '工作流', exact: true }).click();
-  await addInitializationVariable(page, 'centreId', '810000');
-  expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...initial,
     config_variables: [{ name: 'centreId', value: '810000' }] });
-  expect(dialogs).toEqual([]);
+  await expandInitialization(page);
+  await page.getByLabel('初始化变量名 1', { exact: true }).fill('userId');
+  await page.getByLabel('初始化变量值 1', { exact: true }).fill('user-1');
+  expect((await save(page, datasetId)).initial_state).toEqual({ ...initial,
+    config_variables: [{ name: 'userId', value: 'user-1' }] });
+  await expandInitialization(page);
+  await page.getByRole('button', { name: '删除初始化变量 1', exact: true }).click();
+  expect((await save(page, datasetId)).initial_state).toEqual(initial);
 });
 
-test('mixed imported initialization is reduced to the selected type and inactive invalid values do not block saving', async ({ page }) => {
+test('malformed workflow variables stay editable and block saving until repaired', async ({ page }) => {
   const datasetId = await open(page, 'state');
   const original = sample('state');
   const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
     data: { ...original, initial_state: { ...original.initial_state,
-      config_variables: 'invalid inactive configuration',
-      prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] } },
+      config_variables: 'invalid configuration', prompt_variables: [] } },
   });
   expect(seeded.ok()).toBeTruthy();
   await page.reload();
   await expandInitialization(page);
-  await page.getByRole('group', { name: '初始化类型', exact: true })
-    .getByRole('button', { name: '基础编排', exact: true }).click();
+  const raw = page.getByRole('textbox', { name: '初始化变量原始 JSON', exact: true });
+  await expect(raw).toBeVisible();
+  await page.getByRole('button', { name: '保存样本', exact: true }).click();
+  await expect(page.locator('.sample-editor [role=alert]')).toContainText('初始化变量必须为 JSON 数组');
+  await raw.fill('[{"name":"centreId","value":"810000"}]');
   expect((await save(page, datasetId)).initial_state).toEqual({ ...original.initial_state,
-    prompt_variables: [{ name: 'prompt', value: 'retained' }], tool_variables: [] });
+    config_variables: [{ name: 'centreId', value: '810000' }], prompt_variables: [] });
 });
+
+async function chooseVariableAgent(page: Page, label: string, option: string) {
+  await page.getByRole('combobox', { name: label, exact: true }).press('Enter');
+  await page.getByRole('option', { name: option, exact: true }).click();
+}
+
+for (const mode of ['external', 'bank'] as const) {
+  test(`${mode} variable agent selection routes directory credentials and keeps fetch as a placeholder`, async ({ page }) => {
+    const calls: { origin: string; path: string; token: string | undefined; team: string | null }[] = [];
+    await page.route('**/api/local-targets', route => route.fulfill({ json: { targets: [], unavailable: [] } }));
+    await page.route('**/web/**', async route => {
+      const url = new URL(route.request().url());
+      calls.push({ origin: url.origin, path: url.pathname,
+        token: route.request().headers().authorization, team: url.searchParams.get('teamId') });
+      if (url.pathname === '/web/agent/agents') {
+        await route.fulfill({ json: { records: [
+          { id: 'workflow-test', name: '测试工作流', agentType: 'workflow' },
+          { id: 'claw-test', name: '测试分支智能体', agentType: 'abcclaw' },
+        ], total: 2, size: 1000, current: 1, pages: 1 } });
+      } else if (url.pathname === '/web/agent/getAgentVersionList') {
+        await route.fulfill({ json: { code: '0', message: '', data: [{ agentVersion: 'v1', updatedAt: 'v1' }] } });
+      } else if (url.pathname === '/web/abcclaw/v2/branchTree') {
+        await route.fulfill({ json: { code: '0', message: '', data: [{ branchId: 'main', branchName: '主分支', children: [] }] } });
+      } else if (url.pathname === '/web/abcclaw/v2/listVersions') {
+        await route.fulfill({ json: { code: '0', message: '', data: [{ branchId: 'main', agentVersion: 'v2' }] } });
+      } else {
+        await route.abort();
+      }
+    });
+    const datasetId = await open(page, 'state');
+    if (mode === 'bank') await page.getByRole('button', { name: 'Switch to bank' }).click();
+    await expandInitialization(page);
+    const fetchButton = page.getByRole('button', { name: '自动获取变量', exact: true });
+    await expect(fetchButton).toBeDisabled();
+    await chooseVariableAgent(page, '选择智能体', '测试工作流');
+    await expect(page.getByRole('combobox', { name: '分支地址', exact: true })).toBeDisabled();
+    await expect(fetchButton).toBeDisabled();
+    await chooseVariableAgent(page, '智能体版本', 'v1');
+    await expect(fetchButton).toBeEnabled();
+    await expect(page.getByTestId('dirty')).toHaveText('false');
+    await addInitializationVariable(page, 'userId', 'manual-value');
+    const requests: string[] = [];
+    const collect = (request: import('@playwright/test').Request) => {
+      if (['fetch', 'xhr'].includes(request.resourceType())) requests.push(request.url());
+    };
+    page.on('request', collect);
+    await fetchButton.click();
+    await expect(page.getByRole('status').filter({ hasText: '自动获取变量功能暂未开放' })).toBeVisible();
+    await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('manual-value');
+    page.off('request', collect);
+    expect(requests).toEqual([]);
+    await chooseVariableAgent(page, '选择智能体', '测试分支智能体');
+    await expect(fetchButton).toBeDisabled();
+    await expect(page.getByText('自动获取变量功能暂未开放，请手动添加变量。', { exact: true })).toHaveCount(0);
+    await chooseVariableAgent(page, '分支地址', '主分支 · main');
+    await chooseVariableAgent(page, '智能体版本', 'v2');
+    await expect(fetchButton).toBeEnabled();
+    expect(calls.map(call => call.path)).toEqual([
+      '/web/agent/agents', '/web/agent/getAgentVersionList', '/web/agent/agents',
+      '/web/abcclaw/v2/branchTree', '/web/abcclaw/v2/listVersions',
+    ]);
+    expect(calls.every(call => call.origin === (mode === 'bank' ? 'http://bank.invalid' : 'http://127.0.0.1:8119'))).toBeTruthy();
+    expect(calls.every(call => call.token === (mode === 'bank' ? 'Bearer sample-test-token' : 'Bearer local'))).toBeTruthy();
+    expect(calls[0].team).toBe(mode === 'bank' ? 'team-test' : null);
+    await page.getByRole('button', { name: mode === 'bank' ? 'Switch to external' : 'Switch to bank' }).click();
+    await expect(fetchButton).toBeDisabled();
+    await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('manual-value');
+    expect((await save(page, datasetId)).initial_state).toEqual({ ...sample('state').initial_state,
+      config_variables: [{ name: 'userId', value: 'manual-value' }] });
+  });
+}
 
 async function expectAnnotationInputsAbsent(page: Page) {
   await expect(page.getByLabel('背景知识', { exact: true })).toHaveCount(0);
