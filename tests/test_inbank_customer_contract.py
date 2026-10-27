@@ -2,6 +2,8 @@
 
 import json
 import logging
+from copy import deepcopy
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -14,6 +16,7 @@ from test_inbank_trace_server_adapters import (
     _Transport,
 )
 
+from agentgate.domain import Case, CaseTurn
 from agentgate.integrations.targets.inbank import chatabc, yunxia
 from agentgate.run.target_protocol import TargetExecutionError
 
@@ -146,6 +149,93 @@ def test_init_uses_customer_variables_and_timeout(mode):
         else {"prompt_variables": prompt, "tool_variables": tool}
     )
     sleep.assert_not_called()
+
+
+def test_workflow_init_sends_customer_variable_fields_without_editor_metadata():
+    variables = [
+        {"name": "b", "value": "810000", "type": "str", "required": True},
+        {"name": "image", "value": "", "type": "image", "required": True},
+        {"name": "doc", "value": "", "type": "doc", "required": False},
+        {"name": "audio", "value": "", "type": "audio", "required": False},
+        {"name": "user_input", "value": "你好", "type": "str", "required": True},
+    ]
+    before = deepcopy(variables)
+    observed_init, observed_chat = [], []
+    peer = _Transport("workflow")
+    request_json, request_bytes = peer.request_json, peer.request_bytes
+
+    def capture_json(method, url, **kwargs):
+        if url.endswith("/init_session"):
+            observed_init.append(deepcopy(kwargs["payload"]))
+        return request_json(method, url, **kwargs)
+
+    def capture_chat(method, url, **kwargs):
+        observed_chat.append(deepcopy(kwargs["payload"]))
+        return request_bytes(method, url, **kwargs)
+
+    peer.request_json = capture_json
+    peer.request_bytes = capture_chat
+    case = Case(
+        name="Fetched workflow variables",
+        initial_state={"config_variables": variables},
+        turns=[CaseTurn(input={"txt": "本轮问题"})],
+    )
+    adapter = _adapter("workflow", peer, _TraceServer())
+    try:
+        result = adapter.wait(adapter.start(replace(_request("workflow"), case=case)), 10)
+    finally:
+        adapter.close()
+
+    assert result.error is None
+    assert len(observed_init) == 1
+    assert observed_init[0]["data"] == {
+        "config_variables": [
+            {"name": "b", "value": "810000", "type": "str"},
+            {"name": "user_input", "value": "你好", "type": "str"},
+        ]
+    }
+    assert set(observed_init[0]) == {
+        "appId", "trCode", "trVersion", "timestamp", "requestId", "data",
+    }
+    assert observed_chat[0]["data"]["txt"] == "本轮问题"
+    assert observed_chat[0]["data"]["files"] == []
+    assert case.initial_state.to_dict() == {"config_variables": before}
+    assert variables == before
+
+
+@pytest.mark.parametrize("value", [0, False, {"items": [0, False, None]}])
+def test_workflow_init_preserves_values_without_requiring_type_or_forwarding_metadata(value):
+    peer = Mock()
+    peer.request.return_value = _Response(
+        data={"resCode": "FAIAG0000", "data": {"session_id": "sid"}}
+    )
+    variable = {"name": "a", "value": value, "required": True, "label": "页面说明"}
+    before = deepcopy(variable)
+    client = chatabc.AgentChatClient("pod", CFG, "workflow", http=peer)
+
+    assert client.init_session([variable]) == "sid"
+    assert peer.request.call_args.kwargs["json"]["data"] == {
+        "config_variables": [{"name": "a", "value": value}]
+    }
+    assert variable == before
+
+
+@pytest.mark.parametrize("value", ["", " \t\r\n", None])
+def test_workflow_init_skips_empty_variables_without_changing_saved_metadata(value):
+    peer = Mock()
+    peer.request.return_value = _Response(
+        data={"resCode": "FAIAG0000", "data": {"session_id": "sid"}}
+    )
+    variables = [
+        {"name": "a", "value": value, "type": "str", "required": True},
+        {"name": "image", "value": "", "type": "image", "required": True},
+    ]
+    before = deepcopy(variables)
+    client = chatabc.AgentChatClient("pod", CFG, "workflow", http=peer)
+
+    assert client.init_session(variables) == "sid"
+    assert peer.request.call_args.kwargs["json"]["data"] == {"config_variables": []}
+    assert variables == before
 
 
 @pytest.mark.parametrize("module", [chatabc, yunxia])

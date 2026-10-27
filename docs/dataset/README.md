@@ -34,11 +34,37 @@ The agent, branch, and version selectors reuse the evaluation task's
 token; in-bank login uses `agentDirectory` with the current session token and
 team. Selection is temporary editor state and does not change the sample schema.
 
-**自动获取变量** is enabled after a complete selection. It currently only displays
-an unavailable notice: it makes no variable-fetch request and does not replace
-manually entered values. Variable retrieval and result population await a future
-API integration. Manual editing does not require selecting an agent.
+**自动获取变量** queries the selected workflow's exact `agentId` and `agentVersion`
+through `/web/agent/getAgentConfigJsonObjectByAgentIdAndVersion`. The existing
+directory provider supplies the origin and token for the active login mode. Read
+`config.variables` from nodes whose `type` is `Start`; map `BOT_USER_INPUT` to
+`user_input` as specified by the customer. Display type and required metadata
+without adding required-value checks. Returned definitions replace the current
+variable list; matching text values are retained. File variables (`image`, `doc`,
+`audio`) remain empty and have no upload control. Saved values use the existing
+`initial_state.config_variables` contract. Before the in-bank workflow `init_session`
+request, the existing ChatABC client forwards only each variable's `name`, `value`,
+and `type`, matching the customer script's variable entries. `required` remains
+editor metadata in the saved Case; it is not sent to the customer. Missing optional
+`type` is not filled in and nonempty values are not coerced. As in the customer
+script's variable collection, nulls and blank/whitespace-only strings are omitted
+from the outgoing initialization list. Their definitions and required markers
+remain in the saved Case and editor; this does not add required-value validation.
+Valid `0` and `false` values are retained.
+There is no database change or file upload.
+
+Failed queries leave the current form unchanged and allow retry or manual editing.
+Responses belonging to a previous selection, login context, or sample are ignored.
+Variable retrieval and sample saving cannot overlap: both the editor's save button
+and the manual-create wizard's footer wait for retrieval to finish; saving disables
+retrieval until the saved sample has been refreshed.
+Base orchestration and Yunxia variable retrieval remain outside this workflow-only
+scope. External queries require the configured local mock to provide the same
+configuration endpoint; this change does not add a route to that service. Manual
+editing does not require selecting an agent.
 
 Focused acceptance coverage is in
 `frontend/tests/dataset-sample-editor.spec.ts`, including both directory routes,
-selection invalidation, placeholder behavior, persistence, and read-only values.
+selection invalidation, query errors/retries, stale responses, file placeholders,
+persistence, and read-only values. Browser routes simulate customer responses;
+live in-bank acceptance remains necessary.
