@@ -735,6 +735,40 @@ async function useExternalMode(page: Page) {
 const start = (page: Page) => page.getByRole('button', { name: '开始测评', exact: true });
 
 for (const mode of ['bank', 'external'] as const)
+  for (const kind of ['single', 'ab'] as const)
+    test(`${mode} platform ${kind} allows editing timeout after agent and dataset selection`, async ({ page }) => {
+      const requests = await openForm(page, false, sampleCases, mode);
+      await choose(page, '选择智能体', '工作流 · workflow');
+      await choose(page, '智能体版本', mode === 'bank' ? bankVersionOne : 'v1');
+      if (kind === 'ab') {
+        await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+        await page.getByLabel('平台候选版本', { exact: true }).selectOption(
+          mode === 'bank' ? bankVersionTwo : 'v2',
+        );
+      }
+      await page.getByLabel('任务测评集', { exact: true }).selectOption('other');
+      await expect(page.getByLabel('任务测评集版本', { exact: true })).toBeEnabled();
+      await page.getByLabel('任务测评集版本', { exact: true }).selectOption('1');
+      const timeoutInput = page.getByLabel('执行超时（秒）', { exact: true });
+      await expect(timeoutInput).toBeEnabled();
+      await expect(timeoutInput).toHaveValue('900');
+      await timeoutInput.fill('1200');
+      await timeoutInput.blur();
+      await expect(timeoutInput).toHaveValue('1200');
+      await page.getByRole('button', {
+        name: kind === 'ab' ? '创建 A/B试验' : '开始测评', exact: true,
+      }).click();
+      await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
+      const endpoint = kind === 'ab'
+        ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
+      const submission = requests.find((request) => request.path === endpoint)!;
+      expect(submission.body).toMatchObject({
+        dataset_id: 'other', dataset_version: 1, timeout_seconds: 1200,
+      });
+      expect(submission.headers['x-agent-platform-token']).toBe(mode === 'bank' ? 'form-secret' : 'local');
+    });
+
+for (const mode of ['bank', 'external'] as const)
   test(`${mode} execution settings hide repetition and retry controls without empty layout cells`, async ({ page }) => {
     await openForm(page, false, sampleCases, mode);
     const settings = page.getByLabel('执行参数', { exact: true });
@@ -1054,7 +1088,7 @@ test('form submits workflow target and selected source cases with isolated token
     case_ids: ['case-1'],
     evaluator_refs: [{ evaluator_id: 'judge', evaluator_version: '1' }],
     max_parallel_cases: 1,
-    timeout_seconds: 300,
+    timeout_seconds: 900,
     max_retries: 0,
     repetitions: 1,
   });
@@ -1106,7 +1140,7 @@ test('platform A/B submits both versions to the comparison endpoint', async ({
     dataset_version: 2,
     evaluator_refs: [{ evaluator_id: 'judge', evaluator_version: '1' }],
     max_parallel_cases: 1,
-    timeout_seconds: 300,
+    timeout_seconds: 900,
   });
   expect(submission.headers['x-agent-platform-token']).toBe('form-secret');
   expect(requests.some((r) => r.path === '/api/run-comparisons')).toBe(false);
@@ -1455,6 +1489,7 @@ test('external A/B keeps legacy endpoint and association, returning to single re
   const requests = await openForm(page, false, sampleCases, 'external');
   // 不预选平台目标：内置 Demo 的 A/B 走 legacy 端点；预选平台目标会切换到平台 A/B 分支。
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+  await expect(page.getByLabel('执行超时（秒）', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: '创建 A/B试验', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Skill 静态分析', exact: true })).toBeEnabled();
   await expect(page.getByLabel('并发样本数', { exact: true })).toBeDisabled();
