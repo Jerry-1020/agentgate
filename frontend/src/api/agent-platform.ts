@@ -338,14 +338,17 @@ function normalizeInitializationVariables(
     const node = object(raw, status);
     if (node.type !== 'Start') return [];
     const start = object(node.config ?? {}, status);
-    return array(start.variables ?? [], status).map((rawVariable) => {
+    return array(start.variables ?? [], status).flatMap((rawVariable) => {
       const variable = object(rawVariable, status);
       const name = text(variable.name, status);
-      return {
-        name: name === 'BOT_USER_INPUT' ? 'user_input' : name,
-        type: typeof variable.type === 'string' ? variable.type : 'str',
-        required: variable.required === true,
-      };
+      if (name === 'BOT_USER_INPUT' || name === 'user_input') return [];
+      return [
+        {
+          name,
+          type: typeof variable.type === 'string' ? variable.type : 'str',
+          required: variable.required === true,
+        },
+      ];
     });
   });
 }

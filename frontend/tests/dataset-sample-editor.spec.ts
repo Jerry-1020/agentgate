@@ -514,6 +514,37 @@ test('malformed workflow variables stay editable and block saving until repaired
     config_variables: [{ name: 'centreId', value: '810000' }], prompt_variables: [] });
 });
 
+test('manual and saved workflow input variables retain their values and turn inputs', async ({ page }) => {
+  const datasetId = await open(page, 'state');
+  const original = sample('state');
+  const variables = [
+    { name: 'BOT_USER_INPUT', value: 'saved input', type: 'str', required: true },
+    { name: 'attachment', value: 'customer-document.pdf', type: 'doc', required: false },
+  ];
+  const seeded = await page.request.put(baseUrl + `/api/datasets/${datasetId}/drafts/cases/${original.id}`, {
+    data: { ...original, initial_state: { ...original.initial_state, config_variables: variables } },
+  });
+  expect(seeded.ok()).toBeTruthy();
+  await page.reload();
+  await expandInitialization(page);
+  const names = page.getByLabel(/^初始化变量名 \d+$/);
+  await expect(names).toHaveCount(2);
+  await expect(names.nth(0)).toHaveValue('BOT_USER_INPUT');
+  await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('saved input');
+  await addInitializationVariable(page, 'user_input', 'manual input');
+  const saved = await save(page, datasetId);
+  expect(saved.initial_state).toEqual({ ...original.initial_state, config_variables: [
+    ...variables, { name: 'user_input', value: 'manual input', type: 'str' },
+  ] });
+  expect(saved.turns.map((turn: any) => turn.input)).toEqual(original.turns.map(turn => turn.input));
+  await page.reload();
+  await expandInitialization(page);
+  await expect(names).toHaveCount(3);
+  await expect(names.nth(0)).toHaveValue('BOT_USER_INPUT');
+  await expect(names.nth(2)).toHaveValue('user_input');
+  await expect(page.getByLabel('初始化变量值 3', { exact: true })).toHaveValue('manual input');
+});
+
 async function chooseVariableAgent(page: Page | Locator, label: string, option: string) {
   await page.getByRole('combobox', { name: label, exact: true }).press('Enter');
   await page.getByRole('option', { name: option, exact: true }).click();
@@ -527,6 +558,7 @@ const workflowVariables = [
   { name: 'doc', type: 'doc', required: false },
   { name: 'audio', type: 'audio', required: false },
   { name: 'BOT_USER_INPUT', type: 'str', required: true },
+  { name: 'user_input', type: 'str', required: true },
 ];
 function workflowConfig(variables = workflowVariables) {
   return { code: '0', message: 'success', data: {
@@ -594,9 +626,11 @@ for (const mode of ['external', 'bank'] as const) {
     await expect(page.getByLabel('初始化变量类型 1', { exact: true })).toHaveText('str');
     await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('-');
     await fetchButton.click();
-    await expect(page.getByRole('status').filter({ hasText: '已获取 5 个初始化变量' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: '已获取 4 个初始化变量' })).toBeVisible();
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('manual-value');
-    await expect(page.getByLabel('初始化变量名 5', { exact: true })).toHaveValue('user_input');
+    await expect(page.getByLabel(/^初始化变量名 \d+$/)).toHaveCount(4);
+    expect(await page.getByLabel(/^初始化变量名 \d+$/).evaluateAll(inputs =>
+      inputs.map(input => (input as HTMLInputElement).value))).toEqual(['userId', 'image', 'doc', 'audio']);
     await expect(page.getByLabel('初始化变量类型 1', { exact: true })).toHaveText('str');
     await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('是');
     await expect(page.getByLabel('初始化变量类型 3', { exact: true })).toHaveText('doc');
@@ -626,8 +660,7 @@ for (const mode of ['external', 'bank'] as const) {
       await expect(page.getByLabel(`初始化变量值 ${index}`, { exact: true })).toHaveValue(value);
       await expect(page.getByLabel(`初始化变量类型 ${index}`, { exact: true })).toHaveText(name);
     }
-    const expectedVariables = workflowVariables.map(variable => ({ ...variable,
-      name: variable.name === 'BOT_USER_INPUT' ? 'user_input' : variable.name,
+    const expectedVariables = workflowVariables.slice(0, 4).map(variable => ({ ...variable,
       value: variable.name === 'userId' ? 'manual-value' : (fileValues[variable.name] ?? ''),
     }));
     expect((await save(page, datasetId)).initial_state).toEqual({ ...sample('state').initial_state,
@@ -741,7 +774,7 @@ test('workflow variable fetch stays disabled while the existing sample save is p
   await expect(fetchButton).toBeEnabled();
   expect(calls.filter(call => call.path === configPath)).toEqual([]);
   await fetchButton.click();
-  await expect(page.getByRole('status').filter({ hasText: '已获取 5 个初始化变量' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: '已获取 4 个初始化变量' })).toBeVisible();
   expect(calls.filter(call => call.path === configPath)).toHaveLength(1);
 });
 
@@ -819,7 +852,7 @@ for (const failure of ['http', 'business', 'json', 'network'] as const) {
     expect((await save(page, datasetId)).initial_state.config_variables).toEqual([{ name: 'userId', value: 'keep-me', type: 'str' }]);
     failed = false;
     await fetchButton.click();
-    await expect(page.getByRole('status').filter({ hasText: '已获取 5 个' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: '已获取 4 个' })).toBeVisible();
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('keep-me');
   });
 }
