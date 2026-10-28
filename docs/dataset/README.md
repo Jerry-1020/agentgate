@@ -38,15 +38,21 @@ The agent, branch, and version selectors reuse the evaluation task's
 `AgentTargetPicker`. External login uses `localAgentDirectory` and the `local`
 token; in-bank login uses `agentDirectory` with the current session token and
 team. Selection is temporary editor state and does not change the sample schema.
+Standalone in-bank login and embedded integrated login share the in-bank task
+input checks; the external platform mock retains its text-only restriction.
 
 **自动获取变量** queries the selected workflow's exact `agentId` and `agentVersion`
 through `/web/agent/getAgentConfigJsonObjectByAgentIdAndVersion`. The existing
 directory provider supplies the origin and token for the active login mode. Read
-`config.variables` from nodes whose `type` is `Start`; map `BOT_USER_INPUT` to
-`user_input` as specified by the customer. Display type and required metadata
-without adding required-value checks. Returned definitions replace the current
-variable list; matching values are retained, including file variable values. File
-variables (`image`, `doc`, `audio`) can be filled in as initialization values, but
+`config.variables` from nodes whose `type` is `Start`. Exclude `BOT_USER_INPUT`
+and `user_input` only from the automatically fetched definitions. Manually entered,
+imported, or existing saved variables are displayed and saved unchanged. Each
+turn's user input continues to be sent through `chat.txt`, as in the customer
+script. The workflow client keeps its existing initialization behavior.
+Display type and required metadata without adding required-value checks.
+Returned definitions replace the current variable list; matching values are
+retained, including file variable values. File variables (`image`, `doc`, `audio`)
+can be filled in as initialization values, but
 there is no file picker, local file access, or upload. Saved values use the existing
 `initial_state.config_variables` contract. Before the in-bank workflow `init_session`
 request, the existing ChatABC client forwards only each variable's `name`, `value`,

@@ -40,7 +40,7 @@ const localBankSelected = computed(
 );
 const auth = useAuthStore();
 const inbankPlatformSelected = computed(() =>
-  auth.loginMode === 'bank' && !!platformSelection.value && !platformSelection.value.localTarget,
+  auth.usesPlatformDirectory && !!platformSelection.value && !platformSelection.value.localTarget,
 );
 watch(inbankPlatformSelected, (selected) => {
   if (taskKind.value === 'ab' && !selected) concurrency.value = 1;
@@ -590,7 +590,7 @@ async function submit() {
     const bankArrangeType =
       platform &&
       !localTarget &&
-      auth.loginMode === 'bank' &&
+      auth.usesPlatformDirectory &&
       platform.target.typeGroup === 'base/workflow'
         ? (platform.target.platformArrangeType ?? platform.target.platformAgentType)
         : null;
@@ -646,7 +646,7 @@ async function submit() {
     } else if (
       platform &&
       !localTarget &&
-      auth.loginMode === 'bank' &&
+      auth.usesPlatformDirectory &&
       platform.target.typeGroup === 'abcclaw'
     ) {
       const object = (value: unknown): value is Record<string, unknown> =>
