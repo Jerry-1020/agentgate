@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { EvaluationCase, ValidationIssue, Expectation, JsonObject } from '../types/index';
 import { blankSample } from '../utils/sample-import';
 import { outputEditorValue, outputCondition } from '../utils/sample-output';
@@ -27,13 +27,78 @@ const platformToken = computed(() => (auth.usesPlatformDirectory ? auth.token : 
 const platformTeamId = computed(() => (auth.usesPlatformDirectory ? auth.teamId : ''));
 const variableAgent = ref<AgentTargetSelection | null>(null);
 const variableFetchNotice = ref('');
+const fetchingVariables = ref(false);
+const isVariableWorkflow = computed(() =>
+  (variableAgent.value?.platformArrangeType || variableAgent.value?.platformAgentType) === 'workflow',
+);
+let variableFetchSequence = 0;
+watch(
+  [
+    variableAgent,
+    platformDirectory,
+    platformToken,
+    platformTeamId,
+    () => props.item,
+    () => props.editable,
+  ],
+  () => {
+    variableFetchSequence++;
+    fetchingVariables.value = false;
+    variableFetchNotice.value = '';
+  },
+  { flush: 'sync' },
+);
+onBeforeUnmount(() => variableFetchSequence++);
 function receiveVariableAgent(selection: AgentTargetSelection | null) {
   variableAgent.value = selection;
-  variableFetchNotice.value = '';
 }
-function requestVariables() {
-  if (!props.editable || !variableAgent.value) return;
-  variableFetchNotice.value = '自动获取变量功能暂未开放，请手动添加变量。';
+async function requestVariables() {
+  const selection = variableAgent.value;
+  const getVariables = platformDirectory.value.getInitializationVariables;
+  if (
+    !props.editable ||
+    props.saving ||
+    !selection ||
+    !isVariableWorkflow.value ||
+    fetchingVariables.value ||
+    !getVariables
+  )
+    return;
+  const ticket = ++variableFetchSequence;
+  fetchingVariables.value = true;
+  variableFetchNotice.value = '';
+  try {
+    const variables = await getVariables({
+      token: platformToken.value,
+      agentId: selection.agentId,
+      agentVersion: selection.agentVersion,
+    });
+    if (ticket !== variableFetchSequence) return;
+    const existing = configVariables.value.config_variables;
+    configVariables.value.config_variables = variables.map((variable) => {
+      const previous = existing.find((row) => row.name === variable.name);
+      return {
+        id: previous?.id ?? crypto.randomUUID(),
+        name: variable.name,
+        value: previous?.value ?? '',
+        format: previous?.format ?? 'text',
+        extra: { type: variable.type, required: variable.required },
+      };
+    });
+    configVariablesRaw.value.config_variables = null;
+    variableFetchNotice.value = variables.length
+      ? `已获取 ${variables.length} 个初始化变量，请填写变量值。`
+      : '该工作流没有初始化变量。';
+  } catch (cause) {
+    if (ticket !== variableFetchSequence) return;
+    const status = (cause as { status?: number } | null)?.status;
+    variableFetchNotice.value =
+      status === 401 || status === 403
+        ? '获取变量失败：Token 无效或无权访问，请重新登录。已有内容已保留。'
+        : '获取变量失败，请稍后重试或手动填写。已有内容已保留。';
+  } finally {
+    if (ticket === variableFetchSequence) fetchingVariables.value = false;
+  }
 }
 const form = ref<EvaluationCase | null>(null),
   index = ref(0),
@@ -182,7 +247,7 @@ function addConfigVariable(key: InitializationField) {
     name: '',
     value: '',
     format: 'text',
-    extra: {},
+    extra: { type: 'str' },
   });
 }
 function emptyOutputRule(): Extract<Expectation, { kind: 'output' }> {
@@ -258,6 +323,7 @@ function remove() {
   index.value = Math.max(0, index.value - 1);
 }
 function save() {
+  if (props.saving || fetchingVariables.value) return;
   error.value = '';
   if (!validateRules()) return;
   if (!form.value?.name.trim()) {
@@ -274,7 +340,9 @@ function save() {
               if (
                 !variable.name.trim() &&
                 variable.value === '' &&
-                !Object.keys(variable.extra).length
+                Object.entries(variable.extra).every(
+                  ([key, value]) => key === 'type' && value === 'str',
+                )
               )
                 return [];
               let value: unknown = variable.value;
@@ -362,7 +430,7 @@ function updateExpectations(values: Expectation[]) {
   }
   outputRules.value[i] = JSON.parse(JSON.stringify(primary));
 }
-defineExpose({ save });
+defineExpose({ save, fetchingVariables });
 </script>
 <template>
   <section class="sample-editor">
@@ -403,11 +471,18 @@ defineExpose({ save });
               v-if="editable"
               class="add-variable fetch-variables"
               type="button"
-              :disabled="!variableAgent"
-              :title="variableAgent ? '自动获取变量功能暂未开放' : '请先选择智能体及版本'"
+              :disabled="!isVariableWorkflow || fetchingVariables || saving"
+              :aria-busy="fetchingVariables"
+              :title="
+                !variableAgent
+                  ? '请先选择智能体及版本'
+                  : !isVariableWorkflow
+                    ? '当前仅支持获取工作流变量'
+                    : '获取所选工作流版本的初始化变量'
+              "
               @click="requestVariables"
             >
-              自动获取变量
+              {{ fetchingVariables ? '获取中…' : '自动获取变量' }}
             </button>
             <button
               v-if="editable && configVariablesRaw[group.key] === null"
@@ -419,6 +494,10 @@ defineExpose({ save });
               <span aria-hidden="true">＋</span> 添加变量
             </button>
           </div>
+          <p v-if="!variableAgent && !fetchingVariables">
+            请先选择工作流及版本，再点击“自动获取变量”。
+          </p>
+          <p v-if="variableAgent && !isVariableWorkflow">当前仅支持自动获取工作流的初始化变量。</p>
           <p v-if="variableFetchNotice" role="status">{{ variableFetchNotice }}</p>
           <template v-if="configVariablesRaw[group.key] !== null">
             <p class="initialization-warning">已有初始化配置格式不正确，请修正后保存。</p>
@@ -431,7 +510,8 @@ defineExpose({ save });
           </template>
           <div v-else-if="configVariables[group.key].length" class="variable-table">
             <div class="variable-columns" aria-hidden="true">
-              <span>变量名 · Key</span><span>值 · Value</span><span />
+              <span>变量名 · Key</span><span>类型</span><span>是否必填</span>
+              <span>值 · Value</span><span />
             </div>
             <div
               v-for="(variable, i) in configVariables[group.key]"
@@ -446,6 +526,16 @@ defineExpose({ save });
                 autocomplete="off"
                 spellcheck="false"
               />
+              <span class="variable-metadata" :aria-label="`${group.label}类型 ${i + 1}`">
+                {{ variable.extra.type || '—' }}
+              </span>
+              <span class="variable-metadata" :aria-label="`${group.label}是否必填 ${i + 1}`">
+                {{
+                  typeof variable.extra.required === 'boolean'
+                    ? (variable.extra.required ? '是' : '否')
+                    : '-'
+                }}
+              </span>
               <div class="variable-value">
                 <textarea
                   v-if="variable.format === 'json'"
@@ -611,7 +701,8 @@ defineExpose({ save });
         ><button
           v-if="editable && !hideSaveButton"
           class="primary"
-          :disabled="saving"
+          :disabled="saving || fetchingVariables"
+          :title="fetchingVariables ? '正在获取初始化变量，请稍候' : ''"
           @click="save"
         >
           {{ saving ? '保存中…' : '保存样本' }}
@@ -725,7 +816,7 @@ defineExpose({ save });
 .variable-columns,
 .variable-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) 28px;
+  grid-template-columns: minmax(100px, 1fr) 64px 64px minmax(140px, 2fr) 28px;
   gap: 10px;
   align-items: start;
 }
@@ -739,6 +830,13 @@ defineExpose({ save });
 }
 .variable-value {
   min-width: 0;
+}
+.variable-metadata {
+  padding: 8px 0;
+  color: #52617b;
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 .sample-editor .variable-row input,
 .sample-editor .variable-row textarea {
