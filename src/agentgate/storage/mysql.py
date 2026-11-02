@@ -13,7 +13,7 @@ from enum import Enum
 from typing import TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Connection, Table, and_, create_engine, select
+from sqlalchemy import Connection, Table, and_, create_engine, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -43,6 +43,7 @@ from agentgate.domain import (
 )
 from agentgate.domain.credential import ApiKeyMetadata
 from agentgate.domain.evaluation_task import EvaluationTask, task_with_rerun
+from agentgate.domain.run import RunTiming
 from agentgate.evaluator.versioning import publish_evaluator_draft as build_publication
 from agentgate.storage import mysql_schema as s
 from agentgate.storage.configuration import TDSQLConfig
@@ -1053,12 +1054,32 @@ class MySQLRepository:
                 counts[run.status] += 1
         return counts
 
-    def count_active_runs_by_api_key(self, api_key: str | None) -> int:
+    def recover_run(
+        self, expected: EvaluationRun, *, now: datetime, error: str | None = None
+    ) -> EvaluationRun | None:
+        now = normalize_utc(now, "Run recovery time")
         with self._transaction() as db:
-            active: list[EvaluationRun] = []
-            for status in (RunStatus.PENDING, RunStatus.RUNNING):
-                active.extend(_models(db, s.runs, EvaluationRun, status=status))
-        return sum(1 for run in active if run.api_key == api_key)
+            stored = _one(db, s.runs, EvaluationRun, id=expected.id, lock=True)
+            if stored != expected or stored.status not in {RunStatus.PENDING, RunStatus.RUNNING}:
+                return None
+            if error is None:
+                if stored.status is not RunStatus.PENDING or stored.timing.pending_started_at is not None:
+                    return None
+                recovered = stored.model_copy(update={"timing": RunTiming(pending_started_at=now)})
+            else:
+                recovered = transition_run(stored, RunStatus.FAILED, occurred_at=now, error=error)
+            _update(db, s.runs, recovered)
+            projection.put_run(db, recovered)
+            return recovered
+
+    def count_active_runs_by_team(self, user_team_id: str) -> int:
+        with self._transaction() as db:
+            return db.execute(
+                select(func.count()).select_from(s.runs).where(
+                    s.runs.c.user_team_key == _digest(user_team_id),
+                    s.runs.c.status.in_((RunStatus.PENDING.value, RunStatus.RUNNING.value)),
+                )
+            ).scalar_one()
 
     def claim_waiting_run(
         self, run_id: str, claimed_at: datetime

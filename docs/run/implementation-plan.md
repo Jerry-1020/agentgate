@@ -1,6 +1,74 @@
 # Run Implementation Plan
 
-Last updated: 2026-10-19
+Last updated: 2026-10-31
+
+## Release delivery — 2026-10-31
+
+The user subsequently authorized committing, pushing and creating a PR for the two
+completed features against `release_20261102`. Use a separate delivery branch based
+on `50888af`, with one rerun commit and one concurrency commit. Preserve team-level
+dispatch limits, Run timing/recovery, base initialization and the release's selector
+and sample validation behavior. Earlier no-commit/no-push notes describe the original
+implementation scope; this delivery authorization supersedes them without authorizing
+merge. Fresh verification is recorded in project-progress.md.
+
+## Unified Case concurrency — 2026-10-31
+
+Status: implemented and verified; see project-progress.md for full regression counts
+and live SDK execution-span evidence. No commit, push or merge has been performed.
+
+Scope approved by the user as an autonomous implementation Goal, without commit,
+push or merge. All new tasks use an integer Case-concurrency limit of 1–30, default
+1, in both login modes. A/B applies the same limit independently to each Run. Keep
+Turns ordered within each Case, existing session boundaries, credential routing,
+timeout/retry behavior and immutable source reports. Rerun copies retain the limit.
+This supersedes the external/mock A/B and local-bank concurrency-1 restrictions below.
+
+Keep historical RunManifest and CaseExecutionRequest serialization unchanged. Validate
+the 1–30 range at new launch inputs and RunManagement before any persistence, so older
+immutable reports remain readable. Ownership: reuse Engine and existing input models;
+forward the same parameter through all launch paths. Adapt bounded threaded Case
+execution inside the three existing external adapters; retain the in-bank adapters.
+The Demo adapter owns separate Trace captures for each Case and returns inline Trace
+evidence through its existing composition boundary. No new scheduler, generic executor,
+base-class hierarchy or module is introduced. Existing tests receive focused additions; tests/test_external_concurrency.py exercises
+public provider/client injection boundaries, bounded overlap up to 30, cancellation
+and cleanup without replacing private execution methods.
+
+Source assessment: goal/p1-demo supplies synchronous behavior and persistence but no
+compatible bounded external execution. integration/p1-new uses different Target/Run
+contracts and is not copied. The current refactor supplies in-bank thread lifecycles,
+pending-handle rotation, manifest hashing and per-Case session identifiers: reuse these
+contracts and adapt the lifecycle in the owning external adapters. New work is limited
+to parameter propagation, external scheduling and explicit per-Case Trace ownership.
+The prior uncommitted rerun implementation is copied as a dependency into an isolated
+worktree; the source checkout and its running services remain unchanged. Remote refresh
+timed out, so the worktree starts at local refactor-1 c1f2139.
+
+Verification: focused range/default/API/persistence tests, actual overlap bounded by N,
+ordered multi-turn sessions, independent Trace evidence, cancellation and cleanup;
+frontend tests cover both login modes, all target types, A/B and editable rerun copies.
+Then run the full backend/frontend regression and local real-model concurrency checks.
+
+## Editable task copies and controlled A/B inputs — 2026-10-30
+
+Status: implemented and verified under the user-authorized rerun Goal. Task-list
+and single-task-detail rerun entries open the ordinary creation form with exact
+saved selections. Submission creates a new task, including a fresh A/B pair, and
+preserves the source runs, reports and Trace evidence. Keep source-manifest reads
+and UI form hydration in their existing frontend owners; use the current login
+mode for all directory and credential routing. No new rerun workflow is added to
+the Engine or dispatcher, and the existing in-place API is not used by these UI
+entries.
+
+The existing Demo run-comparisons endpoint now accepts case_ids and timeout_seconds
+and forwards them through ServerDependencies to create_ab_runs/RunManagement.
+Reuse manifest Case validation and the shared-control signature for both sides.
+Invalid selections create no task. Existing in-bank concurrency, external A/B
+concurrency 1 and retry 0 restrictions remain. API tests execute original and new
+pairs, verify separate identities and copied settings, and compare source reports
+and persisted runs after execution. See project-progress.md for full regression
+counts and local service verification. No commit, push or merge is authorized.
 
 ## Frontend-owned concurrency and adapter ownership — 2026-10-19
 

@@ -1,6 +1,17 @@
+<script lang="ts">
+import type { EvaluationRun as RerunRun } from '../types/run';
+export interface RerunConfiguration {
+  name: string;
+  kind: 'single' | 'ab';
+  baseline: RerunRun['manifest'];
+  candidate?: RerunRun['manifest'];
+  staticReports: { version: string; reportId: string; descriptorHash: string }[];
+}
+</script>
+
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus';
 import TaskEvaluatorPicker from './TaskEvaluatorPicker.vue';
 import AgentTargetPicker, { type AgentTargetSelection } from './AgentTargetPicker.vue';
 import { agentDirectory, localAgentDirectory } from '../../../api/agent-platform';
@@ -18,6 +29,7 @@ import { recommendEvaluators } from '../utils/evaluator-guidance';
 import { selectableEvaluator } from '../utils/evaluator-display';
 import { refreshTaskLinks, saveTaskLink, type TaskLink } from '../utils/task-links';
 const props = defineProps<{
+  rerun?: RerunConfiguration;
   source?: {
     id: string;
     version: number;
@@ -30,6 +42,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; created: [link: TaskLink] }>();
 const PLATFORM_DEFAULT_TIMEOUT_SECONDS = 15 * 60;
 const taskName = ref('');
+const restoringConfiguration = ref(!!props.rerun);
 const taskKind = ref<'single' | 'ab'>('single'),
   candidateVersion = ref(''),
   includeStatic = ref(false);
@@ -39,12 +52,6 @@ const localBankSelected = computed(
   () => platformSelection.value?.localTarget?.adapter_type === 'local_bank',
 );
 const auth = useAuthStore();
-const inbankPlatformSelected = computed(() =>
-  auth.usesPlatformDirectory && !!platformSelection.value && !platformSelection.value.localTarget,
-);
-watch(inbankPlatformSelected, (selected) => {
-  if (taskKind.value === 'ab' && !selected) concurrency.value = 1;
-});
 const platformDirectory = computed(() =>
   auth.usesPlatformDirectory ? agentDirectory : localAgentDirectory,
 );
@@ -53,34 +60,41 @@ const platformTeamId = computed(() => (auth.usesPlatformDirectory ? auth.teamId 
 function receivePlatformSelection(selection: AgentTargetSelection | null) {
   const wasLegacyAb = taskKind.value === 'ab' && !platformSelection.value;
   platformSelection.value = selection;
+  if (restoringConfiguration.value) return;
   if (wasLegacyAb && selection && !selection.localTarget && timeout.value === 300)
     timeout.value = PLATFORM_DEFAULT_TIMEOUT_SECONDS;
   if (selection?.localTarget?.adapter_type === 'demo_loan') timeout.value = 300;
   if (selection?.localTarget?.adapter_type === 'local_bank') {
-    concurrency.value = 1;
     timeout.value = 180;
     retries.value = 0;
   }
 }
 const platformCandidateVersion = ref('');
 const platformCandidateVersions = ref<readonly { agentVersion: string; status?: string }[]>([]);
-watch(platformSelection, async (selection) => {
+let candidateSequence = 0;
+let candidateRequest = Promise.resolve();
+watch(platformSelection, (selection) => {
+  candidateRequest = loadCandidateVersions(selection);
+});
+async function loadCandidateVersions(selection: AgentTargetSelection | null) {
+  const ticket = ++candidateSequence;
   platformCandidateVersion.value = '';
   platformCandidateVersions.value = [];
   if (!selection) return;
   try {
     const input = { token: platformToken.value, agentId: selection.agentId };
-    platformCandidateVersions.value =
+    const versions =
       selection.typeGroup === 'abcclaw' && selection.branchId
         ? await platformDirectory.value.getBranchVersions({
             ...input,
             branchId: selection.branchId,
           })
         : await platformDirectory.value.getAgentVersions(input);
+    if (ticket === candidateSequence) platformCandidateVersions.value = versions;
   } catch {
-    platformCandidateVersions.value = [];
+    if (ticket === candidateSequence) platformCandidateVersions.value = [];
   }
-});
+}
 const staticDialog = ref(false),
   staticLoading = ref(false),
   staticError = ref('');
@@ -175,9 +189,11 @@ const datasets = ref<DatasetSummary[]>([]),
 const selectedDataset = ref(''),
   selectedVersion = ref(''),
   selectedEvaluators = ref<string[]>([]);
-const repetitions = ref(1),
-  launchMode = ref('now'),
-  scheduledAt = ref('');
+const unavailableEvaluatorIds = computed(() =>
+  selectedEvaluators.value.filter((id) => !evaluators.value.some((e) => e.id === id)),
+);
+const copiedHybridEvaluators = computed(() => evaluators.value.filter((e) => e.kind === 'hybrid'));
+const repetitions = ref(1);
 const bankTargets = ref<BankTarget[]>([]),
   selectedAgent = ref('demo'),
   targetError = ref('');
@@ -255,7 +271,6 @@ watch(selectedAgent, (agent) => {
       : (bankTarget.value?.descriptor.ref.external_version_id ?? '');
   if (agent === 'demo') timeout.value = 300;
   if (agent !== 'demo') {
-    if (!inbankPlatformSelected.value) concurrency.value = 1;
     timeout.value = 180;
     retries.value = 0;
     includeStatic.value = false;
@@ -279,12 +294,6 @@ const executionCases = computed(() =>
     ? availableCases.value.filter((c) => selectedCaseIds.value.includes(c.id))
     : availableCases.value,
 );
-watch(repetitions, (v) => {
-  if (v > 1) {
-    launchMode.value = 'now';
-    scheduledAt.value = '';
-  }
-});
 const datasetVersions = ref<{ version: number; cases: any[] }[]>([]),
   selectedDatasetVersion = ref<number | null>(null);
 const concurrency = ref(1),
@@ -318,8 +327,6 @@ async function openCreate(source?: {
   concurrency.value = 1;
   timeout.value = PLATFORM_DEFAULT_TIMEOUT_SECONDS;
   retries.value = 0;
-  launchMode.value = 'now';
-  scheduledAt.value = '';
   formError.value = '';
   selectedDataset.value = '';
   create.value = true;
@@ -327,7 +334,15 @@ async function openCreate(source?: {
     const [d, e] = await Promise.all([api.datasets(), api.evaluators()]);
     if (ticket !== formSequence) return;
     datasets.value = d.filter((x) => x.version !== null && !x.archived);
-    evaluators.value = e.filter(selectableEvaluator);
+    evaluators.value = e.filter(
+      (item) =>
+        selectableEvaluator(item) ||
+        (item.kind === 'hybrid' &&
+          item.enabled &&
+          !!item.latest_version &&
+          !item.owner_evaluator_id &&
+          props.rerun?.baseline.primary_evaluator_ids.includes(item.id)),
+    );
     selectedDataset.value = source?.id || datasets.value[0]?.id || '';
     selectedEvaluators.value = source?.evaluatorId ? [source.evaluatorId] : [];
   } catch (e) {
@@ -395,38 +410,42 @@ watch(
 const recommended = ref<string[]>([]),
   recommendationError = ref('');
 let recommendationSequence = 0;
+let datasetRequest = Promise.resolve();
+async function loadDataset(id: string) {
+  const ticket = ++recommendationSequence;
+  recommended.value = [];
+  recommendationError.value = '';
+  datasetVersions.value = [];
+  selectedDatasetVersion.value = null;
+  datasetLoading.value = Boolean(id);
+  if (!id) return;
+  try {
+    const d = await request<{
+      versions: {
+        version: number | null;
+        cases: { turns: { expectations: { kind: string; mode?: string }[] }[] }[];
+      }[];
+    }>(`/datasets/${encodeURIComponent(id)}`);
+    if (ticket !== recommendationSequence) return;
+    datasetVersions.value = d.versions.filter((v) => v.version !== null) as {
+      version: number;
+      cases: any[];
+    }[];
+    selectedDatasetVersion.value =
+      runSource.value?.id === id
+        ? runSource.value.version
+        : (datasets.value.find((d) => d.id === id)?.version ?? null);
+  } catch {
+    if (ticket === recommendationSequence)
+      recommendationError.value = '未能读取样本期望，请按使用场景手动选择。';
+  } finally {
+    if (ticket === recommendationSequence) datasetLoading.value = false;
+  }
+}
 watch(
   selectedDataset,
-  async (id) => {
-    const ticket = ++recommendationSequence;
-    recommended.value = [];
-    recommendationError.value = '';
-    datasetVersions.value = [];
-    selectedDatasetVersion.value = null;
-    datasetLoading.value = Boolean(id);
-    if (!id) return;
-    try {
-      const d = await request<{
-        versions: {
-          version: number | null;
-          cases: { turns: { expectations: { kind: string; mode?: string }[] }[] }[];
-        }[];
-      }>(`/datasets/${encodeURIComponent(id)}`);
-      if (ticket !== recommendationSequence) return;
-      datasetVersions.value = d.versions.filter((v) => v.version !== null) as {
-        version: number;
-        cases: any[];
-      }[];
-      selectedDatasetVersion.value =
-        runSource.value?.id === id
-          ? runSource.value.version
-          : (datasets.value.find((d) => d.id === id)?.version ?? null);
-    } catch {
-      if (ticket === recommendationSequence)
-        recommendationError.value = '未能读取样本期望，请按使用场景手动选择。';
-    } finally {
-      if (ticket === recommendationSequence) datasetLoading.value = false;
-    }
+  (id) => {
+    datasetRequest = loadDataset(id);
   },
   { flush: 'sync' },
 );
@@ -449,6 +468,7 @@ watch([executionCases, evaluators], () => {
 async function submit() {
   if (
     submitting.value ||
+    restoringConfiguration.value ||
     formLoading.value ||
     datasetLoading.value ||
     staticLoading.value ||
@@ -465,11 +485,8 @@ async function submit() {
     formError.value = '本地智能体仅支持行外模式。';
     return;
   }
-  if (
-    localTarget?.adapter_type === 'local_bank' &&
-    (concurrency.value !== 1 || retries.value !== 0 || timeout.value > 300)
-  ) {
-    formError.value = '贷款智能体要求并发 1、重试 0、超时不超过 300 秒。';
+  if (localTarget?.adapter_type === 'local_bank' && (retries.value !== 0 || timeout.value > 300)) {
+    formError.value = '贷款智能体要求重试 0、超时不超过 300 秒。';
     return;
   }
   if ((taskKind.value === 'single' || auth.loginMode !== 'external') && !platform) {
@@ -523,16 +540,6 @@ async function submit() {
     formError.value = 'A/B试验暂不支持重复执行，请选择单任务进行稳定性测试。';
     return;
   }
-  if (
-    launchMode.value === 'scheduled' &&
-    (repetitions.value !== 1 ||
-      !scheduledAt.value ||
-      !Number.isFinite(new Date(scheduledAt.value).getTime()) ||
-      new Date(scheduledAt.value).getTime() <= Date.now())
-  ) {
-    formError.value = '预约时间必须晚于当前时间，且只支持单次普通测评。';
-    return;
-  }
   const dataset = datasets.value.find((d) => d.id === selectedDataset.value);
   if (!dataset || selectedDatasetVersion.value === null) {
     formError.value = '请选择已发布的测评集及版本。';
@@ -554,21 +561,29 @@ async function submit() {
     datasetVersion: selectedDatasetVersion.value,
     caseIds: scope.value === 'selected' ? [...selectedCaseIds.value] : undefined,
     evaluatorIds: [...selectedEvaluators.value],
-    chosen: evaluators.value.filter((e) => selectedEvaluators.value.includes(e.id)),
-    evaluatorRefs: evaluators.value
-      .filter((e) => selectedEvaluators.value.includes(e.id))
-      .map((e) => ({ evaluator_id: e.id, evaluator_version: e.latest_version! })),
+    chosen: selectedEvaluators.value.flatMap((id) => {
+      const evaluator = evaluators.value.find((e) => e.id === id);
+      return evaluator ? [evaluator] : [];
+    }),
+    evaluatorRefs: selectedEvaluators.value.map((id) => ({
+      evaluator_id: id,
+      evaluator_version: evaluators.value.find((e) => e.id === id)?.latest_version!,
+    })),
     concurrency: concurrency.value,
-    inbankPlatform: inbankPlatformSelected.value,
     timeout: timeout.value,
     retries: retries.value,
     repetitions: repetitions.value,
-    scheduledFor:
-      launchMode.value === 'scheduled' ? new Date(scheduledAt.value).toISOString() : undefined,
     baseline: localTarget ? platform!.target.agentVersion : selectedVersion.value,
     candidate: localTarget ? platformCandidateVersion.value : candidateVersion.value,
     staticReports: includeStatic.value ? [...staticReports.value] : [],
   };
+  const submissionIdentity = [
+    auth.loginMode,
+    auth.teamId,
+    auth.userId,
+    auth.token,
+    auth.platformReady,
+  ];
   submitting.value = true;
   formError.value = '';
   let creating = false;
@@ -713,6 +728,16 @@ async function submit() {
         '检查覆盖范围',
         { confirmButtonText: '继续测评', cancelButtonText: '返回修改' },
       );
+    if (!create.value) return;
+    const currentIdentity = [
+      auth.loginMode,
+      auth.teamId,
+      auth.userId,
+      auth.token,
+      auth.platformReady,
+    ];
+    if (submissionIdentity.some((value, index) => value !== currentIdentity[index]))
+      invalid('登录信息已变化，请重新打开任务配置后提交。');
     creating = true;
     if (localTarget && taskKind.value === 'single') {
       const common = {
@@ -721,7 +746,6 @@ async function submit() {
         case_ids: snapshot.caseIds,
         evaluator_refs: snapshot.evaluatorRefs,
         timeout_seconds: snapshot.timeout,
-        scheduled_for: snapshot.scheduledFor,
       };
       const created = await request<{ id?: string; run_id?: string; run_ids?: string[] }>(
         localTarget.adapter_type === 'local_bank'
@@ -735,6 +759,7 @@ async function submit() {
               ...common,
               name: snapshot.name,
               mode: localTarget.mode,
+              max_parallel_cases: snapshot.concurrency,
               target_descriptor_sha256: localTarget.descriptor.content_sha256,
               repetitions: snapshot.repetitions,
             }
@@ -788,7 +813,7 @@ async function submit() {
           dataset_version: snapshot.datasetVersion,
           ...(caseIds ? { case_ids: caseIds } : {}),
           evaluator_refs: snapshot.evaluatorRefs,
-          ...(snapshot.inbankPlatform ? { max_parallel_cases: snapshot.concurrency } : {}),
+          max_parallel_cases: snapshot.concurrency,
           timeout_seconds: snapshot.timeout,
         },
       });
@@ -839,7 +864,6 @@ async function submit() {
           timeout_seconds: snapshot.timeout,
           max_retries: snapshot.retries,
           repetitions: snapshot.repetitions,
-          ...(snapshot.scheduledFor ? { scheduled_for: snapshot.scheduledFor } : {}),
         },
       });
       const link = platformTaskLink(created, snapshot.repetitions);
@@ -862,10 +886,13 @@ async function submit() {
       '/run-comparisons',
       'POST',
       {
+        max_parallel_cases: snapshot.concurrency,
         baseline_version: snapshot.baseline,
         candidate_version: snapshot.candidate,
         dataset_id: snapshot.datasetId,
         dataset_version: snapshot.datasetVersion,
+        case_ids: snapshot.caseIds,
+        timeout_seconds: snapshot.timeout,
         evaluators: snapshot.chosen.map((e) => ({ id: e.id, version: e.latest_version! })),
       },
     );
@@ -924,6 +951,7 @@ function platformTaskLink(value: unknown, repetitions: number): TaskLink {
 }
 
 watch(taskKind, (kind) => {
+  if (restoringConfiguration.value) return;
   // 平台选择器在单任务与 A/B 间共享，切换模式保留已选目标。
   formError.value = '';
   cancelAnalysis();
@@ -939,20 +967,95 @@ watch(taskKind, (kind) => {
         versionOptions.value.find((v) => v.id !== selectedVersion.value)?.id ?? '';
     repetitions.value = 1;
     scope.value = 'all';
-    launchMode.value = 'now';
-    if (!inbankPlatformSelected.value) concurrency.value = 1;
     if (!platformSelection.value || platformSelection.value.localTarget) timeout.value = 300;
     retries.value = 0;
   }
 });
 onBeforeUnmount(() => {
+  create.value = false;
   formSequence++;
   recommendationSequence++;
   legacySequence++;
+  candidateSequence++;
   cancelAnalysis();
   platformSelection.value = null;
 });
-onMounted(() => void openCreate(props.source));
+async function restoreConfiguration() {
+  const configuration = props.rerun;
+  if (!configuration) return;
+  const manifest = configuration.baseline;
+  taskName.value = configuration.name;
+  taskKind.value = configuration.kind;
+  try {
+    await datasetRequest;
+    if (!create.value) return;
+    scope.value = manifest.selected_case_ids ? 'selected' : 'all';
+    selectedCaseIds.value = [...(manifest.selected_case_ids ?? [])];
+    selectedEvaluators.value = [...manifest.primary_evaluator_ids];
+    evaluators.value = evaluators.value.map((e) => ({
+      ...e,
+      latest_version:
+        manifest.evaluator_specs?.find((spec) => spec.id === e.id)?.version ?? e.latest_version,
+    }));
+    concurrency.value = manifest.max_parallel_cases;
+    timeout.value = manifest.timeout_seconds;
+    retries.value = manifest.max_retries;
+    await nextTick();
+    const target = manifest.target;
+    const inbank = target.adapter_type?.startsWith('inbank_');
+    const local = ['demo_loan', 'local_bank', 'agent_platform_mock'].includes(
+      target.adapter_type ?? '',
+    );
+    if ((inbank && !auth.usesPlatformDirectory) || (local && auth.usesPlatformDirectory))
+      throw Error('原任务与当前登录模式不一致，请切换到原登录模式后重跑。');
+    if (!platformPicker.value) return;
+    await platformPicker.value.restoreSelection({
+      agentId: target.ref.external_target_id,
+      agentVersion: target.ref.external_version_id,
+      branchId:
+        typeof target.invocation_config?.branch_id === 'string'
+          ? target.invocation_config.branch_id
+          : null,
+    });
+    await nextTick();
+    await candidateRequest;
+    if (!create.value) return;
+    if (configuration.kind === 'ab') {
+      const candidate = configuration.candidate?.target.ref.external_version_id;
+      if (!candidate || !platformCandidateVersions.value.some((v) => v.agentVersion === candidate))
+        throw Error('原 A/B 候选版本不可用，请重新选择候选版本。');
+      platformCandidateVersion.value = candidate;
+    }
+    staticReports.value = [...configuration.staticReports];
+    includeStatic.value = staticReports.value.length > 0;
+    if (
+      !datasets.value.some((dataset) => dataset.id === manifest.dataset.dataset_id) ||
+      !datasetVersions.value.some((version) => version.version === manifest.dataset.version)
+    )
+      throw Error('原测评集或版本不可用，请重新选择已发布的测评集和版本。');
+    if (manifest.primary_evaluator_ids.some((id) => !evaluators.value.some((e) => e.id === id)))
+      throw Error('部分原评估器已不可用，请重新选择评估器或采用推荐评估器。');
+  } catch (error) {
+    if (create.value)
+      formError.value = error instanceof Error ? error.message : '读取原任务配置失败，请重试。';
+  } finally {
+    restoringConfiguration.value = false;
+  }
+}
+onMounted(async () => {
+  const original = props.rerun?.baseline;
+  await openCreate(
+    original
+      ? {
+          id: original.dataset.dataset_id,
+          version: original.dataset.version!,
+          caseIds: original.selected_case_ids ? [...original.selected_case_ids] : undefined,
+        }
+      : props.source,
+  );
+  await nextTick();
+  await restoreConfiguration();
+});
 </script>
 <template>
   <el-dialog
@@ -966,7 +1069,12 @@ onMounted(() => void openCreate(props.source));
     top="3vh"
     :close-on-click-modal="false"
   >
-    <p v-if="formLoading || datasetLoading" role="status">正在加载任务配置…</p>
+    <p v-if="formLoading || datasetLoading || restoringConfiguration" role="status">
+      正在加载任务配置…
+    </p>
+    <p v-if="rerun" class="notice">
+      已复制原任务配置，提交后将创建一个新任务。你可以直接运行，也可以修改后运行。
+    </p>
     <p v-if="auth.loginMode === 'external' && targetError" role="alert">{{ targetError }}</p>
 
     <div class="form-section-heading full">
@@ -1004,7 +1112,7 @@ onMounted(() => void openCreate(props.source));
       </button>
     </div>
     <fieldset
-      :disabled="submitting || formLoading || legacyLoading"
+      :disabled="submitting || formLoading || legacyLoading || restoringConfiguration"
       class="form-grid task-create-grid"
     >
       <div class="form-section-heading full">
@@ -1025,23 +1133,25 @@ onMounted(() => void openCreate(props.source));
         @selection-change="receivePlatformSelection"
       />
       <div v-if="taskKind === 'ab'" class="full platform-candidate-row">
-        <label class="field platform-candidate-field"
-          >实验 B · 候选版本<select
+        <div class="platform-candidate-field">
+          <label for="platform-candidate-version">实验 B · 候选版本</label>
+          <ElSelect
+            id="platform-candidate-version"
             v-model="platformCandidateVersion"
-            class="input"
             aria-label="平台候选版本"
+            placeholder="请选择候选版本"
+            no-data-text="暂无可选项"
+            :teleported="false"
             :disabled="!platformSelection || submitting || formLoading"
           >
-            <option value="">请选择候选版本</option>
-            <option
+            <ElOption
               v-for="v in platformCandidateVersions"
               :key="v.agentVersion"
+              :label="`${v.agentVersion}${v.status ? ' · ' + v.status : ''}`"
               :value="v.agentVersion"
-            >
-              {{ v.agentVersion }}{{ v.status ? ' · ' + v.status : '' }}
-            </option>
-          </select></label
-        >
+            />
+          </ElSelect>
+        </div>
         <p class="muted platform-candidate-hint">与基线版本同一目录加载；必须选择不同的版本。</p>
       </div>
       <p v-if="auth.loginMode === 'external' && legacyLoading" class="full" role="status">
@@ -1157,12 +1267,7 @@ onMounted(() => void openCreate(props.source));
           </select></label
         >
         <label class="field"
-          >运行范围<select
-            :disabled="taskKind === 'ab'"
-            class="input"
-            aria-label="运行范围"
-            v-model="scope"
-          >
+          >运行范围<select class="input" aria-label="运行范围" v-model="scope">
             <option value="all">全部用例（{{ availableCases.length }} 条）</option>
             <option value="selected">指定用例</option></select
           ><el-select
@@ -1178,8 +1283,6 @@ onMounted(() => void openCreate(props.source));
               :key="c.id"
               :label="c.name"
               :value="c.id" /></el-select
-          ><small v-if="taskKind === 'ab'"
-            >当前 A/B 接口运行发布版本的全部用例；指定用例需后端扩展。</small
           ><small v-if="scope === 'selected' && !selectedCaseIds.length"
             >请从当前发布版本重新选择用例。</small
           ></label
@@ -1200,39 +1303,45 @@ onMounted(() => void openCreate(props.source));
         @static="openStatic"
         @cancel-analysis="cancelAnalysis"
       />
+      <section v-if="copiedHybridEvaluators.length" class="full" aria-label="复合评估器">
+        <h3>复合评估器</h3>
+        <label v-for="evaluator in copiedHybridEvaluators" :key="evaluator.id" class="field">
+          <span
+            ><input
+              type="checkbox"
+              v-model="selectedEvaluators"
+              :value="evaluator.id"
+              :aria-label="'选择评估器 ' + evaluator.name"
+            />
+            {{ evaluator.name }} · v{{ evaluator.latest_version }}</span
+          >
+        </label>
+      </section>
+      <p v-if="unavailableEvaluatorIds.length" class="notice error full" role="alert">
+        原评估器已停用或不可用：{{ unavailableEvaluatorIds.join('、') }}。
+        <button
+          type="button"
+          class="link"
+          @click="
+            selectedEvaluators = selectedEvaluators.filter(
+              (id) => !unavailableEvaluatorIds.includes(id),
+            );
+            formError = '';
+          "
+        >
+          移除不可用评估器
+        </button>
+      </p>
       <div class="form-section-heading full">
         <span>06</span>
         <div><h3>执行设置</h3></div>
       </div>
       <div class="execution-settings full" aria-label="执行参数">
         <label class="field"
-          >执行时间<select
-            aria-label="执行时间"
-            class="input"
-            v-model="launchMode"
-            :disabled="taskKind === 'ab'"
-          >
-            <option value="now">立即执行</option>
-            <option value="scheduled">预约执行</option></select
-          ><small v-if="repetitions > 1">稳定性测试暂不支持预约。</small></label
-        >
-        <label v-if="launchMode === 'scheduled'" class="field"
-          >预约时间<input
-            aria-label="预约时间"
-            class="input"
-            type="datetime-local"
-            v-model="scheduledAt"
-          /><small
-            >本机时区
-            {{ Intl.DateTimeFormat().resolvedOptions().timeZone }}；到期由调度服务进入队列。</small
-          ></label
-        >
-        <label class="field"
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
-            :disabled="(taskKind === 'ab' && !inbankPlatformSelected) || localBankSelected"
-            title="最多 30 个样本并发"
+            title="1–30 个样本并发，默认 1；同一样本内按轮次顺序执行"
             aria-label="并发样本数"
             type="number"
             min="1"
@@ -1242,7 +1351,6 @@ onMounted(() => void openCreate(props.source));
         <label class="field"
           >执行超时（秒）<input
             class="input"
-            :disabled="taskKind === 'ab' && (!platformSelection || !!platformSelection.localTarget)"
             v-model.number="timeout"
             :title="
               bankTarget || localBankSelected ? '1–300 秒，最大 300 秒' : '1–3600 秒，最大 3600 秒'
@@ -1255,11 +1363,7 @@ onMounted(() => void openCreate(props.source));
         /></label>
       </div>
 
-      <p v-if="taskKind === 'ab'" class="muted full">
-        {{ inbankPlatformSelected
-          ? 'A/B 两侧使用相同并发数，失败重试 0。'
-          : 'A/B 两侧沿用固定执行参数：并发 1，失败重试 0。' }}
-      </p>
+      <p v-if="taskKind === 'ab'" class="muted full">A/B 两侧分别使用所设并发上限，失败重试 0。</p>
     </fieldset>
     <p class="task-summary">
       本次：{{
@@ -1310,6 +1414,7 @@ onMounted(() => void openCreate(props.source));
           class="primary"
           :disabled="
             submitting ||
+            restoringConfiguration ||
             legacyLoading ||
             ((taskKind === 'single' || auth.loginMode !== 'external') && !platformSelection) ||
             (taskKind === 'ab' && !!platformSelection && !platformCandidateVersion) ||
@@ -1383,6 +1488,13 @@ onMounted(() => void openCreate(props.source));
 .platform-candidate-row .platform-candidate-field {
   grid-column: 3;
   grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.platform-candidate-field :deep(.el-select) {
+  width: 100%;
 }
 .platform-candidate-row .platform-candidate-hint {
   grid-column: 1 / 3;
@@ -1467,7 +1579,7 @@ onMounted(() => void openCreate(props.source));
 }
 .execution-settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -1485,16 +1597,6 @@ onMounted(() => void openCreate(props.source));
 }
 .execution-settings small {
   font-size: 11px;
-}
-@media (max-width: 1000px) {
-  .execution-settings {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 650px) {
-  .execution-settings {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 420px) {
   .execution-settings {

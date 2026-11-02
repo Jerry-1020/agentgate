@@ -6,6 +6,9 @@ export interface EvaluationRun {
   id: string;
   status: RunStatus;
   manifest: {
+    timeout_seconds: number;
+    max_parallel_cases: number;
+    max_retries: number;
     selected_case_ids?: string[] | null;
     primary_evaluator_ids: string[];
     evaluator_specs?: {
@@ -14,6 +17,9 @@ export interface EvaluationRun {
       kind: string;
       version: string;
       content_sha256: string;
+      implementation_id?: string;
+      implementation_version?: string;
+      config?: Record<string, unknown>;
       children?: { evaluator_id: string; evaluator_version: string; weight: number | null }[];
       combination?: string | null;
     }[];

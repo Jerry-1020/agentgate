@@ -7,11 +7,11 @@ let server: ViteDevServer;
 let url: string;
 const fixture = `<!doctype html><html><body><div id="app"></div><script type="module">
 import {createApp,h,ref} from 'vue';
-import {agentDirectory} from '/src/api/agent-platform.ts';
+import {agentDirectory,localAgentDirectory} from '/src/api/agent-platform.ts';
 import Picker from '/src/views/evaluation/components/AgentTargetPicker.vue';
 import '/node_modules/element-plus/dist/index.css';
 window.directory=agentDirectory;
-window.callDirectory=async(name,input)=>{try{return {ok:true,value:await agentDirectory[name](input)}}catch(error){return {ok:false,error:{status:error.status,kind:error.kind,message:error.message,properties:Object.keys(error),cause:error.cause}}}};
+window.callDirectory=async(name,input,mode='bank')=>{const directory=mode==='external'?localAgentDirectory:agentDirectory;try{return {ok:true,value:await directory[name](input)}}catch(error){return {ok:false,error:{status:error.status,kind:error.kind,message:error.message,properties:Object.keys(error),cause:error.cause}}}};
 createApp({setup(){const picker=ref(null),token=ref('test-token'),teamId=ref('a');window.readTarget=()=>picker.value?.readSubmissionSelection();window.setAuth=auth=>{token.value=auth.token;teamId.value=auth.teamId;};return()=>h(Picker,{ref:picker,directory:agentDirectory,token:token.value,teamId:teamId.value});}}).mount('#app');
 </script></body></html>`;
 
@@ -104,8 +104,12 @@ const batch = (records: unknown[], total = records.length, current = 1, size = 3
 });
 const reply = (route: Route, value: unknown, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) });
-const call = (page: Page, name: string, input: Record<string, unknown> = { token: 'test-token' }) =>
-  page.evaluate(({ name, input }) => (window as any).callDirectory(name, input), { name, input });
+const call = (
+  page: Page,
+  name: string,
+  input: Record<string, unknown> = { token: 'test-token' },
+  mode: 'bank' | 'external' = 'bank',
+) => page.evaluate(({ name, input, mode }) => (window as any).callDirectory(name, input, mode), { name, input, mode });
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole('combobox', { name: label, exact: true }).press('Enter');
   await page
@@ -332,6 +336,97 @@ test('in-bank base/workflow versions reject blank updatedAt even if agentVersion
   expect(await call(page, 'getAgentVersions', { token: 't', agentId: 'base-1' }))
     .toMatchObject({ ok: false, error: { kind: 'protocol', status: 200 } });
 });
+
+const initializationDefinitions = [
+  {
+    kind: 'base',
+    data: {
+      agent_type: 'tool_agent',
+      agent_config: {
+        prompt_variables: [
+          { key: 'customerId', name: '客户标识', type: 'string', required: true },
+          { key: 'displayName', name: 'user_input', type: 'string' },
+          { key: 'systemCode', name: 'BOT_USER_INPUT', type: 'string', scope: 'system', readonly: true },
+          { key: 'retryCount', name: '重试次数', type: 'number', value: 0 },
+          { key: 'enabled', name: '启用', type: 'boolean', default: false },
+          { key: 'optional' },
+          { key: 'User_Input', type: 'string' },
+          { key: 'BOT_USER_INPUT_EXTRA', type: 'str' },
+          { key: 'user_input', name: '输入问题', type: 'string' },
+          { key: 'BOT_USER_INPUT', name: '用户输入', type: 'string' },
+        ],
+        nodes: [{ type: 'Start', config: { variables: [{ name: 'ignoredWorkflowVariable' }] } }],
+      },
+    },
+    expected: [
+      { name: 'customerId', type: 'str', required: true },
+      { name: 'displayName', type: 'str', required: false },
+      { name: 'systemCode', type: 'str', required: false },
+      { name: 'retryCount', type: 'number', required: false },
+      { name: 'enabled', type: 'boolean', required: false },
+      { name: 'optional', type: 'str', required: false },
+      { name: 'User_Input', type: 'str', required: false },
+      { name: 'BOT_USER_INPUT_EXTRA', type: 'str', required: false },
+    ],
+  },
+  {
+    kind: 'workflow',
+    data: {
+      agent_type: 'workflow',
+      agent_config: {
+        prompt_variables: [{ key: 'ignoredBaseVariable' }],
+        nodes: [
+          { type: 'Task', config: { variables: [{ name: 'ignoredTaskVariable' }] } },
+          { type: 'Start', config: { variables: [
+            { name: 'customerId', key: 'ignoredKey', type: 'str', required: true },
+            { name: 'User_Input', type: 'string', scope: 'system', readonly: true, default: 0 },
+            { name: 'BOT_USER_INPUT_EXTRA', type: 'number', value: 0 },
+            { name: 'optional' },
+            { name: 'user_input', key: 'otherKey', type: 'str' },
+            { name: 'BOT_USER_INPUT', type: 'str' },
+          ] } },
+        ],
+      },
+    },
+    expected: [
+      { name: 'customerId', type: 'str', required: true },
+      { name: 'User_Input', type: 'string', required: false },
+      { name: 'BOT_USER_INPUT_EXTRA', type: 'number', required: false },
+      { name: 'optional', type: 'str', required: false },
+    ],
+  },
+];
+
+for (const mode of ['bank', 'external'] as const) {
+  for (const definition of initializationDefinitions) {
+    test(`${mode} ${definition.kind} initialization definitions preserve identifiers and use the config endpoint`, async ({ page }) => {
+      const requests: {
+        origin: string; path: string; query: Record<string, string>; authorization?: string;
+      }[] = [];
+      await page.route('**/web/agent/getAgentConfigJsonObjectByAgentIdAndVersion?**', async (route) => {
+        const parsed = new URL(route.request().url());
+        requests.push({
+          origin: parsed.origin,
+          path: parsed.pathname,
+          query: Object.fromEntries(parsed.searchParams),
+          authorization: (await route.request().allHeaders()).authorization,
+        });
+        await reply(route, wrap(definition.data));
+      });
+      const token = mode === 'external' ? 'local' : 'bank-initialization-token';
+      const agentId = `${definition.kind} &/+#?`;
+      expect(await call(page, 'getInitializationVariables', {
+        token, agentId, agentVersion: bankVersionOne,
+      }, mode)).toEqual({ ok: true, value: definition.expected });
+      expect(requests).toEqual([{
+        origin: mode === 'external' ? 'http://127.0.0.1:8119' : new URL(url).origin,
+        path: '/web/agent/getAgentConfigJsonObjectByAgentIdAndVersion',
+        query: { agentId, agentVersion: bankVersionOne },
+        authorization: `Bearer ${token}`,
+      }]);
+    });
+  }
+}
 
 test('a failed or inconsistent subsequent page never returns partial success', async ({ page }) => {
   for (const mode of ['http', 'repeated-page', 'changed-total', 'early-empty']) {
@@ -752,9 +847,7 @@ for (const mode of ['bank', 'external'] as const)
       await choose(page, '智能体版本', mode === 'bank' ? bankVersionOne : 'v1');
       if (kind === 'ab') {
         await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-        await page.getByLabel('平台候选版本', { exact: true }).selectOption(
-          mode === 'bank' ? bankVersionTwo : 'v2',
-        );
+        await choose(page, '平台候选版本', mode === 'bank' ? bankVersionTwo : 'v2');
       }
       await page.getByLabel('任务测评集', { exact: true }).selectOption('other');
       await expect(page.getByLabel('任务测评集版本', { exact: true })).toBeEnabled();
@@ -775,27 +868,38 @@ for (const mode of ['bank', 'external'] as const)
       expect(submission.body).toMatchObject({
         dataset_id: 'other', dataset_version: 1, timeout_seconds: 1200,
       });
+      expect(submission.body).not.toHaveProperty('scheduled_for');
       expect(submission.headers['x-agent-platform-token']).toBe(mode === 'bank' ? 'form-secret' : 'local');
     });
 
-for (const mode of ['bank', 'external'] as const)
-  test(`${mode} execution settings hide repetition and retry controls without empty layout cells`, async ({ page }) => {
+for (const [mode, kind] of [
+  ['bank', 'single'], ['external', 'single'], ['bank', 'ab'], ['external', 'ab'],
+] as const)
+  test(`${mode} ${kind} execution settings hide scheduling, repetition and retry controls without empty layout cells`, async ({ page }) => {
     await openForm(page, false, sampleCases, mode);
+    if (kind === 'ab') await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
     const settings = page.getByLabel('执行参数', { exact: true });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      await expect(settings.locator(':scope > .field')).toHaveCount(3);
-      await expect(settings.getByLabel('执行时间', { exact: true })).toBeVisible();
+      await expect(settings.locator(':scope > .field')).toHaveCount(2);
+      await expect(settings.getByLabel('执行时间', { exact: true })).toHaveCount(0);
+      await expect(settings.getByLabel('预约时间', { exact: true })).toHaveCount(0);
       await expect(settings.getByLabel('并发样本数', { exact: true })).toBeVisible();
       await expect(settings.getByLabel('执行超时（秒）', { exact: true })).toBeVisible();
       await expect(settings.getByText('稳定性测试', { exact: true })).toHaveCount(0);
       await expect(settings.getByText('失败重试次数', { exact: true })).toHaveCount(0);
+      const { panel, concurrency, timeout } = await settings.evaluate((element) => ({
+        panel: element.getBoundingClientRect().toJSON(),
+        concurrency: element.querySelector('[aria-label="并发样本数"]')!.getBoundingClientRect().toJSON(),
+        timeout: element.querySelector('[aria-label="执行超时（秒）"]')!.getBoundingClientRect().toJSON(),
+      }));
+      expect(concurrency.width).toBeGreaterThan(panel.width * (width > 420 ? 0.45 : 0.9));
+      if (width > 420) expect(Math.abs(concurrency.y - timeout.y)).toBeLessThan(1);
+      else expect(timeout.y).toBeGreaterThan(concurrency.y + concurrency.height);
+      await test.info().attach(`execution-settings-${mode}-${kind}-${width}`, {
+        body: await settings.screenshot(), contentType: 'image/png',
+      });
     }
-    await settings.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
-    await expect(settings.getByLabel('预约时间', { exact: true })).toBeVisible();
-    await expect(settings.locator(':scope > .field')).toHaveCount(4);
-    await settings.getByLabel('执行时间', { exact: true }).selectOption('now');
-    await expect(settings.locator(':scope > .field')).toHaveCount(3);
   });
 
 for (const mode of ['bank', 'integrated'] as const)
@@ -1092,7 +1196,7 @@ test('switching external A/B to in-bank discards late demo catalogs and requires
   expect(requests.some((r) => r.path === '/api/run-comparisons')).toBe(false);
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '实验 A · 基线版本', bankVersionOne);
-  await page.getByLabel('平台候选版本', { exact: true }).selectOption(bankVersionTwo);
+  await choose(page, '平台候选版本', bankVersionTwo);
   await create.click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   expect(
@@ -1144,15 +1248,53 @@ test('form submits workflow target and selected source cases with isolated token
   ).toEqual({ updates: 1, storage: '{}' });
 });
 
+for (const mode of ['bank', 'external'] as const)
+  test(`${mode} A/B version selectors share the project select styling`, async ({ page }) => {
+    await openForm(page, false, sampleCases, mode);
+    await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
+    await expect(page.locator('.platform-candidate-field .el-select__wrapper')).toHaveClass(/is-disabled/);
+    await page.locator('.target-field').filter({ hasText: '选择智能体' }).locator('.el-select__wrapper').click();
+    await page.getByRole('option', { name: '工作流', exact: true }).click();
+    await choose(page, '实验 A · 基线版本', mode === 'bank' ? bankVersionOne : 'v1');
+    await page.getByRole('heading', { name: '测评对象', exact: true }).click();
+    const baseline = page.locator('.target-field').filter({ hasText: '实验 A · 基线版本' });
+    const candidate = page.locator('.platform-candidate-field');
+    await expect(candidate.locator('select')).toHaveCount(0);
+    await expect(candidate.locator('.el-select')).toHaveCount(1);
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 1100 });
+      await page.getByRole('heading', { name: '测评对象', exact: true }).click();
+      const appearance = (element: Element) => {
+        const style = getComputedStyle(element);
+        return {
+          height: style.height,
+          borderRadius: style.borderRadius,
+          backgroundColor: style.backgroundColor,
+          boxShadow: style.boxShadow,
+        };
+      };
+      await expect(async () => {
+        const baselineAppearance = await baseline.locator('.el-select__wrapper').evaluate(appearance);
+        const candidateAppearance = await candidate.locator('.el-select__wrapper').evaluate(appearance);
+        expect(candidateAppearance).toEqual(baselineAppearance);
+      }).toPass({ timeout: 5000 });
+      const fieldBox = await candidate.boundingBox();
+      const selectBox = await candidate.locator('.el-select').boundingBox();
+      expect(Math.abs(fieldBox!.width - selectBox!.width)).toBeLessThan(1);
+    }
+    await choose(page, '平台候选版本', mode === 'bank' ? bankVersionTwo : 'v2');
+    await expect(page.getByRole('button', { name: '创建 A/B试验', exact: true })).toBeEnabled();
+  });
+
 test('platform A/B submits both versions to the comparison endpoint', async ({
   page,
 }, testInfo) => {
   const requests = await openForm(page);
   await selectFormTarget(page);
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-  const candidate = page.getByLabel('平台候选版本', { exact: true });
+  const candidate = page.getByRole('combobox', { name: '平台候选版本', exact: true });
   await expect(candidate).toBeEnabled();
-  await candidate.selectOption(bankVersionTwo);
+  await choose(page, '平台候选版本', bankVersionTwo);
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page
     .locator('.task-create-dialog')
@@ -1199,8 +1341,7 @@ for (const mode of ['bank', 'external'] as const)
       }
       if (kind === 'ab') {
         await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-        await page.getByLabel('平台候选版本', { exact: true })
-          .selectOption(mode === 'bank' ? bankVersionTwo : 'v2');
+        await choose(page, '平台候选版本', mode === 'bank' ? bankVersionTwo : 'v2');
       }
       let bulkReads = 0;
       await page.route('**/api/evaluation-tasks', (route) => {
@@ -1246,7 +1387,7 @@ test('A/B task refresh failure still emits creation without submitting twice', a
   const requests = await openForm(page);
   await selectFormTarget(page);
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-  await page.getByLabel('平台候选版本', { exact: true }).selectOption(bankVersionTwo);
+  await choose(page, '平台候选版本', bankVersionTwo);
   await page.route('**/api/evaluation-tasks/ab-a', (route) =>
     reply(route, { detail: 'form-secret' }, 500),
   );
@@ -1266,11 +1407,11 @@ test('platform A/B requires a different candidate version before creating', asyn
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
   const create = page.getByRole('button', { name: '创建 A/B试验', exact: true });
   await expect(create).toBeDisabled();
-  const candidate = page.getByLabel('平台候选版本', { exact: true });
+  const candidate = page.getByRole('combobox', { name: '平台候选版本', exact: true });
   await expect(candidate).toBeEnabled();
-  await candidate.selectOption(bankVersionOne);
+  await choose(page, '平台候选版本', bankVersionOne);
   await expect(create).toBeDisabled();
-  await candidate.selectOption(bankVersionTwo);
+  await choose(page, '平台候选版本', bankVersionTwo);
   await expect(create).toBeEnabled();
 });
 
@@ -1302,9 +1443,8 @@ for (const [mode, target, kind] of [
       await expect(concurrencyInput).toHaveValue('4');
       if (kind === 'ab') {
         await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-        await page.getByLabel('平台候选版本', { exact: true })
-          .selectOption(target === 'claw' ? 'v3' : bankVersionTwo);
-        await expect(page.getByText('A/B 两侧使用相同并发数，失败重试 0。')).toBeVisible();
+        await choose(page, '平台候选版本', target === 'claw' ? 'v3' : bankVersionTwo);
+        await expect(page.getByText('A/B 两侧分别使用所设并发上限，失败重试 0。')).toBeVisible();
         await expect(concurrencyInput).toBeEnabled();
         await expect(concurrencyInput).toHaveValue('4');
         await concurrencyInput.fill('5');
@@ -1319,6 +1459,7 @@ for (const [mode, target, kind] of [
         ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
       const submission = requests.find((request) => request.path === endpoint)!;
       expect(submission.body.max_parallel_cases).toBe(kind === 'ab' ? 5 : 4);
+      expect(submission.body).not.toHaveProperty('scheduled_for');
       const token = mode === 'integrated' ? 'integrated-secret' : 'form-secret';
       expect(submission.headers['x-agent-platform-token']).toBe(token);
       expect(submission.body.target).toEqual({
@@ -1345,7 +1486,7 @@ for (const invalid of ['0', '31', '1.5'])
     const requests = await openForm(page);
     await selectFormTarget(page);
     await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-    await page.getByLabel('平台候选版本', { exact: true }).selectOption(bankVersionTwo);
+    await choose(page, '平台候选版本', bankVersionTwo);
     await page.getByLabel('并发样本数', { exact: true }).fill(invalid);
     await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: '并发样本数必须为 1—30 的整数' }))
@@ -1353,7 +1494,7 @@ for (const invalid of ['0', '31', '1.5'])
     expect(requests.some((request) => request.path === '/api/agent-platform/comparisons')).toBe(false);
   });
 
-test('switching from bank A/B to external restores its fixed concurrency', async ({ page }) => {
+test('switching from bank A/B to external retains editable concurrency', async ({ page }) => {
   const requests = await openForm(page);
   await selectFormTarget(page);
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
@@ -1362,18 +1503,19 @@ test('switching from bank A/B to external restores its fixed concurrency', async
   await useExternalMode(page);
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '实验 A · 基线版本', 'v1');
-  await page.getByLabel('平台候选版本', { exact: true }).selectOption('v2');
-  await expect(concurrencyInput).toHaveValue('1');
-  await expect(concurrencyInput).toBeDisabled();
+  await choose(page, '平台候选版本', 'v2');
+  await expect(concurrencyInput).toHaveValue('5');
+  await expect(concurrencyInput).toBeEnabled();
   await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
   const submission = requests.find((request) => request.path === '/api/agent-platform/comparisons')!;
-  expect(submission.body).not.toHaveProperty('max_parallel_cases');
+  expect(submission.body.max_parallel_cases).toBe(5);
   expect(submission.headers['x-agent-platform-token']).toBe('local');
 });
 
-for (const kind of ['single', 'ab'] as const)
-  test(`external platform ${kind} retains its existing concurrency and token routing`, async ({ page }) => {
+for (const target of ['workflow', 'base', 'claw'] as const)
+  for (const kind of ['single', 'ab'] as const)
+  test(`external ${target} ${kind} submits editable concurrency and retains token routing`, async ({ page }) => {
     const requests = await openForm(page);
     await useExternalMode(page);
     const directoryRequests: { origin: string; authorization?: string }[] = [];
@@ -1382,17 +1524,20 @@ for (const kind of ['single', 'ab'] as const)
       if (location.pathname.startsWith('/web/'))
         directoryRequests.push({ origin: location.origin, authorization: request.headers().authorization });
     });
-    await choose(page, '选择智能体', '工作流 · workflow');
-    await choose(page, '智能体版本', 'v1');
+    await choose(page, '选择智能体', {
+      workflow: '工作流 · workflow', base: '基础编排 · base', claw: '云虾 · claw',
+    }[target]);
+    if (target === 'claw') await choose(page, '分支地址', '分支 · branch/raw');
+    await choose(page, '智能体版本', target === 'claw' ? 'v2' : 'v1');
     const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
     await expect(concurrencyInput).toBeVisible();
     await concurrencyInput.fill('4');
     if (kind === 'ab') {
       await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-      await page.getByLabel('平台候选版本', { exact: true }).selectOption('v2');
-      await expect(concurrencyInput).toHaveValue('1');
-      await expect(concurrencyInput).toBeDisabled();
-      await expect(page.getByText('A/B 两侧沿用固定执行参数：并发 1，失败重试 0。')).toBeVisible();
+      await choose(page, '平台候选版本', target === 'claw' ? 'v3' : 'v2');
+      await expect(concurrencyInput).toHaveValue('4');
+      await expect(concurrencyInput).toBeEnabled();
+      await expect(page.getByText('A/B 两侧分别使用所设并发上限，失败重试 0。')).toBeVisible();
     }
     await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
     await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
@@ -1403,7 +1548,8 @@ for (const kind of ['single', 'ab'] as const)
     const endpoint = kind === 'ab'
       ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
     const submission = requests.find((request) => request.path === endpoint)!;
-    if (kind === 'ab') expect(submission.body).not.toHaveProperty('max_parallel_cases');
+    expect(submission.body).not.toHaveProperty('scheduled_for');
+    if (kind === 'ab') expect(submission.body.max_parallel_cases).toBe(4);
     else {
       expect(submission.body.max_parallel_cases).toBe(4);
       expect(submission.body.repetitions).toBe(1);
@@ -1542,10 +1688,12 @@ test('external A/B keeps legacy endpoint and association, returning to single re
   const requests = await openForm(page, false, sampleCases, 'external');
   // 不预选平台目标：内置 Demo 的 A/B 走 legacy 端点；预选平台目标会切换到平台 A/B 分支。
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-  await expect(page.getByLabel('执行超时（秒）', { exact: true })).toBeDisabled();
   await expect(page.getByRole('button', { name: '创建 A/B试验', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Skill 静态分析', exact: true })).toHaveCount(0);
-  await expect(page.getByLabel('并发样本数', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('并发样本数', { exact: true })).toBeEnabled();
+  await page.getByLabel('并发样本数', { exact: true }).fill('6');
+  await expect(page.getByLabel('执行超时（秒）', { exact: true })).toBeEnabled();
+  await page.getByLabel('执行超时（秒）', { exact: true }).fill('222');
   await expect(page.getByLabel('稳定性测试', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('失败重试次数', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '创建 A/B试验', exact: true }).click();
@@ -1555,6 +1703,8 @@ test('external A/B keeps legacy endpoint and association, returning to single re
     candidate_version: 'old-2',
     dataset_id: 'dataset',
     dataset_version: 2,
+    timeout_seconds: 222,
+    max_parallel_cases: 6,
     evaluators: [{ id: 'judge', version: '1' }],
   });
   expect(requests.some((r) => r.method === 'PUT' && r.path === '/api/evaluation-tasks/a')).toBe(
@@ -1591,19 +1741,15 @@ test('late external A/B catalogs cannot change the single task dataset or execut
   await expect(page.getByLabel('任务测评集', { exact: true })).toHaveValue('dataset');
 });
 
-test('external scheduled execution sends UTC and rejects invalid numeric limits before creating', async ({
+test('external immediate execution omits scheduling and rejects invalid numeric limits before creating', async ({
   page,
 }) => {
   const requests = await openForm(page);
   await useExternalMode(page);
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '智能体版本', 'v1');
-  await page.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
-  const date = new Date(Date.now() + 86400000);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-  await page.getByLabel('预约时间', { exact: true }).fill(local);
+  await expect(page.getByLabel('执行时间', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('预约时间', { exact: true })).toHaveCount(0);
   await page.getByLabel('并发样本数', { exact: true }).fill('31');
   await start(page).click();
   await expect(page.getByRole('alert').filter({ hasText: '并发样本数必须为' })).toBeVisible();
@@ -1611,9 +1757,8 @@ test('external scheduled execution sends UTC and rejects invalid numeric limits 
   await page.getByLabel('并发样本数', { exact: true }).fill('3');
   await start(page).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
-  expect(
-    requests.find((r) => r.path === '/api/agent-platform/evaluations')?.body.scheduled_for,
-  ).toBe(new Date(local).toISOString());
+  expect(requests.find((r) => r.path === '/api/agent-platform/evaluations')?.body)
+    .not.toHaveProperty('scheduled_for');
 });
 
 test('cancelling uncovered-case confirmation releases the lock without a creation request', async ({

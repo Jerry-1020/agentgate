@@ -66,7 +66,7 @@ class PlatformEvaluationInput(BaseModel):
     evaluator_ids: list[Identifier] | None = Field(default=None, min_length=1, strict=True)
     evaluator_refs: list[EvaluatorRef] | None = Field(default=None, min_length=1, strict=True)
     case_ids: list[Identifier] | None = Field(default=None, min_length=1, strict=True)
-    max_parallel_cases: int = Field(strict=True, ge=1, le=30)
+    max_parallel_cases: int = Field(default=1, strict=True, ge=1, le=30)
     timeout_seconds: int = Field(strict=True, ge=1, le=3600)
     max_retries: int = Field(strict=True, ge=0, le=5)
     repetitions: int = Field(strict=True, ge=1, le=20)

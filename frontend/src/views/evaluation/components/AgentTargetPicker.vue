@@ -107,6 +107,7 @@ type ListKey = 'agent' | 'branch' | 'version';
 type LoadState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
 const prefix = `agent-target-${getCurrentInstance()!.uid}`;
 const selected = reactive({ agent: '', branch: '', version: '' });
+const restoring = ref(false);
 const agents = ref<readonly PlatformAgent[]>([]);
 const branches = ref<readonly (PlatformBranch & { depth: number })[]>([]);
 const versions = ref<readonly PlatformVersion[]>([]);
@@ -182,7 +183,12 @@ function clearAfter(key: ListKey) {
   if (key !== 'version') clearList('version');
 }
 function selectField(key: ListKey, value: string) {
-  if (props.disabled || fields.value.find((field) => field.key === key)?.disabled) return;
+  if (
+    props.disabled ||
+    restoring.value ||
+    fields.value.find((field) => field.key === key)?.disabled
+  )
+    return;
   if (selected[key] === value) return;
   clearAfter(key);
   selected[key] = value;
@@ -316,7 +322,47 @@ function readSubmissionSelection(): { target: AgentTargetSelection; token: strin
     ? { target: { ...selection.value }, token: props.token }
     : null;
 }
-defineExpose({ readSubmissionSelection });
+async function restoreSelection(target: {
+  agentId: string;
+  agentVersion: string;
+  branchId?: string | null;
+}) {
+  reset();
+  const ticket = session;
+  restoring.value = true;
+  const ensureCurrent = () => {
+    if (disposed || ticket !== session) throw Error('登录信息已变化，请重新打开任务配置。');
+  };
+  try {
+    await loadAgents();
+    ensureCurrent();
+    if (states.agent !== 'ready' || !agents.value.some((item) => item.agentId === target.agentId))
+      throw Error('原智能体在当前目录中不可用，请重新选择智能体。');
+    selected.agent = target.agentId;
+    if (requiresBranch.value) {
+      await loadBranches();
+      ensureCurrent();
+      if (
+        states.branch !== 'ready' ||
+        !branches.value.some((item) => item.branchId === target.branchId)
+      )
+        throw Error('原智能体分支不可用，请重新选择分支和版本。');
+      selected.branch = target.branchId!;
+    }
+    await loadVersions();
+    ensureCurrent();
+    if (
+      states.version !== 'ready' ||
+      !versions.value.some((item) => item.agentVersion === target.agentVersion)
+    )
+      throw Error('原智能体版本不可用，请重新选择版本。');
+    selected.version = target.agentVersion;
+    return selection.value;
+  } finally {
+    restoring.value = false;
+  }
+}
+defineExpose({ readSubmissionSelection, restoreSelection });
 function reset() {
   session++;
   clearList('agent');
@@ -346,7 +392,7 @@ onBeforeUnmount(() => {
           :aria-disabled="disabled || field.disabled ? true : undefined"
           :aria-expanded="disabled || field.disabled ? false : undefined"
           :placeholder="field.placeholder"
-          :disabled="disabled || field.disabled"
+          :disabled="disabled || restoring || field.disabled"
           :loading="states[field.key] === 'loading'"
           loading-text="正在加载…"
           no-data-text="暂无可选项"

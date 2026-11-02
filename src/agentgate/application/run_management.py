@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from agentgate.domain import (
     EvaluationRun,
@@ -18,18 +18,17 @@ from agentgate.domain import (
     transition_run,
     utcnow,
 )
+from agentgate.domain.run import RunTiming
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.run.engine import RunEngine, TraceResolver
-from agentgate.run.retry import retry_delay_seconds
 from agentgate.run.target_protocol import TargetAdapterProtocol
 from agentgate.server.user_context import get_user_info
 from agentgate.storage.repository import AgentGateRepository
 
 from .dataset_management import DatasetManagement
 from .evaluator_management import EvaluatorManagement
-from .run_scheduling import MAX_CONCURRENT_RUNS_PER_API_KEY, MAX_DISPATCH_ATTEMPTS
+from .run_scheduling import MAX_CONCURRENT_RUNS_PER_TEAM, MAX_DISPATCH_ATTEMPTS, RunScheduling
 from .target_catalog import TargetCatalog
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +65,9 @@ class RunManagement:
         api_key: str | None = None,
     ) -> EvaluationRun:
         """Resolve exact inputs and persist a pending or scheduled Run."""
+
+        if type(max_parallel_cases) is not int or not 1 <= max_parallel_cases <= 30:
+            raise ValueError("max_parallel_cases must be an integer from 1 to 30")
 
         self.target_catalog.resolve_descriptor(
             target.ref,
@@ -119,6 +121,7 @@ class RunManagement:
                 else RunStatus.PENDING
             ),
             created_at=created_at,
+            timing=RunTiming(pending_started_at=created_at if normalized_schedule is None else None),
             scheduled_for=normalized_schedule,
             user_team_id=user_team_id,
             user_id=user_id,
@@ -160,6 +163,7 @@ class RunManagement:
             )
 
         rerun = EvaluationRun(
+            timing=RunTiming(pending_started_at=utcnow()),
             manifest=source.manifest,
             user_team_id=source.user_team_id,
             user_id=source.user_id,
@@ -203,14 +207,13 @@ class RunManagement:
         if run.status is not RunStatus.PENDING:
             raise ValueError("only a pending EvaluationRun can be dispatched")
 
-        active = self.repository.count_active_runs_by_api_key(run.api_key)
-        if active > MAX_CONCURRENT_RUNS_PER_API_KEY:
+        active = self.repository.count_active_runs_by_team(run.user_team_id)
+        if active > MAX_CONCURRENT_RUNS_PER_TEAM:
             waiting = transition_run(run, RunStatus.WAITING)
             self.repository.save_run(waiting)
-            key_display = "None" if run.api_key is None else "***"
             LOGGER.warning(
-                "Run throttled to waiting: run_id=%s active_count=%d max=%d api_key=%s",
-                run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY, key_display,
+                "Run throttled to waiting: run_id=%s active_count=%d max=%d user_team_id=%r",
+                run.id, active, MAX_CONCURRENT_RUNS_PER_TEAM, run.user_team_id,
             )
             return waiting
 
@@ -245,7 +248,7 @@ class RunManagement:
             raise RuntimeError("Run dispatch failed") from exc
         LOGGER.info(
             "Run dispatched: run_id=%s active_count=%d max=%d",
-            run.id, active, MAX_CONCURRENT_RUNS_PER_API_KEY,
+            run.id, active, MAX_CONCURRENT_RUNS_PER_TEAM,
         )
         return run
 
@@ -303,46 +306,8 @@ class RunManagement:
         now: datetime | None = None,
         grace_seconds: float = 30,
     ) -> list[EvaluationRun]:
-        """Fail running Runs whose execution recovery deadline has expired."""
+        """Recover pending and running Runs whose deadlines have expired."""
 
-        if grace_seconds < 0:
-            raise ValueError("grace_seconds must not be negative")
-        current_time = normalize_utc(now or utcnow(), "stale Run check time")
-        failed_runs: list[EvaluationRun] = []
-        for run in self.repository.list_runs_by_status(RunStatus.RUNNING):
-            case_count = len(run.manifest.execution_cases)
-            batch_count = (
-                case_count + run.manifest.max_parallel_cases - 1
-            ) // run.manifest.max_parallel_cases
-            retry_delay_budget = sum(
-                retry_delay_seconds(retry_number)
-                for retry_number in range(1, run.manifest.max_retries + 1)
-            )
-            execution_seconds = (
-                run.manifest.timeout_seconds * batch_count
-                + case_count
-                * (
-                    run.manifest.timeout_seconds * run.manifest.max_retries
-                    + retry_delay_budget
-                )
-            )
-            deadline = run.started_at + timedelta(
-                seconds=execution_seconds + grace_seconds
-            )
-            if deadline > current_time:
-                continue
-            failed = transition_run(
-                run,
-                RunStatus.FAILED,
-                occurred_at=current_time,
-                error="Execution worker exceeded its recovery deadline",
-            )
-            try:
-                self.repository.save_run(failed)
-            except ValueError:
-                current = self.repository.get_run(run.id)
-                if current is None or current.status is RunStatus.RUNNING:
-                    raise
-                continue
-            failed_runs.append(failed)
-        return failed_runs
+        return RunScheduling(self.repository).recover_stale_runs(
+            now=now, grace_seconds=grace_seconds
+        )

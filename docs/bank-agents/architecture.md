@@ -58,3 +58,13 @@
 目标描述包含模型名、提示词、工具 Schema、Skill 和实现源码摘要。任务固化描述摘要；实现变化后旧任务重跑可能被拒绝，应创建新任务，不能替换旧结果的版本来源。
 
 本包没有提供客户完整内部源码、提示词和业务规则，不能据此宣称已经与行内生产系统完全一致。
+
+## Case concurrency — 2026-10-31
+
+AgentGate accepts max_parallel_cases as an integer 1–30, default 1, for new local
+loan evaluations. LocalBankAdapter schedules independent Cases in a bounded thread
+pool; the runtime still processes Turns sequentially per session. Every Case receives
+a fresh session, and every Turn has a distinct request/SDK Trace binding. This setting
+is owned by the evaluation platform, not advertised as a hard runtime capability.
+The runtime, business rules, SDK and directory/token separation are unchanged. Cancellation
+stops subsequent Turns; adapter cleanup waits for in-flight HTTP work to finish.

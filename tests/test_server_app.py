@@ -7,8 +7,7 @@ from agentgate.demo.loan import LOAN_DATASET
 from agentgate.domain import FrozenJsonObject
 from agentgate.evaluator.judge import JudgeRequest, JudgeResponse
 from agentgate.integrations.model_providers.environment import ConfiguredJudgeModel
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.server.app import create_app
 from agentgate.server.dependencies import ServerDependencies, build_dependencies
 
@@ -227,15 +226,15 @@ def test_application_factory_supports_async_demo_workflow(tmp_path) -> None:
         run_id = launched.json()["data"]["run_id"]
         queued = client.get(f"/api/runs/{run_id}/status")
 
-        capture = InMemoryTraceCapture()
+        adapter = DemoLoanTargetAdapter()
         try:
             application.state.dependencies.runs.execute_run(
                 run_id,
-                DemoLoanTargetAdapter(capture),
-                capture.resolve,
+                adapter,
+                resolve_demo_trace,
             )
         finally:
-            capture.shutdown()
+            adapter.close()
 
         stored_trace = application.state.dependencies.repository.get_trace(
             run_id, "high-risk-approval"

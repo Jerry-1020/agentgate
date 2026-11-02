@@ -321,8 +321,8 @@ def test_inbank_parallelism_changes_only_new_task_manifests(comparison, monkeypa
             assert stored.manifest.manifest_sha256 == old_run.manifest.manifest_sha256
 
 
-@pytest.mark.parametrize("requested_parallelism", [None, 2])
-def test_mock_ab_keeps_serial_manifests_regardless_of_call_parallelism(
+@pytest.mark.parametrize("requested_parallelism", [None, 2, 30])
+def test_mock_ab_pins_requested_parallelism_on_both_manifests(
     requested_parallelism, mock_peer, monkeypatch, tmp_path
 ):
     origin, _ = mock_peer
@@ -338,7 +338,7 @@ def test_mock_ab_keeps_serial_manifests_regardless_of_call_parallelism(
             arguments["max_parallel_cases"] = requested_parallelism
         runs = submit_platform_comparison(**arguments)
         assert dispatcher.ids == [run.id for run in runs]
-        assert all(deps.repository.get_run(run.id).manifest.max_parallel_cases == 1 for run in runs)
+        assert all(deps.repository.get_run(run.id).manifest.max_parallel_cases == (requested_parallelism or 1) for run in runs)
     finally:
         deps.close()
 
@@ -640,4 +640,62 @@ def test_platform_comparison_persists_user_task_name(
         assert client.get("/api/evaluation-tasks/" + task_id).json()["data"]["name"] == body["name"]
         for side in ("baseline", "candidate"):
             run_id = response.json()["data"][side]["run_id"]
-            assert deps.repository.get_run(run_id).manifest.max_parallel_cases == 1
+            assert deps.repository.get_run(run_id).manifest.max_parallel_cases == (requested_parallelism or 1)
+
+
+@pytest.mark.parametrize('mode', ['base', 'workflow', 'claw'])
+def test_worker_parallel_http_sessions_have_independent_outputs_and_cleanup(
+    mode, mock_peer, monkeypatch, tmp_path,
+):
+    from threading import Barrier, Lock
+    origin, peer = mock_peer
+    monkeypatch.setenv('AGENTGATE_AGENT_PLATFORM_MODE', 'mock')
+    monkeypatch.setenv('AGENTGATE_AGENT_PLATFORM_ORIGIN', origin)
+    import base64
+    monkeypatch.setenv('AGENTGATE_API_KEY_ENCRYPTION_KEY', base64.urlsafe_b64encode(b'k' * 32).decode())
+    gate, lock = Barrier(2), Lock()
+    original_call = PlatformClient.call
+    active = peak = 0
+    def call(self, path, token, **kwargs):
+        nonlocal active, peak
+        payload = kwargs.get('payload') or {}
+        text = payload.get('txt') or payload.get('data', {}).get('txt', '')
+        if not text.endswith('-0'):
+            return original_call(self, path, token, **kwargs)
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            gate.wait(5)
+            return original_call(self, path, token, **kwargs)
+        finally:
+            with lock:
+                active -= 1
+    monkeypatch.setattr(PlatformClient, 'call', call)
+    app = create_app(tmp_path / 'overlap.db', RecordingDispatcher(), ApiKeyEncryptor(b'k' * 32))
+    with TestClient(app) as client:
+        deps = app.state.dependencies
+        dataset = deps.datasets.create_dataset('independent sessions')
+        deps.datasets.create_draft(dataset.id)
+        for index in range(4):
+            deps.datasets.save_case(dataset.id, Case(id=f'case-{index}', name=f'case-{index}', turns=[
+                CaseTurn(input={'txt': f'case-{index}-{turn}'}, expectations=[{
+                    'kind': 'output', 'path': 'output',
+                    'condition': {'kind': 'matches_pattern', 'pattern': f'.*case-{index}-{turn}.*'},
+                }]) for turn in range(2)
+            ]))
+        deps.datasets.publish_draft(dataset.id)
+        response = client.post('/api/agent-platform/evaluations', json=submission(dataset.id, mode),
+                               headers={'X-Agent-Platform-Token': 'test-private-token'})
+        assert response.status_code == 202, response.text
+        run_id = response.json()['data']['run_ids'][0]
+        assert _execute(deps.repository, run_id) == 'completed'
+        assert peak == 2
+        traces = deps.repository.list_traces(run_id)
+        assert len(traces) == len({trace.trace_id for trace in traces}) == 4
+        for trace in traces:
+            assert trace.final_output['output'].endswith(trace.case_id + '-1')
+        assert len(deps.repository.list_results(run_id)) == 4
+        assert all(result.outcome.value == 'pass' for result in deps.repository.list_results(run_id))
+        assert peer.state.instances == {}
+        assert len([e for e in peer.state.events if e['operation'] == 'delete']) == 4

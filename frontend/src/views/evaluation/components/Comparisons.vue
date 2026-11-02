@@ -9,7 +9,6 @@ import {
   request,
   score,
   statusLabel,
-  metricLabel,
   type Report,
   type EvaluationRun,
   type Comparison,
@@ -19,6 +18,7 @@ import {
   reportComparisonIssues,
   comparisonErrorMessage,
 } from '../utils/comparison-compatibility';
+import { comparisonScoreGroups } from '../utils/task-report';
 
 const props = defineProps<{ initialPair?: { a: string; b: string }; embedded?: boolean }>();
 const emit = defineEmits<{ status: [statuses: Record<string, string>] }>();
@@ -125,10 +125,14 @@ const snapshotLoading = ref(false),
   error = ref('');
 const result = ref<Comparison | null>(null),
   showDiff = ref(false);
+const expandedScores = ref({ llm: false, rule: false });
 let snapshotTicket = 0,
   comparisonTicket = 0;
 const a = computed(() => snapshots.value[baseline.value]),
   b = computed(() => snapshots.value[candidate.value]);
+const scoreGroups = computed(() =>
+  result.value && a.value && b.value ? comparisonScoreGroups(result.value, a.value, b.value) : [],
+);
 const issues = computed(() => (a.value && b.value ? reportComparisonIssues(a.value, b.value) : []));
 const canCompare = computed(
   () =>
@@ -151,6 +155,7 @@ async function loadSnapshots() {
   error.value = '';
   snapshotError.value = '';
   showDiff.value = false;
+  expandedScores.value = { llm: false, rule: false };
   snapshotLoading.value = mode.value === 'history' && !!(baseline.value || candidate.value);
   if (mode.value !== 'history') return;
   const ids = [...new Set([baseline.value, candidate.value].filter(Boolean))];
@@ -213,13 +218,6 @@ onUnmounted(() => {
   clearTimeout(pairTimer);
   document.removeEventListener('visibilitychange', visibilityChanged);
 });
-const templateLabels1: Record<string, string> = {
-  overall: '整体',
-  kind: '评估类型',
-  dimension: '维度',
-  metric: '指标',
-  evaluator: '评估器',
-};
 const templateLabels2: Record<string, string> = {
   unchanged: '不变',
   improvement: '改善',
@@ -372,7 +370,7 @@ const templateLabels2: Record<string, string> = {
         </div>
         <h3 class="section-title">指标对比</h3>
         <div class="table-wrap">
-          <table class="data-table">
+          <table class="data-table" aria-label="指标对比">
             <thead>
               <tr>
                 <th>指标</th>
@@ -381,30 +379,54 @@ const templateLabels2: Record<string, string> = {
                 <th>分数差（B − A）</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="m in result.metric_deltas" :key="m.level + m.key">
+            <tbody v-for="group in scoreGroups" :key="group.key">
+              <tr class="score-summary">
                 <td>
-                  {{ metricLabel(m.key) }}
-                  <div class="muted">{{ templateLabels1[m.level] ?? m.level }}</div>
+                  <div class="score-label">
+                    <button
+                      v-if="group.key !== 'overall'"
+                      type="button"
+                      class="score-toggle"
+                      :disabled="!group.children.length"
+                      :aria-expanded="expandedScores[group.key]"
+                      :aria-label="
+                        (expandedScores[group.key] ? '收起' : '展开') + group.name + '明细'
+                      "
+                      @click="expandedScores[group.key] = !expandedScores[group.key]"
+                    >
+                      <span class="disclosure-triangle" aria-hidden="true"></span>
+                    </button>
+                    <span v-else class="score-toggle-spacer" aria-hidden="true"></span>
+                    {{ group.name }}
+                  </div>
                 </td>
-                <td>{{ score(m.baseline.score) }}</td>
-                <td>{{ score(m.candidate.score) }}</td>
-                <td :class="m.score_delta != null && m.score_delta < 0 ? 'down' : 'up'">
-                  {{ delta(m.score_delta) }}
+                <td>{{ score(group.baseline) }}</td>
+                <td>{{ score(group.candidate) }}</td>
+                <td :class="group.delta != null && group.delta < 0 ? 'down' : 'up'">
+                  {{ delta(group.delta) }}
                 </td>
               </tr>
+              <template v-if="group.key !== 'overall' && expandedScores[group.key]">
+                <tr v-for="child in group.children" :key="child.key" class="score-detail">
+                  <td>{{ child.name }}</td>
+                  <td>{{ score(child.baseline) }}</td>
+                  <td>{{ score(child.candidate) }}</td>
+                  <td :class="child.delta != null && child.delta < 0 ? 'down' : 'up'">
+                    {{ delta(child.delta) }}
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
       </section>
       <section class="card section-gap">
         <h2 class="section-title">逐项结果变化</h2>
-        <p class="section-note">每项对应一个用例与一个评估器，不是去重后的用例数。</p>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <th>用例</th>
+                <th>样本名称</th>
                 <th>评估器</th>
                 <th>实验A</th>
                 <th>实验B</th>
@@ -432,7 +454,10 @@ const templateLabels2: Record<string, string> = {
       class="card section-gap comparison-details"
       @toggle="showDiff = ($event.target as HTMLDetailsElement).open"
     >
-      <summary>查看方案与测评条件差异（只读）</summary>
+      <summary>
+        <span class="disclosure-triangle" aria-hidden="true"></span>
+        查看方案与测评条件差异
+      </summary>
       <ConfigurationDiff v-if="showDiff" :baseline="a.run.manifest" :candidate="b.run.manifest" />
     </details>
   </template>
@@ -515,6 +540,56 @@ const templateLabels2: Record<string, string> = {
 .data-table td.down {
   color: #dc2626;
 }
+.score-summary {
+  font-weight: 600;
+}
+.score-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.score-toggle,
+.score-toggle-spacer {
+  width: 14px;
+  flex: 0 0 14px;
+}
+.score-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #007f69;
+  cursor: pointer;
+}
+.disclosure-triangle {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+.score-toggle[aria-expanded='true'] .disclosure-triangle,
+.comparison-details[open] > summary .disclosure-triangle {
+  transform: rotate(90deg);
+}
+.score-toggle:disabled {
+  color: #9ca3af;
+  cursor: default;
+}
+.score-toggle:focus-visible {
+  outline: 2px solid #007f69;
+  outline-offset: 2px;
+}
+.score-detail {
+  background: #fafcfb;
+}
+.score-detail td:first-child {
+  padding-left: 30px;
+}
 .case-id {
   display: block;
   color: #6b7280;
@@ -522,9 +597,16 @@ const templateLabels2: Record<string, string> = {
   overflow-wrap: anywhere;
 }
 .comparison-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  list-style: none;
   font-size: 14px;
   font-weight: 600;
   color: #007f69;
+}
+.comparison-details > summary::-webkit-details-marker {
+  display: none;
 }
 .comparison-details :deep(> .card) {
   border: 0;

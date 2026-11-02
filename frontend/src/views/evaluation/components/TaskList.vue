@@ -309,20 +309,13 @@ onUnmounted(() => clearTimeout(debounce));
               </button>
               <button
                 v-if="
-                  (r.kind ?? 'single') === 'single' &&
+                  ['single', 'ab'].includes(r.kind ?? 'single') &&
                   ['completed', 'failed', 'cancelled'].includes(r.status)
                 "
                 class="link"
                 @click="
                   emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'rerun' })
                 "
-              >
-                重跑
-              </button>
-              <button
-                v-if="r.kind === 'ab' && ['completed', 'failed', 'cancelled'].includes(r.status)"
-                type="button"
-                class="link"
               >
                 重跑
               </button>

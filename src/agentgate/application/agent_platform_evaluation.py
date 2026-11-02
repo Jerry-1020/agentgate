@@ -260,6 +260,7 @@ def submit_platform_evaluation(
             EvaluationRun(
                 id=task_id if index == 0 else str(uuid4()),
                 manifest=run.manifest,
+                timing=run.timing,
                 status=run.status,
                 scheduled_for=run.scheduled_for,
                 user_team_id=user_team_id,
@@ -338,8 +339,6 @@ def submit_platform_comparison(
     platform_mode = os.getenv("AGENTGATE_AGENT_PLATFORM_MODE", "").strip().lower()
     if platform_mode not in {"mock", "inbank"}:
         raise ConnectionError("agent platform mode must be mock or inbank")
-    if platform_mode == "mock":
-        max_parallel_cases = 1
     client = PlatformClient.from_environment() if platform_mode == "mock" else None
 
     task_id = str(uuid4())
@@ -420,6 +419,7 @@ def submit_platform_comparison(
                 EvaluationRun(
                     id=(task_id if not prepared else str(uuid4())),
                     manifest=run.manifest,
+                timing=run.timing,
                     status=run.status,
                     scheduled_for=run.scheduled_for,
                     user_team_id=user_team_id,

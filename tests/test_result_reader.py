@@ -23,8 +23,7 @@ from agentgate.domain import (
     RunStatus,
     TargetSnapshot,
 )
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.storage.sqlite import SQLiteRepository
 
 
@@ -48,11 +47,11 @@ def completed_run(repository: SQLiteRepository):
     seed_demo(repository)
     runs = run_management(repository)
     run = runs.create_run(target(), dataset_id=LOAN_DATASET.id)
-    capture = InMemoryTraceCapture()
+    adapter = DemoLoanTargetAdapter()
     completed = runs.execute_run(
-        run.id, DemoLoanTargetAdapter(capture), capture.resolve
+        run.id, adapter, resolve_demo_trace
     )
-    capture.shutdown()
+    adapter.close()
     return completed
 
 
@@ -138,13 +137,13 @@ def test_reader_returns_exact_manifest_for_pending_and_completed_runs(
 
     assert reader.get_run_manifest(pending.id) == pending.manifest
 
-    capture = InMemoryTraceCapture()
+    adapter = DemoLoanTargetAdapter()
     completed = management.execute_run(
         pending.id,
-        DemoLoanTargetAdapter(capture),
-        capture.resolve,
+        adapter,
+        resolve_demo_trace,
     )
-    capture.shutdown()
+    adapter.close()
 
     assert reader.get_run_manifest(completed.id) == pending.manifest
 
