@@ -193,9 +193,7 @@ const unavailableEvaluatorIds = computed(() =>
   selectedEvaluators.value.filter((id) => !evaluators.value.some((e) => e.id === id)),
 );
 const copiedHybridEvaluators = computed(() => evaluators.value.filter((e) => e.kind === 'hybrid'));
-const repetitions = ref(1),
-  launchMode = ref('now'),
-  scheduledAt = ref('');
+const repetitions = ref(1);
 const bankTargets = ref<BankTarget[]>([]),
   selectedAgent = ref('demo'),
   targetError = ref('');
@@ -296,12 +294,6 @@ const executionCases = computed(() =>
     ? availableCases.value.filter((c) => selectedCaseIds.value.includes(c.id))
     : availableCases.value,
 );
-watch(repetitions, (v) => {
-  if (v > 1) {
-    launchMode.value = 'now';
-    scheduledAt.value = '';
-  }
-});
 const datasetVersions = ref<{ version: number; cases: any[] }[]>([]),
   selectedDatasetVersion = ref<number | null>(null);
 const concurrency = ref(1),
@@ -335,8 +327,6 @@ async function openCreate(source?: {
   concurrency.value = 1;
   timeout.value = PLATFORM_DEFAULT_TIMEOUT_SECONDS;
   retries.value = 0;
-  launchMode.value = 'now';
-  scheduledAt.value = '';
   formError.value = '';
   selectedDataset.value = '';
   create.value = true;
@@ -550,16 +540,6 @@ async function submit() {
     formError.value = 'A/B试验暂不支持重复执行，请选择单任务进行稳定性测试。';
     return;
   }
-  if (
-    launchMode.value === 'scheduled' &&
-    (repetitions.value !== 1 ||
-      !scheduledAt.value ||
-      !Number.isFinite(new Date(scheduledAt.value).getTime()) ||
-      new Date(scheduledAt.value).getTime() <= Date.now())
-  ) {
-    formError.value = '预约时间必须晚于当前时间，且只支持单次普通测评。';
-    return;
-  }
   const dataset = datasets.value.find((d) => d.id === selectedDataset.value);
   if (!dataset || selectedDatasetVersion.value === null) {
     formError.value = '请选择已发布的测评集及版本。';
@@ -593,8 +573,6 @@ async function submit() {
     timeout: timeout.value,
     retries: retries.value,
     repetitions: repetitions.value,
-    scheduledFor:
-      launchMode.value === 'scheduled' ? new Date(scheduledAt.value).toISOString() : undefined,
     baseline: localTarget ? platform!.target.agentVersion : selectedVersion.value,
     candidate: localTarget ? platformCandidateVersion.value : candidateVersion.value,
     staticReports: includeStatic.value ? [...staticReports.value] : [],
@@ -768,7 +746,6 @@ async function submit() {
         case_ids: snapshot.caseIds,
         evaluator_refs: snapshot.evaluatorRefs,
         timeout_seconds: snapshot.timeout,
-        scheduled_for: snapshot.scheduledFor,
       };
       const created = await request<{ id?: string; run_id?: string; run_ids?: string[] }>(
         localTarget.adapter_type === 'local_bank'
@@ -887,7 +864,6 @@ async function submit() {
           timeout_seconds: snapshot.timeout,
           max_retries: snapshot.retries,
           repetitions: snapshot.repetitions,
-          ...(snapshot.scheduledFor ? { scheduled_for: snapshot.scheduledFor } : {}),
         },
       });
       const link = platformTaskLink(created, snapshot.repetitions);
@@ -991,7 +967,6 @@ watch(taskKind, (kind) => {
         versionOptions.value.find((v) => v.id !== selectedVersion.value)?.id ?? '';
     repetitions.value = 1;
     scope.value = 'all';
-    launchMode.value = 'now';
     if (!platformSelection.value || platformSelection.value.localTarget) timeout.value = 300;
     retries.value = 0;
   }
@@ -1363,28 +1338,6 @@ onMounted(async () => {
       </div>
       <div class="execution-settings full" aria-label="执行参数">
         <label class="field"
-          >执行时间<select
-            aria-label="执行时间"
-            class="input"
-            v-model="launchMode"
-            :disabled="taskKind === 'ab'"
-          >
-            <option value="now">立即执行</option>
-            <option value="scheduled">预约执行</option></select
-          ><small v-if="repetitions > 1">稳定性测试暂不支持预约。</small></label
-        >
-        <label v-if="launchMode === 'scheduled'" class="field"
-          >预约时间<input
-            aria-label="预约时间"
-            class="input"
-            type="datetime-local"
-            v-model="scheduledAt"
-          /><small
-            >本机时区
-            {{ Intl.DateTimeFormat().resolvedOptions().timeZone }}；到期由调度服务进入队列。</small
-          ></label
-        >
-        <label class="field"
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
@@ -1626,7 +1579,7 @@ onMounted(async () => {
 }
 .execution-settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -1644,16 +1597,6 @@ onMounted(async () => {
 }
 .execution-settings small {
   font-size: 11px;
-}
-@media (max-width: 1000px) {
-  .execution-settings {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 650px) {
-  .execution-settings {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 420px) {
   .execution-settings {

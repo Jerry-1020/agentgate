@@ -868,27 +868,38 @@ for (const mode of ['bank', 'external'] as const)
       expect(submission.body).toMatchObject({
         dataset_id: 'other', dataset_version: 1, timeout_seconds: 1200,
       });
+      expect(submission.body).not.toHaveProperty('scheduled_for');
       expect(submission.headers['x-agent-platform-token']).toBe(mode === 'bank' ? 'form-secret' : 'local');
     });
 
-for (const mode of ['bank', 'external'] as const)
-  test(`${mode} execution settings hide repetition and retry controls without empty layout cells`, async ({ page }) => {
+for (const [mode, kind] of [
+  ['bank', 'single'], ['external', 'single'], ['bank', 'ab'], ['external', 'ab'],
+] as const)
+  test(`${mode} ${kind} execution settings hide scheduling, repetition and retry controls without empty layout cells`, async ({ page }) => {
     await openForm(page, false, sampleCases, mode);
+    if (kind === 'ab') await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
     const settings = page.getByLabel('执行参数', { exact: true });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      await expect(settings.locator(':scope > .field')).toHaveCount(3);
-      await expect(settings.getByLabel('执行时间', { exact: true })).toBeVisible();
+      await expect(settings.locator(':scope > .field')).toHaveCount(2);
+      await expect(settings.getByLabel('执行时间', { exact: true })).toHaveCount(0);
+      await expect(settings.getByLabel('预约时间', { exact: true })).toHaveCount(0);
       await expect(settings.getByLabel('并发样本数', { exact: true })).toBeVisible();
       await expect(settings.getByLabel('执行超时（秒）', { exact: true })).toBeVisible();
       await expect(settings.getByText('稳定性测试', { exact: true })).toHaveCount(0);
       await expect(settings.getByText('失败重试次数', { exact: true })).toHaveCount(0);
+      const { panel, concurrency, timeout } = await settings.evaluate((element) => ({
+        panel: element.getBoundingClientRect().toJSON(),
+        concurrency: element.querySelector('[aria-label="并发样本数"]')!.getBoundingClientRect().toJSON(),
+        timeout: element.querySelector('[aria-label="执行超时（秒）"]')!.getBoundingClientRect().toJSON(),
+      }));
+      expect(concurrency.width).toBeGreaterThan(panel.width * (width > 420 ? 0.45 : 0.9));
+      if (width > 420) expect(Math.abs(concurrency.y - timeout.y)).toBeLessThan(1);
+      else expect(timeout.y).toBeGreaterThan(concurrency.y + concurrency.height);
+      await test.info().attach(`execution-settings-${mode}-${kind}-${width}`, {
+        body: await settings.screenshot(), contentType: 'image/png',
+      });
     }
-    await settings.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
-    await expect(settings.getByLabel('预约时间', { exact: true })).toBeVisible();
-    await expect(settings.locator(':scope > .field')).toHaveCount(4);
-    await settings.getByLabel('执行时间', { exact: true }).selectOption('now');
-    await expect(settings.locator(':scope > .field')).toHaveCount(3);
   });
 
 for (const mode of ['bank', 'integrated'] as const)
@@ -1448,6 +1459,7 @@ for (const [mode, target, kind] of [
         ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
       const submission = requests.find((request) => request.path === endpoint)!;
       expect(submission.body.max_parallel_cases).toBe(kind === 'ab' ? 5 : 4);
+      expect(submission.body).not.toHaveProperty('scheduled_for');
       const token = mode === 'integrated' ? 'integrated-secret' : 'form-secret';
       expect(submission.headers['x-agent-platform-token']).toBe(token);
       expect(submission.body.target).toEqual({
@@ -1501,8 +1513,9 @@ test('switching from bank A/B to external retains editable concurrency', async (
   expect(submission.headers['x-agent-platform-token']).toBe('local');
 });
 
-for (const kind of ['single', 'ab'] as const)
-  test(`external platform ${kind} submits editable concurrency and retains token routing`, async ({ page }) => {
+for (const target of ['workflow', 'base', 'claw'] as const)
+  for (const kind of ['single', 'ab'] as const)
+  test(`external ${target} ${kind} submits editable concurrency and retains token routing`, async ({ page }) => {
     const requests = await openForm(page);
     await useExternalMode(page);
     const directoryRequests: { origin: string; authorization?: string }[] = [];
@@ -1511,14 +1524,17 @@ for (const kind of ['single', 'ab'] as const)
       if (location.pathname.startsWith('/web/'))
         directoryRequests.push({ origin: location.origin, authorization: request.headers().authorization });
     });
-    await choose(page, '选择智能体', '工作流 · workflow');
-    await choose(page, '智能体版本', 'v1');
+    await choose(page, '选择智能体', {
+      workflow: '工作流 · workflow', base: '基础编排 · base', claw: '云虾 · claw',
+    }[target]);
+    if (target === 'claw') await choose(page, '分支地址', '分支 · branch/raw');
+    await choose(page, '智能体版本', target === 'claw' ? 'v2' : 'v1');
     const concurrencyInput = page.getByLabel('并发样本数', { exact: true });
     await expect(concurrencyInput).toBeVisible();
     await concurrencyInput.fill('4');
     if (kind === 'ab') {
       await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
-      await choose(page, '平台候选版本', 'v2');
+      await choose(page, '平台候选版本', target === 'claw' ? 'v3' : 'v2');
       await expect(concurrencyInput).toHaveValue('4');
       await expect(concurrencyInput).toBeEnabled();
       await expect(page.getByText('A/B 两侧分别使用所设并发上限，失败重试 0。')).toBeVisible();
@@ -1532,6 +1548,7 @@ for (const kind of ['single', 'ab'] as const)
     const endpoint = kind === 'ab'
       ? '/api/agent-platform/comparisons' : '/api/agent-platform/evaluations';
     const submission = requests.find((request) => request.path === endpoint)!;
+    expect(submission.body).not.toHaveProperty('scheduled_for');
     if (kind === 'ab') expect(submission.body.max_parallel_cases).toBe(4);
     else {
       expect(submission.body.max_parallel_cases).toBe(4);
@@ -1724,19 +1741,15 @@ test('late external A/B catalogs cannot change the single task dataset or execut
   await expect(page.getByLabel('任务测评集', { exact: true })).toHaveValue('dataset');
 });
 
-test('external scheduled execution sends UTC and rejects invalid numeric limits before creating', async ({
+test('external immediate execution omits scheduling and rejects invalid numeric limits before creating', async ({
   page,
 }) => {
   const requests = await openForm(page);
   await useExternalMode(page);
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '智能体版本', 'v1');
-  await page.getByLabel('执行时间', { exact: true }).selectOption('scheduled');
-  const date = new Date(Date.now() + 86400000);
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-  await page.getByLabel('预约时间', { exact: true }).fill(local);
+  await expect(page.getByLabel('执行时间', { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('预约时间', { exact: true })).toHaveCount(0);
   await page.getByLabel('并发样本数', { exact: true }).fill('31');
   await start(page).click();
   await expect(page.getByRole('alert').filter({ hasText: '并发样本数必须为' })).toBeVisible();
@@ -1744,9 +1757,8 @@ test('external scheduled execution sends UTC and rejects invalid numeric limits 
   await page.getByLabel('并发样本数', { exact: true }).fill('3');
   await start(page).click();
   await expect.poll(() => page.evaluate(() => (window as any).created.length)).toBe(1);
-  expect(
-    requests.find((r) => r.path === '/api/agent-platform/evaluations')?.body.scheduled_for,
-  ).toBe(new Date(local).toISOString());
+  expect(requests.find((r) => r.path === '/api/agent-platform/evaluations')?.body)
+    .not.toHaveProperty('scheduled_for');
 });
 
 test('cancelling uncovered-case confirmation releases the lock without a creation request', async ({
