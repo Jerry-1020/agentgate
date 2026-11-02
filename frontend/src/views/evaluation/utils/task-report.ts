@@ -1,4 +1,5 @@
-import type { EvaluationResult } from '../../../api/client';
+import type { EvaluationResult, Report } from '../../../api/client';
+import type { Comparison } from '../../../api/evaluations';
 import type { EvaluationRun } from '../types/run';
 
 export type EvaluatorSnapshot = NonNullable<EvaluationRun['manifest']['evaluator_specs']>[number];
@@ -65,6 +66,108 @@ export function sampleSummary(results: EvaluationResult[], primary: string[]) {
     score: numbers.length ? numbers.reduce((a, b) => a + b, 0) / numbers.length : null,
   };
 }
+
+type ComparisonScore = {
+  key: string;
+  name: string;
+  baseline: number | null;
+  candidate: number | null;
+  delta: number | null;
+};
+export type ComparisonScoreGroup = ComparisonScore & {
+  key: 'overall' | 'llm' | 'rule';
+  children: ComparisonScore[];
+};
+
+const mean = (values: number[]) =>
+  values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+
+function caseMean(results: EvaluationResult[]): number | null {
+  const cases = new Map<string, number[]>();
+  for (const result of results) {
+    if (result.score == null) continue;
+    const scores = cases.get(result.case_id) ?? [];
+    scores.push(result.score);
+    cases.set(result.case_id, scores);
+  }
+  return mean([...cases.values()].map((scores) => mean(scores)!));
+}
+
+export function comparisonScoreGroups(
+  comparison: Comparison,
+  baseline: Report,
+  candidate: Report,
+): ComparisonScoreGroup[] {
+  const row = (key: string, name: string, a: number | null, b: number | null): ComparisonScore => ({
+    key,
+    name,
+    baseline: a,
+    candidate: b,
+    delta: a == null || b == null ? null : b - a,
+  });
+  const primarySpecs = (baseline.run.manifest.evaluator_specs ?? []).filter((spec) =>
+    baseline.run.manifest.primary_evaluator_ids.includes(spec.id),
+  );
+  const llmKinds = ['llm_judge', 'llm_group'];
+  const llmScore = (report: Report) => {
+    const summaries = report.metrics.filter(
+      (metric) => metric.level === 'kind' && llmKinds.includes(metric.key),
+    );
+    if (summaries.length === 1) return summaries[0].score;
+    const metrics = new Map<string, EvaluationResult[]>();
+    for (const result of report.results) {
+      if (
+        !report.run.manifest.primary_evaluator_ids.includes(result.evaluator_id) ||
+        !llmKinds.includes(result.evaluator_kind)
+      )
+        continue;
+      const results = metrics.get(result.metric) ?? [];
+      results.push(result);
+      metrics.set(result.metric, results);
+    }
+    // Match kind summaries: average each metric's case scores, then average the metrics.
+    return mean(
+      [...metrics.values()].flatMap((results) => {
+        const value = caseMean(results);
+        return value == null ? [] : [value];
+      }),
+    );
+  };
+  return (['overall', 'llm', 'rule'] as const).map((key) => {
+    const metric = comparison.metric_deltas.find(
+      (item) => item.level === (key === 'overall' ? 'overall' : 'kind') && item.key === key,
+    );
+    const name = { overall: '综合得分', llm: 'LLM评估得分', rule: '规则评估得分' }[key];
+    const summary = row(
+      key,
+      name,
+      key === 'llm' ? llmScore(baseline) : (metric?.baseline.score ?? null),
+      key === 'llm' ? llmScore(candidate) : (metric?.candidate.score ?? null),
+    );
+    if (key !== 'llm') summary.delta = metric?.score_delta ?? null;
+    const children = primarySpecs
+      .filter((spec) =>
+        key === 'llm' ? llmKinds.includes(spec.kind) : key === 'rule' && spec.kind === 'rule',
+      )
+      .map((spec) => {
+        const evaluatorScore = (report: Report) =>
+          caseMean(
+            report.results.filter(
+              (result) =>
+                result.evaluator_id === spec.id && result.evaluator_version === spec.version,
+            ),
+          );
+        return row(
+          spec.id,
+          `${spec.name} · v${spec.version}`,
+          evaluatorScore(baseline),
+          evaluatorScore(candidate),
+        );
+      });
+    return { ...summary, key, children };
+  });
+}
+
 export function csvCell(value: unknown) {
   const text = String(value ?? '');
   return '"' + (/^[=+@\-\t\r]/.test(text) ? "'" + text : text).replace(/"/g, '""') + '"';

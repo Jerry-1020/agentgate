@@ -686,6 +686,7 @@ watch(sampleId, () => {
                 :key="group.result.evaluator_id"
                 :result="group.result"
                 :child-results="group.children"
+                :evaluator-specs="manifest.evaluator_specs"
                 :primary="manifest.primary_evaluator_ids.includes(group.result.evaluator_id)"
                 :turns="sample.turns"
               />
