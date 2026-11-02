@@ -1181,11 +1181,6 @@ onMounted(() => void openCreate(props.source));
       </div>
       <div class="execution-settings full" aria-label="执行参数">
         <label class="field"
-          >执行时间<select aria-label="执行时间" class="input" disabled>
-            <option value="now">立即执行</option>
-          </select></label
-        >
-        <label class="field"
           >并发样本数<input
             class="input"
             v-model.number="concurrency"
@@ -1425,7 +1420,7 @@ onMounted(() => void openCreate(props.source));
 }
 .execution-settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -1443,16 +1438,6 @@ onMounted(() => void openCreate(props.source));
 }
 .execution-settings small {
   font-size: 11px;
-}
-@media (max-width: 1000px) {
-  .execution-settings {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 650px) {
-  .execution-settings {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 @media (max-width: 420px) {
   .execution-settings {

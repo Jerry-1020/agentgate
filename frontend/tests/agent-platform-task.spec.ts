@@ -779,28 +779,32 @@ for (const mode of ['bank', 'external'] as const)
       expect(submission.headers['x-agent-platform-token']).toBe(mode === 'bank' ? 'form-secret' : 'local');
     });
 
-for (const mode of ['bank', 'external'] as const)
-  test(`${mode} execution settings hide scheduling, repetition and retry controls without empty layout cells`, async ({ page }) => {
+for (const [mode, kind] of [
+  ['bank', 'single'], ['external', 'single'], ['bank', 'ab'], ['external', 'ab'],
+] as const)
+  test(`${mode} ${kind} execution settings hide scheduling, repetition and retry controls without empty layout cells`, async ({ page }) => {
     await openForm(page, false, sampleCases, mode);
+    if (kind === 'ab') await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
     const settings = page.getByLabel('执行参数', { exact: true });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });
-      await expect(settings.locator(':scope > .field')).toHaveCount(3);
-      await expect(settings.getByLabel('执行时间', { exact: true })).toBeVisible();
+      await expect(settings.locator(':scope > .field')).toHaveCount(2);
+      await expect(settings.getByLabel('执行时间', { exact: true })).toHaveCount(0);
+      await expect(settings.getByLabel('预约时间', { exact: true })).toHaveCount(0);
       await expect(settings.getByLabel('并发样本数', { exact: true })).toBeVisible();
       await expect(settings.getByLabel('执行超时（秒）', { exact: true })).toBeVisible();
       await expect(settings.getByText('稳定性测试', { exact: true })).toHaveCount(0);
       await expect(settings.getByText('失败重试次数', { exact: true })).toHaveCount(0);
-      await test.info().attach(`execution-settings-${mode}-${width}`, {
+      const panel = (await settings.boundingBox())!;
+      const concurrency = (await settings.getByLabel('并发样本数', { exact: true }).boundingBox())!;
+      const timeout = (await settings.getByLabel('执行超时（秒）', { exact: true }).boundingBox())!;
+      expect(concurrency.width).toBeGreaterThan(panel.width * (width > 420 ? 0.45 : 0.9));
+      if (width > 420) expect(Math.abs(concurrency.y - timeout.y)).toBeLessThan(1);
+      else expect(timeout.y).toBeGreaterThan(concurrency.y + concurrency.height);
+      await test.info().attach(`execution-settings-${mode}-${kind}-${width}`, {
         body: await settings.screenshot(), contentType: 'image/png',
       });
     }
-    const executionTime = settings.getByLabel('执行时间', { exact: true });
-    await expect(executionTime).toBeDisabled();
-    await expect(executionTime).toHaveValue('now');
-    await expect(executionTime.locator('option')).toHaveText(['立即执行']);
-    await expect(settings.getByLabel('预约时间', { exact: true })).toHaveCount(0);
-    await expect(settings.locator(':scope > .field')).toHaveCount(3);
   });
 
 for (const mode of ['bank', 'integrated'] as const)
@@ -1609,7 +1613,7 @@ test('external immediate execution omits scheduling and rejects invalid numeric 
   await useExternalMode(page);
   await choose(page, '选择智能体', '工作流 · workflow');
   await choose(page, '智能体版本', 'v1');
-  await expect(page.getByLabel('执行时间', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('执行时间', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('预约时间', { exact: true })).toHaveCount(0);
   await page.getByLabel('并发样本数', { exact: true }).fill('31');
   await start(page).click();
