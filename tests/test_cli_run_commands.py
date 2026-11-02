@@ -125,28 +125,21 @@ def test_run_commands_reject_unknown_target_and_run(tmp_path) -> None:
     assert "unknown EvaluationRun" in unknown_run.output
 
 
-def test_run_evaluate_sanitizes_failures_and_shuts_down_capture(
+def test_run_evaluate_sanitizes_failures_and_closes_adapter(
     tmp_path, monkeypatch
 ) -> None:
     repository = SQLiteRepository(tmp_path / "failure.db")
     ensure_demo_dataset(repository)
     app, _, reader = cli_for(repository)
 
-    class RecordingCapture:
-        shutdown_called = False
-
-        def resolve(self, request, result):
-            raise AssertionError("resolve must not be called")
-
-        def shutdown(self) -> None:
-            type(self).shutdown_called = True
-
     class FailingAdapter:
         adapter_type = "demo_loan"
         adapter_version = "1"
 
-        def __init__(self, capture) -> None:
-            self.capture = capture
+        close_called = False
+
+        def close(self) -> None:
+            type(self).close_called = True
 
         def start(self, request) -> str:
             raise RuntimeError("token=raw-secret")
@@ -160,7 +153,6 @@ def test_run_evaluate_sanitizes_failures_and_shuts_down_capture(
         def cancel(self, handle) -> None:
             raise AssertionError("cancel must not be called")
 
-    monkeypatch.setattr(run_commands, "InMemoryTraceCapture", RecordingCapture)
     monkeypatch.setattr(run_commands, "DemoLoanTargetAdapter", FailingAdapter)
 
     result = CliRunner().invoke(app, ["run", "evaluate"])
@@ -168,7 +160,7 @@ def test_run_evaluate_sanitizes_failures_and_shuts_down_capture(
     assert result.exit_code == 1
     assert "RuntimeError" in result.output
     assert "raw-secret" not in result.output
-    assert RecordingCapture.shutdown_called is True
+    assert FailingAdapter.close_called is True
     failed = reader.list_runs()[0]
     assert failed.status.value == "failed"
     assert "raw-secret" not in (failed.error or "")

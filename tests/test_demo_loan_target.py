@@ -7,8 +7,7 @@ from agentgate.domain import (
     TargetSnapshot,
     TargetType,
 )
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.run.target_protocol import CaseExecutionRequest, CaseExecutionStatus
 
 
@@ -49,14 +48,13 @@ def test_adapter_executes_fixed_agent_with_real_otel_trace() -> None:
             },
         ),),
     )
-    capture = InMemoryTraceCapture()
     state_store: dict[str, dict] = {}
-    adapter = DemoLoanTargetAdapter(capture, state_store=state_store)
+    adapter = DemoLoanTargetAdapter(state_store=state_store)
     value = request(case)
 
     handle = adapter.start(value)
     result = adapter.wait(handle, value.timeout_seconds)
-    trace = capture.resolve(value, result)
+    trace = resolve_demo_trace(value, result)
 
     assert adapter.get_status(handle) is CaseExecutionStatus.COMPLETED
     assert trace.final_state["status"] == "pending_review"
@@ -66,7 +64,7 @@ def test_adapter_executes_fixed_agent_with_real_otel_trace() -> None:
     assert tool_names == ["credit_inquiry", "request_human_review"]
     assert all("agentgate.run.id" not in span.attributes
                for span in trace.spans if span.operation_type == "tool")
-    capture.shutdown()
+    adapter.close()
 
 
 def test_adapter_preserves_conversation_across_case_turns() -> None:
@@ -81,12 +79,11 @@ def test_adapter_preserves_conversation_across_case_turns() -> None:
             CaseTurn(id="turn-2", input={"risk": "high", "amount": 90000}),
         ),
     )
-    capture = InMemoryTraceCapture()
-    adapter = DemoLoanTargetAdapter(capture)
+    adapter = DemoLoanTargetAdapter()
     value = request(case)
 
     handle = adapter.start(value)
-    trace = capture.resolve(value, adapter.wait(handle, value.timeout_seconds))
+    trace = resolve_demo_trace(value, adapter.wait(handle, value.timeout_seconds))
 
     assert trace.turn_outcomes["turn-1"]["output"]["missing_fields"] == (
         "risk", "amount"
@@ -98,4 +95,4 @@ def test_adapter_preserves_conversation_across_case_turns() -> None:
                     if span.operation_type == "tool"]
     assert first_tools == []
     assert second_tools == ["credit_inquiry", "request_human_review"]
-    capture.shutdown()
+    adapter.close()

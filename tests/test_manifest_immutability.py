@@ -266,3 +266,12 @@ def test_repository_lists_and_counts_runs_by_status(tmp_path):
     }
     with pytest.raises(ValueError, match="limit must be at least 1"):
         repository.list_runs_by_status(RunStatus.PENDING, limit=0)
+
+
+def test_historical_concurrency_remains_readable_without_rewriting_snapshot(tmp_path):
+    repository = SQLiteRepository(tmp_path / "historical-concurrency.db")
+    values = manifest(repository).model_dump(exclude={"manifest_sha256"})
+    historical = EvaluationRun(manifest=RunManifest.model_validate({**values, "max_parallel_cases": 32}))
+    repository.save_run(historical)
+    assert repository.get_run(historical.id) == historical
+    assert repository.get_run(historical.id).manifest.max_parallel_cases == 32

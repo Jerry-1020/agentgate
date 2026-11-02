@@ -38,7 +38,7 @@ def configure_inbank(monkeypatch, adapter_type):
 @pytest.mark.parametrize(
     "adapter_class,resolver",
     [
-        (factory.DemoLoanTargetAdapter, None),
+        (factory.DemoLoanTargetAdapter, factory.resolve_demo_trace),
         (factory.LocalBankAdapter, factory.resolve_local_bank_trace),
         (factory.InbankChatABCTargetAdapter, factory.resolve_chatabc_trace),
         (factory.InbankYunxiaTargetAdapter, factory.resolve_yunxia_trace),
@@ -56,10 +56,7 @@ def test_create_selects_components_without_starting_target(monkeypatch, adapter_
             trace_token="bank-task-token" if adapter_class.adapter_type.startswith("inbank_") else None,
         )
         assert isinstance(adapter, adapter_class)
-        if resolver is not None:
-            assert actual_resolver is resolver
-        else:
-            assert actual_resolver == adapter.capture.resolve
+        assert actual_resolver is resolver
         if adapter_class.adapter_type.startswith("inbank_"):
             assert adapter.pod_lifecycle["create"] == "not_attempted"
     assert factory.load_chatabc_settings.call_count == (

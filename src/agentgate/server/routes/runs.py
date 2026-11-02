@@ -37,7 +37,7 @@ class LaunchRequest(BaseModel):
     evaluator_ids: list[str] | None = None
     evaluator_refs: list[EvaluatorRef] | None = Field(default=None, min_length=1)
     timeout_seconds: float = Field(default=300, gt=0, le=3600)
-    max_parallel_cases: int = Field(default=1, ge=1, le=32)
+    max_parallel_cases: int = Field(default=1, ge=1, le=30, strict=True)
     max_retries: int = Field(default=0, ge=0, le=5)
     case_ids: list[str] | None = None
     scheduled_for: datetime | None = None

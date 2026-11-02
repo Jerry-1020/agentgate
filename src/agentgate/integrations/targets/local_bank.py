@@ -10,16 +10,28 @@ from __future__ import annotations
 import json
 import os
 import time
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from threading import Event
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
 from agentgate.domain import FrozenJsonObject, TargetDescriptor, TargetRef, TargetSnapshot
 from agentgate.integrations.observability.trace_sdk import normalize_sdk_exports
 from agentgate.integrations.observability.trace_server import TraceServerClient
-from agentgate.integrations.targets.bank_protocol import build_chatabc_payload, build_cloudshrimp_payload, parse_bank_sse
-from agentgate.run.target_protocol import CaseExecutionResult, CaseExecutionStatus, TargetExecutionError
+from agentgate.integrations.targets.bank_protocol import (
+    build_chatabc_payload,
+    build_cloudshrimp_payload,
+    parse_bank_sse,
+)
+from agentgate.run.target_protocol import (
+    CaseExecutionPending,
+    CaseExecutionRequest,
+    CaseExecutionResult,
+    CaseExecutionStatus,
+    TargetExecutionError,
+)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -161,23 +173,46 @@ class LocalBankAdapter:
     def __init__(self, client=None, trace_client=None):
         self.client = client or LocalBankClient()
         self.trace_server = trace_client or TraceServerClient()
-        self.results = {}
-        self.statuses = {}
+        self._pool: ThreadPoolExecutor | None = None
+        self._futures: dict[str, Future[CaseExecutionResult]] = {}
+        self._cancelled: dict[str, Event] = {}
+        self._run_id: str | None = None
+        self._parallelism: int | None = None
+        self._closed = False
 
-    def start(self, request):
+    def start(self, request: CaseExecutionRequest) -> str:
         handle = request.execution_id
-        if handle in self.statuses:
-            raise TargetExecutionError("invalid_request", "duplicate execution ID")
-        self.statuses[handle] = CaseExecutionStatus.RUNNING
-        try:
-            self.results[handle] = self._execute(request)
-        except Exception:
-            self.statuses[handle] = CaseExecutionStatus.FAILED
-            raise
-        self.statuses[handle] = CaseExecutionStatus.COMPLETED
+        if self._closed or handle in self._futures:
+            raise TargetExecutionError("invalid_request", "adapter closed or duplicate execution")
+        if self._run_id is not None and (
+            request.run_id != self._run_id or request.max_parallel_cases != self._parallelism
+        ):
+            raise TargetExecutionError("invalid_request", "adapter belongs to one Run and concurrency limit")
+        if self._run_id is None:
+            self._run_id, self._parallelism = request.run_id, request.max_parallel_cases
+            if request.max_parallel_cases > 1:
+                self._pool = ThreadPoolExecutor(max_workers=request.max_parallel_cases)
+        self._cancelled[handle] = Event()
+
+        def execute() -> CaseExecutionResult:
+            self._check_cancelled(handle)
+            result = self._execute(request)
+            self._check_cancelled(handle)
+            return result
+
+        if self._pool is None:
+            future: Future[CaseExecutionResult] = Future()
+            self._futures[handle] = future
+            try:
+                future.set_result(execute())
+            except Exception as exc:
+                future.set_exception(exc)
+                raise
+        else:
+            self._futures[handle] = self._pool.submit(execute)
         return handle
 
-    def _execute(self, request):
+    def _execute(self, request: CaseExecutionRequest) -> CaseExecutionResult:
         config = request.target.invocation_config
         mode = config["mode"]
         descriptor, snapshot = local_bank_target(self.client, mode)
@@ -188,6 +223,7 @@ class LocalBankAdapter:
             raise TargetExecutionError("invalid_request", "unknown synthetic test customer")
         deadline = time.monotonic() + request.timeout_seconds
         def remaining():
+            self._check_cancelled(request.execution_id)
             value = deadline - time.monotonic()
             if value <= 0:
                 raise TargetExecutionError("rejected", "bank case deadline reached; inspect remote execution")
@@ -259,19 +295,50 @@ class LocalBankAdapter:
             "final_output": FrozenJsonObject(final["output"]), "final_state": FrozenJsonObject(final["state"])})
         return CaseExecutionResult(request.execution_id, trace.trace_id, trace)
 
-    def get_status(self, handle):
-        if handle not in self.statuses:
-            raise TargetExecutionError("invalid_request", "unknown execution")
-        return self.statuses[handle]
+    def _future(self, handle: str) -> Future[CaseExecutionResult]:
+        try:
+            return self._futures[handle]
+        except KeyError:
+            raise TargetExecutionError("invalid_request", "unknown execution") from None
 
-    def wait(self, handle, timeout_seconds):
-        if timeout_seconds <= 0 or self.get_status(handle) != CaseExecutionStatus.COMPLETED:
-            raise TargetExecutionError("protocol_error", "execution is not complete")
-        return self.results[handle]
+    def _check_cancelled(self, handle: str) -> None:
+        if self._cancelled[handle].is_set():
+            raise TargetExecutionError("cancelled", "Case execution was cancelled")
 
-    def cancel(self, handle):
-        # Synchronous HTTP disconnect cannot undo committed remote tool actions.
-        self.get_status(handle)
+    def get_status(self, handle: str) -> CaseExecutionStatus:
+        future = self._future(handle)
+        if self._cancelled[handle].is_set() or future.cancelled():
+            return CaseExecutionStatus.CANCELLED
+        if not future.done():
+            return CaseExecutionStatus.RUNNING
+        return CaseExecutionStatus.FAILED if future.exception() else CaseExecutionStatus.COMPLETED
+
+    def wait(self, handle: str, timeout_seconds: float) -> CaseExecutionResult:
+        if timeout_seconds <= 0:
+            raise TargetExecutionError("invalid_request", "timeout must be positive")
+        future = self._future(handle)
+        self._check_cancelled(handle)
+        try:
+            return future.result(timeout=min(timeout_seconds, 0.1))
+        except TimeoutError:
+            raise CaseExecutionPending() from None
+        except CancelledError:
+            raise TargetExecutionError("cancelled", "Case execution was cancelled") from None
+
+    def cancel(self, handle: str) -> None:
+        future = self._future(handle)
+        if not future.done():
+            self._cancelled[handle].set()
+            future.cancel()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        for handle in self._futures:
+            self.cancel(handle)
+        if self._pool is not None:
+            self._pool.shutdown(wait=True, cancel_futures=True)
 
 
 def resolve_local_bank_trace(request, result):

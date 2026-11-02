@@ -131,7 +131,6 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   let status = options.status ?? 'completed';
-  let rerunCreated = false;
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (!path.startsWith('/api/')) return route.continue();
@@ -141,10 +140,20 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
     if (path.startsWith('/api/stability-experiments/'))
       return reply({
         experiment: { id: 'stable', run_ids: ['stable-run'], created_at: now },
-        runs: [{ progress: { run_id: 'stable-run', status, total_cases: 7, completed_cases: 1 },
-          score: null, outcome: null }],
-        measured_runs: 0, mean: null, sample_variance: null, sample_stddev: null,
-        min: null, max: null, complete: ['completed', 'failed', 'cancelled'].includes(status),
+        runs: [
+          {
+            progress: { run_id: 'stable-run', status, total_cases: 7, completed_cases: 1 },
+            score: null,
+            outcome: null,
+          },
+        ],
+        measured_runs: 0,
+        mean: null,
+        sample_variance: null,
+        sample_stddev: null,
+        min: null,
+        max: null,
+        complete: ['completed', 'failed', 'cancelled'].includes(status),
       });
     // Bulk reads are deliberately unavailable: detail rendering must not depend on them.
     if (path === '/api/runs' || path === '/api/evaluation-tasks')
@@ -152,10 +161,6 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
         status: 500,
         json: { detail: 'Unrelated bulk query must not be called' },
       });
-    if (path === '/api/evaluation-tasks/task/rerun' && route.request().method() === 'POST') {
-      rerunCreated = true;
-      return reply({ ...task('task'), run_ids: ['new-run'] });
-    }
     if (path.startsWith('/api/evaluation-tasks/')) {
       if (options.associationStatus)
         return route.fulfill({
@@ -163,9 +168,7 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
           json: { detail: 'Task unavailable' },
         });
       const detail = task(path.split('/').pop()!);
-      return reply(
-        rerunCreated && detail.id === 'task' ? { ...detail, run_ids: ['new-run'] } : detail,
-      );
+      return reply(detail);
     }
     if (path === '/api/run-comparisons')
       return reply({
@@ -371,7 +374,9 @@ for (const detail of [
   { name: 'stability', route: '/stability/stable', endpoint: '/api/stability-experiments/stable' },
 ]) {
   for (const bank of [false, true]) {
-    test(`${detail.name} polls at 5s, pauses hidden, resumes, stops and cleans up (${bank ? 'bank' : 'external'})`, async ({ page }) => {
+    test(`${detail.name} polls at 5s, pauses hidden, resumes, stops and cleans up (${bank ? 'bank' : 'external'})`, async ({
+      page,
+    }) => {
       const state = await setup(page, { status: 'running' });
       await page.clock.install();
       await open(page, detail.route, bank);
@@ -390,8 +395,8 @@ for (const detail of [
       await expect.poll(() => count(state.calls, detail.endpoint)).toBe(4);
       await page.clock.fastForward(30000);
       expect(count(state.calls, detail.endpoint)).toBe(4);
-      if (bank) expect(state.calls.every(c => c.headers['token'] === 'test-token')).toBe(true);
-      else expect(state.calls.every(c => !c.headers['token'])).toBe(true);
+      if (bank) expect(state.calls.every((c) => c.headers['token'] === 'test-token')).toBe(true);
+      else expect(state.calls.every((c) => !c.headers['token'])).toBe(true);
       await page.evaluate(() => (window as any).detailHarness.unmount());
       await visibility(page, true);
       await visibility(page, false);
@@ -404,17 +409,33 @@ for (const detail of [
   test(`${detail.name} ignores a response from before the tab was hidden`, async ({ page }) => {
     const state = await setup(page, { status: 'running' });
     let release!: () => void;
-    const hold = new Promise<void>(resolve => { release = resolve; });
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     let delayed = false;
-    await page.route(`**${detail.endpoint}`, async route => {
+    await page.route(`**${detail.endpoint}`, async (route) => {
       if (delayed) return route.fallback();
       delayed = true;
       await hold;
-      const data = detail.name === 'stability'
-        ? { experiment: { id: 'stable', run_ids: [], created_at: now }, runs: [],
-            measured_runs: 0, mean: null, min: null, max: null, complete: true }
-        : { run_id: detail.name === 'ab' ? 'run-a' : 'task-run', status: 'completed',
-            total_cases: 7, completed_cases: 7, progress: 1, created_at: now };
+      const data =
+        detail.name === 'stability'
+          ? {
+              experiment: { id: 'stable', run_ids: [], created_at: now },
+              runs: [],
+              measured_runs: 0,
+              mean: null,
+              min: null,
+              max: null,
+              complete: true,
+            }
+          : {
+              run_id: detail.name === 'ab' ? 'run-a' : 'task-run',
+              status: 'completed',
+              total_cases: 7,
+              completed_cases: 7,
+              progress: 1,
+              created_at: now,
+            };
       await route.fulfill({ json: { code: '0', message: 'success', data } });
     });
     await page.clock.install();
@@ -426,10 +447,13 @@ for (const detail of [
     await visibility(page, false);
     await expect.poll(() => count(state.calls, detail.endpoint)).toBe(1);
     release();
-    await page.clock.fastForward(5100);
-    await expect.poll(() => count(state.calls, detail.endpoint)).toBe(2);
-    await page.clock.fastForward(5100);
-    await expect.poll(() => count(state.calls, detail.endpoint)).toBe(3);
+    // Network completion can schedule the next poll after a clock jump has finished.
+    for (const minimum of [2, 3]) {
+      await expect.poll(async () => {
+        await page.clock.fastForward(5100);
+        return count(state.calls, detail.endpoint);
+      }).toBeGreaterThanOrEqual(minimum);
+    }
     if (detail.name === 'single') expect(count(state.calls, '/api/runs/task-run')).toBe(0);
     await page.evaluate(() => (window as any).detailHarness.unmount());
     expect(state.errors).toEqual([]);
@@ -509,23 +533,41 @@ test('query-only tab navigation updates the tab without reloading the report', a
   expect(state.errors).toEqual([]);
 });
 
-test('rerun refreshes the run binding without changing the task route or reusing old traces', async ({
+test('detail rerun opens editable creation and cancellation preserves the original binding', async ({
   page,
 }) => {
   const state = await setup(page);
+  await page.route('**/api/datasets**', (route) => {
+    if (!new URL(route.request().url()).pathname.startsWith('/api/')) return route.fallback();
+    return route.fulfill({
+      json: {
+        code: '0',
+        message: 'success',
+        data:
+          new URL(route.request().url()).pathname === '/api/datasets'
+            ? [{ id: 'dataset', name: '测评集', version: 1 }]
+            : { versions: [{ version: 1, cases }] },
+      },
+    });
+  });
+  await page.route('**/api/evaluators**', (route) => {
+    if (!new URL(route.request().url()).pathname.startsWith('/api/')) return route.fallback();
+    return route.fulfill({ json: { code: '0', message: 'success', data: [] } });
+  });
   await open(page);
   await page.getByRole('button', { name: '任务快照', exact: true }).click();
   await page.getByRole('button', { name: '使用原配置重跑', exact: true }).click();
-  await page
-    .getByRole('dialog', { name: '重新运行当前任务' })
-    .getByRole('button', { name: '开始测评', exact: true })
-    .click();
-  await expect.poll(() => count(state.calls, '/api/runs/new-run')).toBe(1);
+  const dialog = page.getByRole('dialog', { name: '新建测评任务', exact: true });
+  await expect(dialog.getByLabel('任务名称', { exact: true })).toHaveValue('任务 task_重跑');
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect(page).toHaveURL(/#\/tasks\/task$/);
-  expect(count(state.calls, '/api/evaluation-tasks/task')).toBe(2);
+  expect(count(state.calls, '/api/evaluation-tasks/task/rerun')).toBe(0);
+  expect(count(state.calls, '/api/runs/new-run')).toBe(0);
+  await page.getByRole('button', { name: '执行结果', exact: true }).click();
   await page.getByRole('button', { name: '样本详情', exact: true }).first().click();
   await expect(page.getByText('回答 case-1', { exact: true })).toBeVisible();
-  expect(traces(state.calls).map((c) => c.path)).toEqual(['/api/runs/new-run/traces/case-1']);
+  expect(traces(state.calls).map((c) => c.path)).toEqual(['/api/runs/task-run/traces/case-1']);
   expect(state.errors).toEqual([]);
 });
 

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from agentgate.server.app import create_app
-from agentgate.server.dependencies import DemoLoanTargetAdapter, InMemoryTraceCapture
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 
 
 class Dispatcher:
@@ -36,11 +36,11 @@ def test_repeated_runs_share_snapshot_and_persist_summary(tmp_path):
         pending = client.get("/api/stability-experiments/" + task["id"]).json()["data"]
         assert pending["mean"] is None and not pending["complete"]
         for run in runs:
-            capture = InMemoryTraceCapture()
+            adapter = DemoLoanTargetAdapter(state_store=deps.demo_state)
             try:
-                deps.runs.execute_run(run.id, DemoLoanTargetAdapter(capture, state_store=deps.demo_state), capture.resolve)
+                deps.runs.execute_run(run.id, adapter, resolve_demo_trace)
             finally:
-                capture.shutdown()
+                adapter.close()
         summary = client.get("/api/stability-experiments/" + task["id"]).json()["data"]
         assert summary["complete"]
         assert summary["measured_runs"] == 3

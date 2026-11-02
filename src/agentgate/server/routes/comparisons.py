@@ -35,6 +35,9 @@ class RunComparisonLaunchRequest(BaseModel):
     dataset_id: str = Field(min_length=1)
     dataset_version: int = Field(ge=1)
     evaluators: list[EvaluatorVersionSelection] | None = None
+    case_ids: list[str] | None = Field(default=None, min_length=1)
+    timeout_seconds: float = Field(default=300, gt=0, le=3600)
+    max_parallel_cases: int = Field(default=1, ge=1, le=30, strict=True)
 
 
 class RunComparisonVariant(BaseModel):
@@ -61,6 +64,9 @@ def launch_run_comparison(
             request.candidate_version,
             dataset_id=request.dataset_id,
             dataset_version=request.dataset_version,
+            case_ids=request.case_ids,
+            timeout_seconds=request.timeout_seconds,
+            max_parallel_cases=request.max_parallel_cases,
             evaluator_refs=(
                 [
                     EvaluatorRef(

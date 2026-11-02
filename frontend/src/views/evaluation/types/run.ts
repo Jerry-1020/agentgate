@@ -6,6 +6,9 @@ export interface EvaluationRun {
   id: string;
   status: RunStatus;
   manifest: {
+    timeout_seconds: number;
+    max_parallel_cases: number;
+    max_retries: number;
     selected_case_ids?: string[] | null;
     primary_evaluator_ids: string[];
     evaluator_specs?: {

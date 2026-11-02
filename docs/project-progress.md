@@ -1,6 +1,142 @@
 # AgentGate Project Progress
 
-Last updated: 2026-10-19
+Last updated: 2026-10-31
+
+## 2026-10-31 — Delivery to release_20261102
+
+The user subsequently authorized committing, pushing and opening a PR for both the
+editable-rerun and unified-concurrency changes, targeting `release_20261102`; merging
+is not authorized. Prepare delivery on `feature/rerun-concurrency-release-20261102`
+from fetched release head `50888af24ea437872a7fb06035f9101d607b4f6e`, with separate
+rerun and concurrency commits. Preserve the original dirty checkouts and their live
+verification services.
+
+Three-way integration preserves the release branch's team-level dispatch limits,
+pending/running timeout recovery, base-agent initialization fields, required sample
+inputs and Element Plus A/B version selector. Adapt browser interactions to the
+release selector and retain both its Run-timing tests and the new concurrency tests.
+The earlier verification counts below describe the original implementation worktrees;
+delivery verification against the release base is recorded separately here.
+
+Fresh release-base verification: backend **2983 passed / 124 skipped**;
+tested-Agent suite **32 passed**; frontend units **126 passed**; related browser
+checks cover **241 distinct cases**, plus **19** task-summary cases (260 distinct
+browser cases). The main related-browser run passed 239 cases. The two selector
+style tests were adapted to the visible Element Plus wrapper and live computed-style
+comparison, then each passed three serial repeats (six checks); no production fix
+was required for those test interactions. The release's structured-input test now
+reads exact contenteditable text, including whitespace, instead of using input.value.
+
+Type checking, production build, changed-source ESLint and whitespace checks pass.
+Ruff comparison across 15 production Python files introduces no findings (release
+baseline 14, current 10). Four existing TaskList.vue formatting differences match the
+release baseline; all other changed production frontend files pass Prettier. Preserve
+the existing CI configuration, whose PR trigger targets refactor-1 only. Local skipped
+checks and the absence of live in-bank acceptance are not claimed as CI coverage.
+
+## 2026-10-31 — Unified configurable Case concurrency
+
+Completed the user-authorized autonomous implementation Goal on
+`feature/unified-case-concurrency`; its initial scope excluded commit, push and merge.
+The later delivery authorization above permits commit, push and PR creation only.
+New task inputs and RunManagement validate integer concurrency 1–30, default 1.
+The same value flows through single, stability and supported A/B launch paths in
+both login modes. A/B applies the limit independently to each side. Remove local
+loan and external/mock A/B overrides without changing directory/token routing,
+retry restrictions, independent timeout limits or exact target/version selection.
+Historical immutable manifests retain their serialization and remain readable.
+
+LocalBankAdapter, PlatformAdapter and DemoLoanTargetAdapter now own bounded Case
+execution in their existing modules. Turns within a Case remain sequential; local
+loan sessions and mock instances stay separate. Demo owns one private OTel capture
+per Case and returns its completed inline Trace; update its CLI, server, Worker and
+test composition accordingly. Cancellation prevents later Turns; cleanup waits for
+in-flight work before releasing resources or wiping credentials. Keep the existing
+Engine, adapter protocol, in-bank executors and tested-Agent runtime unchanged.
+
+Verification: full backend **2958 passed / 102 skipped**; tested-Agent suite
+**32 passed**; frontend units **126 passed**; related login/directory/task/detail/
+rerun browser cases **168 passed**; task-summary browser cases **19 passed**.
+Type checking, production build, affected frontend lint/format and diff checks pass.
+The 15 affected production Python files introduce no Ruff findings compared with
+the original checkout; 11 pre-existing findings remain and four import findings
+were resolved. Tests cover 1/2/3/30 bounded overlap, multi-turn order, private Trace
+captures, real local HTTP sessions, cancellation/cleanup, range/default/persistence
+contracts and historical snapshot readability. No live in-bank acceptance is claimed.
+
+Live acceptance uses a separate loopback stack on web **5297**, API **8197**.
+Base, workflow and cloudshrimp each processed three synthetic Cases at concurrency 3;
+actual SDK execution spans show peak 3 in every mode, and all 36 evaluator Results pass.
+The page rerun form restored 3, accepted a change to 2 with timeout 200, and created a
+new completed base task whose actual peak is 2. Demo A/B rerun accepted upper limit 30
+with three Cases per side and timeout 200, persisted 30 on both new Runs and completed.
+These six tasks/eight Runs generated 96 Results and **24 distinct real deepseek-flash
+Judge requests**, with no execution/evaluator ERROR. Demo quality fail/review verdicts
+remain visible; completion does not mean all business evaluations passed. All source
+reports and all copied settings other than the explicit edits remain unchanged.
+Measure overlap using actual SDK execution spans, excluding synthesized Turn envelopes;
+the SDK trace envelope's existing timestamp behavior is outside this change.
+
+Evidence: `runtime/concurrency-live-acceptance/acceptance-summary.json` and
+`live-overlap.json`, with original/copied reports, Trace evidence and UI screenshots.
+The original rerun checkout and 5197 stack are preserved. Its uncommitted rerun changes
+were copied only as a dependency for this isolated implementation. Remote refresh timed
+out; the feature starts at local refactor-1 **c1f2139**. Use the feature-only patch in
+`runtime/feature-unified-concurrency.patch` to review changes against that dependency.
+
+## 2026-10-30 — Editable rerun creates a new task
+
+Completed the user-authorized autonomous Goal on `feature/rerun-as-new-task`.
+The single-task and A/B list actions now open the existing editable task creation
+form. Restore the source task name with an `_重跑` suffix (within 128 characters),
+agent and branch, exact agent versions on both A/B sides, dataset publication,
+selected Case IDs, primary evaluator versions and order, execution settings, and
+immutable static-analysis associations. Users can submit unchanged or edit first.
+Only submission creates fresh task/run identities. Cancellation, source-loading
+failure and rejected submissions leave the source task and its results intact.
+
+RerunDialog reads task associations and manifests; EvaluationTaskForm owns restored
+form state and ordinary creation requests; AgentTargetPicker restores selections
+through its injected directory and rejects unavailable saved versions. In-bank and
+integrated modes retain the configured directory and current session token;
+external mode retains localAgentDirectory and the synthetic `local` token. Saved
+credential references are not reused as session tokens. Identity changes close the
+copy form and prevent an in-flight validation from creating a task afterwards.
+Unavailable/disabled original evaluators require an explicit selection change.
+Published hybrid evaluators already selected by the source task are restored with
+their exact versions and editable checkboxes, while ordinary new-task catalog
+selection retains its existing scope.
+
+Forward Case selection and timeout through the existing Demo A/B HTTP ->
+ServerDependencies -> create_ab_runs path, keeping both sides controlled and
+preserving existing concurrency/retry restrictions. The existing immutable Run
+manifest, adapters, persistence and dispatcher remain in use. No new production
+module, endpoint, compatibility schema or database migration is introduced. Source
+assessment for goal/p1-demo, integration/p1-new and the current branch is recorded
+in refactor-implementation-plan.md; their incompatible old rerun contracts are not
+ported. Update stale picker labels and replace same-task rerun expectations in the
+browser fixtures. Keep the existing detail-navigation/history/summary regressions.
+
+Verification: full backend **2902 passed / 102 skipped**; tested-Agent suite
+**32 passed**; frontend unit suite **126 passed**; related login, directory, task
+creation, detail and rerun browser suite **166 passed**, followed by two supplemental hybrid-evaluator cases; the final
+rerun suite has **40 passed**. Task-summary browser suite **19 passed**
+(187 distinct browser cases overall). Three
+existing visibility/late-response polling tests were stabilized by advancing the
+fake clock until the next network-backed poll occurs; each passed three repeats.
+Vue type checking, affected ESLint, production build and diff whitespace checks
+passed. Ruff comparison against HEAD confirmed four pre-existing findings and no
+new findings (UP037, two I001, TRY004); existing dependency deprecations and large
+bundle warnings remain. Backend acceptance executes both original and copied Demo
+A/B runs and compares the original complete reports afterwards. Browser network
+fixtures verify bank/external/integrated routing; no live in-bank gateway or paid
+model acceptance is claimed.
+
+The local eight-service stack was gracefully restarted only after confirming no
+active or queued evaluations. Frontend/API/directory/loan runtime/Trace health
+checks returned HTTP 200, Redis returned PONG, both Celery nodes responded, and the
+running API schema exposes the new A/B fields. Runtime data is retained. No commit,
+push or merge was performed; unrelated work in the original checkout is preserved.
 
 ## 2026-10-19 — Restore complete sample expectations
 

@@ -372,7 +372,6 @@ def test_existing_response_envelope_wraps_once(monkeypatch, tmp_path):
         "dataset_id",
         "dataset_version",
         "evaluator_ids",
-        "max_parallel_cases",
         "timeout_seconds",
         "max_retries",
         "repetitions",
@@ -386,7 +385,7 @@ def test_required_fields_have_no_silent_defaults(field):
 
 
 @pytest.mark.parametrize("mode", ["inbank", "mock", ""])
-def test_ordinary_submission_requires_parallelism_in_every_platform_mode(mode, monkeypatch):
+def test_ordinary_submission_defaults_parallelism_to_one_in_every_platform_mode(mode, monkeypatch):
     monkeypatch.setenv("AGENTGATE_AGENT_PLATFORM_MODE", mode)
     calls = []
 
@@ -398,8 +397,8 @@ def test_ordinary_submission_requires_parallelism_in_every_platform_mode(mode, m
     body.pop("max_parallel_cases")
     with client_for(submit) as client:
         response = client.post(PATH, json=body, headers=HEADERS)
-    assert response.status_code == 422, response.text
-    assert calls == []
+    assert response.status_code == 202, response.text
+    assert len(calls) == 1 and calls[0]["max_parallel_cases"] == 1
 
 
 def test_valid_domain_task_with_wrong_requested_repeat_count_is_uncertain():

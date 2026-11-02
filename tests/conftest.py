@@ -19,8 +19,7 @@ from agentgate.demo.targets import (
     get_demo_target_descriptor,
 )
 from agentgate.domain import EvaluationReport, EvaluationRun
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.storage.sqlite import SQLiteRepository
 
 
@@ -54,15 +53,15 @@ def execute_demo() -> DemoExecution:
             dataset_version=dataset_version,
             evaluator_ids=evaluator_ids,
         )
-        capture = InMemoryTraceCapture()
+        adapter = DemoLoanTargetAdapter(state_store=state_store)
         try:
             completed = runs.execute_run(
                 run.id,
-                DemoLoanTargetAdapter(capture, state_store=state_store),
-                capture.resolve,
+                adapter,
+                resolve_demo_trace,
             )
         finally:
-            capture.shutdown()
+            adapter.close()
         return completed, ResultReader(repository).get_report(completed.id)
 
     return execute

@@ -4,9 +4,8 @@ import os
 from contextlib import ExitStack
 
 from agentgate.domain import TargetSnapshot
-from agentgate.integrations.observability import InMemoryTraceCapture
 from agentgate.integrations.observability.trace_server import BASE_URL_ENV, TraceServerClient
-from agentgate.integrations.targets.demo_loan import DemoLoanTargetAdapter
+from agentgate.integrations.targets.demo_loan import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.integrations.targets.inbank.chatabc import (
     InbankChatABCTargetAdapter,
     load_chatabc_settings,
@@ -49,12 +48,12 @@ class TargetExecutionFactory:
                 source_timezone=os.getenv("AGENTGATE_TRACE_SERVER_SOURCE_TIMEZONE", "").strip() or None,
             )
         if target.adapter_type == DemoLoanTargetAdapter.adapter_type:
-            capture = InMemoryTraceCapture()
-            resources.callback(capture.shutdown)
-            adapter = DemoLoanTargetAdapter(capture)
-            resolver = capture.resolve
+            adapter = DemoLoanTargetAdapter()
+            resources.callback(adapter.close)
+            resolver = resolve_demo_trace
         elif target.adapter_type == LocalBankAdapter.adapter_type:
             adapter = LocalBankAdapter()
+            resources.callback(adapter.close)
             resolver = resolve_local_bank_trace
         elif target.adapter_type == InbankChatABCTargetAdapter.adapter_type:
             chatabc = InbankChatABCTargetAdapter(load_chatabc_settings(), trace_client=trace_client)

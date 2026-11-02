@@ -64,9 +64,9 @@ class Client:
             return {"resCode": "FAIAG0000", "data": {"session_id": self.session}}
         if payload is not None:
             rid = kwargs["request_id"]
-            self.session = payload.get("sessionId", self.session)
+            session = payload.get("sessionId") or payload.get("data", {}).get("session_id")
             result = {"mode": self.mode, "status": "completed", "agent_version": "v1", "request_id": rid,
-                      "session_id": self.session, "output": "test answer", "final_state": {"status": "pending_review"},
+                      "session_id": session, "output": "test answer", "final_state": {"status": "pending_review"},
                       "trace_id": rid}
             self.requests[rid] = result
             self.inputs[rid] = {"txt": payload["txt"] if self.mode == "cloudshrimp" else payload["data"]["txt"]}
@@ -315,3 +315,28 @@ def test_workflow_graph_change_creates_new_snapshot_without_mutating_old():
     assert changed_snapshot.descriptor_sha256 != original_snapshot.descriptor_sha256
     assert original.model_dump(mode="json") == saved
     assert original_snapshot.descriptor_sha256 == original.content_sha256
+
+
+@pytest.mark.parametrize("value", [None, 1, 3, 30, 0, 31, 1.5, True, "2"])
+def test_local_bank_launch_validates_and_pins_concurrency(tmp_path, monkeypatch, value):
+    from agentgate.server.routes import bank_targets
+    monkeypatch.setattr(bank_targets, "LocalBankClient", Client)
+    class Dispatcher:
+        def submit(self, _run_id): pass
+    app = create_app(tmp_path / "concurrency.db", Dispatcher())
+    with TestClient(app) as http:
+        deps = app.state.dependencies
+        ds = deps.datasets.create_dataset("concurrency")
+        deps.datasets.create_draft(ds.id)
+        deps.datasets.save_case(ds.id, Case(name="c", turns=[CaseTurn(input={"txt": "hello"})]))
+        deps.datasets.publish_draft(ds.id)
+        body = {"mode": "base", "dataset_id": ds.id, "dataset_version": 1}
+        if value is not None: body["max_parallel_cases"] = value
+        valid = value is None or type(value) is int and 1 <= value <= 30
+        response = http.post("/api/bank-evaluations", json=body)
+        assert response.status_code == (202 if valid else 422), response.text
+        if valid:
+            rid = response.json()["data"]["run_id"]
+            assert deps.repository.get_run(rid).manifest.max_parallel_cases == (value or 1)
+        else:
+            assert deps.repository.list_evaluation_tasks() == []

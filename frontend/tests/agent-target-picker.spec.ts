@@ -84,7 +84,7 @@ for (const [name, id, rawType] of [
   test(`${rawType} selects an exact version without branch and locks the submission copy`, async ({
     page,
   }) => {
-    await choose(page, '选择智能体', `${name} · ${id}`);
+    await choose(page, '选择智能体', name);
     await expect(page.getByRole('combobox', { name: '分支地址' })).toBeDisabled();
     expect(await read(page)).toBeNull();
     await choose(page, '智能体版本', '1.1.0 · published');
@@ -117,7 +117,7 @@ for (const [name, id, rawType] of [
 test('abcclaw includes nested branch identity, queries branch versions and invalidates on branch change', async ({
   page,
 }) => {
-  await choose(page, '选择智能体', '云虾助手 · claw-a');
+  await choose(page, '选择智能体', '云虾助手');
   await expect(page.getByRole('combobox', { name: '智能体版本' })).toBeDisabled();
   await choose(page, '分支地址', '↳ ↳ 叶分支 · leaf');
   await choose(page, '智能体版本', 'leaf-v1 · test');
@@ -137,12 +137,12 @@ test('abcclaw includes nested branch identity, queries branch versions and inval
 });
 
 test('agent change clears dependent selection without transient mixed targets', async ({ page }) => {
-  await choose(page, '选择智能体', '基础助手 · base-a');
+  await choose(page, '选择智能体', '基础助手');
   await choose(page, '智能体版本', '1.0.0 · published');
   await page.evaluate(() => {
     (window as any).picker.events.length = 0;
   });
-  await choose(page, '选择智能体', '工作流助手 · workflow-a');
+  await choose(page, '选择智能体', '工作流助手');
   expect(await read(page)).toBeNull();
   const events = await page.evaluate(() => (window as any).picker.events);
   expect(events.filter((value: any) => value?.agentId === 'workflow-a' && value !== null)).toEqual(
@@ -154,7 +154,7 @@ test('agent change clears dependent selection without transient mixed targets', 
 });
 
 test('unknown agent type stays visible but cannot produce a target', async ({ page }) => {
-  await choose(page, '选择智能体', '未知助手 · unknown');
+  await choose(page, '选择智能体', '未知助手');
   await expect(page.getByRole('alert')).toContainText('暂不支持');
   await expect(page.getByRole('combobox', { name: '智能体版本' })).toBeDisabled();
   await expect(page.getByRole('combobox', { name: '分支地址' })).toBeDisabled();
@@ -164,7 +164,7 @@ test('unknown agent type stays visible but cannot produce a target', async ({ pa
 test('refresh invalidates a removed version, error is sanitized and empty state allows retry', async ({
   page,
 }) => {
-  await choose(page, '选择智能体', '基础助手 · base-a');
+  await choose(page, '选择智能体', '基础助手');
   await choose(page, '智能体版本', '1.0.0 · published');
   await page.evaluate(() => {
     (window as any).picker.versions = ['1.1.0'];
@@ -196,7 +196,7 @@ test('refresh invalidates a removed version, error is sanitized and empty state 
 test('late version response after an auth change cannot populate the new context', async ({
   page,
 }) => {
-  await choose(page, '选择智能体', '基础助手 · base-a');
+  await choose(page, '选择智能体', '基础助手');
   await page.evaluate(() => {
     (window as any).picker.hold = 'getAgentVersions';
   });
@@ -212,7 +212,7 @@ test('late version response after an auth change cannot populate the new context
   await expect(page.getByRole('combobox', { name: '选择智能体' })).toBeEnabled();
   await expect(page.getByRole('combobox', { name: '智能体版本' })).toBeDisabled();
   expect(await read(page)).toBeNull();
-  await choose(page, '选择智能体', '服务助手 · base-b');
+  await choose(page, '选择智能体', '服务助手');
   await choose(page, '智能体版本', '1.1.0 · published');
   const result = await read(page);
   expect(result.target.agentId).toBe('base-b');
@@ -230,7 +230,7 @@ test('personal space passes an empty teamId through to the directory', async ({ 
 });
 
 test('unmount clears the parent selection', async ({ page }) => {
-  await choose(page, '选择智能体', '基础助手 · base-a');
+  await choose(page, '选择智能体', '基础助手');
   await choose(page, '智能体版本', '1.0.0 · published');
   expect(await read(page)).not.toBeNull();
   await page.evaluate(() => (window as any).picker.unmount());

@@ -14,9 +14,7 @@ from agentgate.demo.targets import (
     get_demo_target_descriptor,
 )
 from agentgate.domain import RunStatus, TargetSnapshot
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
-
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 
 app = typer.Typer(help="运行和查看评估任务", no_args_is_help=True)
 
@@ -97,15 +95,15 @@ def evaluate(
         _fail_validation(error)
 
     try:
-        capture = InMemoryTraceCapture()
+        adapter = DemoLoanTargetAdapter()
         try:
             completed = management.execute_run(
                 run.id,
-                DemoLoanTargetAdapter(capture),
-                capture.resolve,
+                adapter,
+                resolve_demo_trace,
             )
         finally:
-            capture.shutdown()
+            adapter.close()
         report = reader.get_report(completed.id)
     except Exception as error:
         _fail_execution(error)

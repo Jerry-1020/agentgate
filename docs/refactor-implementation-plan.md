@@ -4,6 +4,33 @@ Current implementation status is tracked in
 [`project-progress.md`](project-progress.md). This document remains the migration and
 sequencing authority rather than a claim that every target file already exists.
 
+## Release delivery checkpoint — 2026-10-31
+
+The user subsequently authorized separate commits for editable rerun and configurable
+concurrency, a feature-branch push and PR creation against `release_20261102`.
+Integrate on `feature/rerun-concurrency-release-20261102` from release head `50888af`;
+preserve release-owned behavior and the original implementation worktrees. This
+supersedes the earlier no-commit/no-push limits for delivery only. Do not merge.
+See project-progress.md for fresh verification against the release base.
+
+## Unified Case concurrency checkpoint — 2026-10-31
+
+The user authorized autonomous implementation and verification of 1–30 configurable
+Case concurrency (default 1) for both login modes and all supported single/A/B targets.
+This supersedes the local-loan/external-A/B serial restrictions in older plans.
+See docs/run/implementation-plan.md for ownership and source assessment; the behavior
+baseline is goal/p1-demo (4e6d8b4), with integration/p1-new (d1112e7) inspected as reference.
+The current refactor supplies the manifest/protocol/Engine/in-bank concurrency contracts.
+Adapt external scheduling in the existing three adapters; do not introduce an executor
+module or change the Engine. Demo Trace captures are per Case. Validate new configuration
+at launch/application boundaries without rewriting historical immutable snapshots.
+
+The implementation is on feature/unified-case-concurrency at local refactor-1 c1f2139;
+remote refresh timed out. Existing uncommitted rerun work is a copied dependency and
+must stay separate from any future concurrency commit. No commit, push or merge is
+performed. Full regression and local real-model acceptance pass; precise counts,
+limits and evidence locations are recorded in project-progress.md.
+
 ## 1. Scope And Authority
 
 This plan reorganizes the working behavior on Git branch `goal/p1-demo` into the
@@ -379,3 +406,43 @@ components. This later review does not change the refactor baseline.
 ## 2026-10-07 三类贷款核心专项验收
 
 用户授权直接实施至可验收。当前分支复用多轮领域、规则/LLM/composite执行与版本发布；新增单一职责 execution_path evaluator，适配器只规范化实际SDK类型，UI保存与导出保留新断言。未修改目录/Token模式路由、未新增调度或注册框架、未改变默认内置评估器集合。goal/p1-demo、integration/p1-new本地不可解析，因此未声称复用其具体代码。共3集v2、24样本、9任务真实完成，工作流7节点10连线、云虾3 Skills覆盖。回归1380后端/82前端通过，最终结果67/72通过，5条真实原因解释失败保留，详见project-progress.md。
+
+
+## 2026-10-30 — Editable rerun as a new task
+
+The user authorized autonomous implementation and verification of this scope on
+`feature/rerun-as-new-task`, with no commit, push or merge. Single and A/B rerun
+entries open the existing creation form, preload the saved target/branch and exact
+versions, dataset version, sample selection, primary evaluator versions, execution
+settings and static-analysis links, and append `_重跑` to the editable name. Only
+explicit submission creates new task/run identities; the source remains intact.
+
+Source assessment: `goal/p1-demo` App.vue preserves explicit creation and immutable
+execution evidence but has no editable task-copy workflow. `integration/p1-new`
+tasks API and results/RerunDialog.vue use incompatible task contracts and a
+single-case latest-version rerun; do not port those schemas or fallback behavior.
+Adapt the current RerunDialog, EvaluationTaskForm, AgentTargetPicker and Run API
+types instead. Keep directory and token selection in the existing auth-dependent
+form boundary. The new code restores saved selections and handles unavailable
+versions without choosing replacements. No new production module or endpoint is needed. Extend the existing Demo A/B
+submission contract to forward selected cases and timeout through the existing
+RunManagement/create_ab_runs boundary, preventing copied settings from reverting
+to defaults. Existing concurrency/retry restrictions on A/B and local targets
+still apply.
+
+Checkpoints: restore picker selections and reject stale loads; load source tasks
+and manifests without writes; hydrate the editable form and create through normal
+submission APIs; verify list/detail, single/A/B, bank/external, cancel/error and
+original-record preservation. Complete frontend type/lint/unit/build checks,
+focused browser suites and full backend regression. Record actual results in
+project-progress.md.
+
+Status: completed on 2026-10-30. Full backend, tested-Agent, frontend unit, related
+browser and build verification is recorded in project-progress.md. The local
+stack has been restarted and health-checked; work remains uncommitted on the
+feature branch.
+
+The copy form also restores enabled published hybrid evaluators already selected
+by the source task, exposing removal/reselection without expanding the ordinary
+new-task catalog. Supplemental unchanged/editable hybrid cases pass, along with
+the final 40-case rerun suite, type checks, unit tests and production build.

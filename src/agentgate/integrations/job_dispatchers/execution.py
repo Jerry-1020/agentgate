@@ -57,9 +57,9 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
         return run.status.value
     target = run.manifest.target
     if target.adapter_type == "local_bank" and (
-        run.manifest.max_retries != 0 or run.manifest.max_parallel_cases != 1
+        run.manifest.max_retries != 0
     ):
-        raise ValueError(f"{target.adapter_type} execution requires no retries and serial cases")
+        raise ValueError(f"{target.adapter_type} execution requires no retries")
     if target.adapter_type in {"inbank_chatabc", "inbank_yunxia"} and run.manifest.max_retries != 0:
         raise ValueError(f"{target.adapter_type} execution requires no retries")
 
@@ -86,6 +86,7 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                     adapter = PlatformAdapter(PlatformClient.from_environment(), token)
                     trace_resolver = resolve_platform_trace
                     resources.callback(setattr, adapter, "token", "")
+                    resources.callback(adapter.close)
                 else:
                     adapter, trace_resolver = TargetExecutionFactory.create(
                         target, resources, trace_token=token,

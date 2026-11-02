@@ -26,6 +26,7 @@ class BankLaunch(BaseModel):
     evaluator_ids: list[str] | None = None
     evaluator_refs: list[EvaluatorRef] | None = Field(default=None, min_length=1)
     timeout_seconds: float = Field(default=180, gt=0, le=300)
+    max_parallel_cases: int = Field(default=1, ge=1, le=30, strict=True)
     repetitions: int = Field(default=1, ge=1, le=20, strict=True)
     scheduled_for: datetime | None = None
     target_descriptor_sha256: str | None = None
@@ -67,7 +68,7 @@ def launch(request: BankLaunch, dependencies: Dependencies):
             dataset_version=request.dataset_version, case_ids=request.case_ids,
             evaluator_ids=selected_ids,
             evaluator_refs=request.evaluator_refs, timeout_seconds=request.timeout_seconds,
-            max_parallel_cases=1, max_retries=0, scheduled_for=request.scheduled_for, persist=False)
+            max_parallel_cases=request.max_parallel_cases, max_retries=0, scheduled_for=request.scheduled_for, persist=False)
         for case in run.manifest.execution_cases:
             if set(case.initial_state) - {"customer"}:
                 raise ValueError("only test customer initial_state is supported")
@@ -76,7 +77,7 @@ def launch(request: BankLaunch, dependencies: Dependencies):
             for turn in case.turns:
                 if set(turn.input) != {"txt"} or not isinstance(turn.input["txt"], str) or not 1 <= len(turn.input["txt"].strip()) <= 4000:
                     raise ValueError("bank turns require nonblank txt up to 4000 characters")
-        runs = [run, *(EvaluationRun(manifest=run.manifest, user_team_id=run.user_team_id,
+        runs = [run, *(EvaluationRun(timing=run.timing, manifest=run.manifest, user_team_id=run.user_team_id,
             user_id=run.user_id, user_name=run.user_name, api_key=run.api_key)
             for _ in range(request.repetitions - 1))]
         task = EvaluationTask(id=run.id, name=request.name.strip() if request.name else None, kind="stability" if request.repetitions > 1 else "single", run_ids=tuple(r.id for r in runs))

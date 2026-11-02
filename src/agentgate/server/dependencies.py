@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Request
-from agentgate.application.evaluation_queries import EvaluationQueries
 
 from agentgate.application import (
     ABRunPair,
@@ -24,6 +23,7 @@ from agentgate.application import (
     create_ab_runs,
 )
 from agentgate.application.credential_management import ApiKeyManagement
+from agentgate.application.evaluation_queries import EvaluationQueries
 from agentgate.application.evaluator_management import (
     EvaluatorManagement,
     build_default_evaluator_management,
@@ -31,8 +31,8 @@ from agentgate.application.evaluator_management import (
 from agentgate.application.result_case_writeback import ResultCaseWriteback
 from agentgate.demo.bootstrap import (
     ensure_demo_dataset,
-    ensure_loan_core_datasets,
     ensure_demo_target_descriptors,
+    ensure_loan_core_datasets,
 )
 from agentgate.demo.loan import LOAN_DATASET, LoanAgent
 from agentgate.demo.targets import (
@@ -58,10 +58,9 @@ from agentgate.integrations.model_providers.environment import (
     load_judge_model_from_environment,
 )
 from agentgate.integrations.observability import (
-    InMemoryTraceCapture,
     ingest_otlp_http_json,
 )
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.skill_analysis import analyze_skill_relationships
 from agentgate.storage.configuration import SQLiteConfig, create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
@@ -159,6 +158,9 @@ class ServerDependencies:
         *,
         dataset_id: str = LOAN_DATASET.id,
         dataset_version: int | None = None,
+        case_ids: list[str] | None = None,
+        timeout_seconds: float = 300,
+        max_parallel_cases: int = 1,
         evaluator_refs: list[EvaluatorRef] | None = None,
     ) -> ABRunPair:
         """Create and dispatch one controlled pair of POC Loan Agent Runs."""
@@ -171,6 +173,9 @@ class ServerDependencies:
             dataset_id=dataset_id,
             dataset_version=dataset_version,
             evaluator_refs=evaluator_refs,
+            case_ids=case_ids,
+            timeout_seconds=timeout_seconds,
+            max_parallel_cases=max_parallel_cases,
         )
 
     def execute_demo_run(
@@ -196,14 +201,11 @@ class ServerDependencies:
             max_parallel_cases=1,
             max_retries=0,
         )
-        capture = InMemoryTraceCapture()
+        adapter = DemoLoanTargetAdapter(state_store=self.demo_state)
         try:
-            adapter = DemoLoanTargetAdapter(
-                capture, state_store=self.demo_state
-            )
-            return self.runs.execute_run(run.id, adapter, capture.resolve)
+            return self.runs.execute_run(run.id, adapter, resolve_demo_trace)
         finally:
-            capture.shutdown()
+            adapter.close()
 
     def submit_stability_runs(self, version: str, repetitions: int, **settings):
         from agentgate.domain.evaluation_task import EvaluationTask
@@ -212,7 +214,7 @@ class ServerDependencies:
         template = self._create_demo_run(version, persist=False, **settings)
         if template.status != RunStatus.PENDING:
             raise ValueError("stability does not support scheduling")
-        runs = [template, *(EvaluationRun(manifest=template.manifest,
+        runs = [template, *(EvaluationRun(timing=template.timing, manifest=template.manifest,
             user_team_id=template.user_team_id, user_id=template.user_id,
             user_name=template.user_name, api_key=template.api_key)
             for _ in range(repetitions - 1))]

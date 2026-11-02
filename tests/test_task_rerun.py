@@ -8,8 +8,7 @@ from fastapi.testclient import TestClient
 
 from agentgate.domain import EvaluationRun, RunStatus, utcnow
 from agentgate.domain.evaluation_task import EvaluationTask
-from agentgate.integrations.observability import InMemoryTraceCapture
-from agentgate.integrations.targets import DemoLoanTargetAdapter
+from agentgate.integrations.targets import DemoLoanTargetAdapter, resolve_demo_trace
 from agentgate.server.app import create_app
 
 
@@ -40,13 +39,13 @@ def rerun(client, task_id, run_id):
 
 
 def execute(client, run_id):
-    capture = InMemoryTraceCapture()
+    adapter = DemoLoanTargetAdapter()
     try:
         return client.app.state.dependencies.runs.execute_run(
-            run_id, DemoLoanTargetAdapter(capture), capture.resolve,
+            run_id, adapter, resolve_demo_trace,
         )
     finally:
-        capture.shutdown()
+        adapter.close()
 
 
 def test_rerun_preserves_task_snapshot_and_old_evidence_across_restart(tmp_path):
