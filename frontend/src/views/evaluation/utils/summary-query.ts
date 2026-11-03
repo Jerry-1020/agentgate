@@ -11,7 +11,7 @@ export function taskPath(row: TaskListSummary): string {
 }
 export function hasActiveRuns(rows: TaskListSummary[]): boolean {
   return rows.some((row) =>
-    row.runs.some((run) => ['pending', 'scheduled', 'running'].includes(run.status)),
+    row.runs.some((run) => ['pending', 'scheduled', 'waiting', 'running'].includes(run.status)),
   );
 }
 export function evaluatorStrategy(kinds: string[]): string {
