@@ -764,6 +764,11 @@ test.describe('task-list rerun action', () => {
         const path = new URL(req.url()).pathname;
         if (!path.startsWith('/api/')) return route.continue();
         calls.push({ path, method: req.method() });
+        if (/^\/api\/runs\/[^/]+\/samples$/.test(path) && req.method() === 'GET') {
+          const id = decodeURIComponent(path.split('/')[3]);
+          const run = rows.flatMap(row => row.runs).find(run => run.run_id === id)!;
+          return route.fulfill({json:{run:{id,status:run.status,started_at:now,completed_at:terminal.includes(run.status)?now:null},results:[]}});
+        }
         if (path !== '/api/evaluation-task-summaries' || req.method() !== 'GET') {
           return route.fulfill({ status: 500, json: { detail: 'Unexpected request' } });
         }
@@ -810,7 +815,7 @@ test.describe('task-list rerun action', () => {
       expect(calls.length).toBeGreaterThan(0);
       expect(
         calls.every(
-          (call) => call.method === 'GET' && call.path === '/api/evaluation-task-summaries',
+          (call) => call.method === 'GET' && (call.path === '/api/evaluation-task-summaries' || /^\/api\/runs\/[^/]+\/samples$/.test(call.path)),
         ),
       ).toBe(true);
     });
