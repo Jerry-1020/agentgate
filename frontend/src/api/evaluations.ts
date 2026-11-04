@@ -168,6 +168,7 @@ export const kindLabel = (kind: string) =>
   ] ?? kind;
 export const statusLabel = (value: string) =>
   ({
+    waiting: '等待下发',
     pending: '排队中',
     running: '运行中',
     completed: '运行完成',
