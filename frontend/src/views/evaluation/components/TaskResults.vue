@@ -26,10 +26,12 @@ import {
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import RerunDialog from './RerunDialog.vue';
 import TraceExplorer from './TraceExplorer.vue';
+import TaskExecutionFlow from './TaskExecutionFlow.vue';
 import { sameJson } from '../utils/report-presentation';
 import { taskTitle } from '../utils/dashboard-data';
 const detailTabs = [
   ['results', '执行结果'],
+  ['flow', '执行流程'],
   ['low-samples', '低分样本'],
   ['iteration', '优化迭代'],
   ['config', '任务快照'],
@@ -482,6 +484,7 @@ watch(sampleId, () => {
             {{ tab === 'low-samples' ? '暂无匹配的低分样本' : '暂无匹配样本' }}
           </p>
         </template>
+        <TaskExecutionFlow v-else-if="tab === 'flow'" :run-ids="[id]" :statuses="{ [id]: progress.status }" />
         <section v-else-if="tab === 'iteration'" aria-label="优化迭代">
           <p class="empty">能力构建中</p>
         </section>

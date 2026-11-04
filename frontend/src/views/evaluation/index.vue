@@ -32,6 +32,7 @@ import ScoringTemplates from './components/ScoringTemplates.vue';
 import JudgeSystem from './components/JudgeSystem.vue';
 import ModelSettings from './components/ModelSettings.vue';
 import RunDetail from './components/TaskResults.vue';
+import TaskExecutionFlow from './components/TaskExecutionFlow.vue';
 import TaskList from './components/TaskList.vue';
 import Comparisons from './components/Comparisons.vue';
 import Analysis from './components/UpstreamAnalysis.vue';
@@ -41,6 +42,7 @@ const datasetDirty = ref(false),
   evaluatorDirty = ref(false),
   settingsDirty = ref(false);
 const rerunId = ref('');
+const pairFlowOpen = ref(false);
 const rerunTaskId = ref('');
 const currentRoute = useRoute(),
   router = useRouter();
@@ -419,6 +421,10 @@ async function taskRerunCreated(taskId: string) {
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
           embedded
           @status="pairStatuses = $event" />
+        <details v-if="pairLink" class="card" @toggle="pairFlowOpen = ($event.target as HTMLDetailsElement).open">
+          <summary>执行流程（A/B）</summary>
+          <TaskExecutionFlow v-if="pairFlowOpen" :run-ids="pairLink.runIds" :statuses="pairStatuses" />
+        </details>
         <RunDetail
           v-if="!pairLink"
           :key="runId"

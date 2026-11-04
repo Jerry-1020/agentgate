@@ -24,6 +24,7 @@ from agentgate.domain import (
 from agentgate.storage.repository import AgentGateRepository
 
 from .retry import can_retry_target_failure, retry_delay_seconds
+from .events import RunEventRecorder, safe_diagnostic
 from .target_protocol import (
     CaseExecutionPending,
     CaseExecutionRequest,
@@ -57,6 +58,7 @@ class RunEngine:
         self.evaluate_case = evaluate_case
         self.resolve_trace = resolve_trace
         self.retry_sleep = retry_sleep
+        self.target_events = {}
 
     def execute(
         self, run: EvaluationRun, target_adapter: TargetAdapterProtocol
@@ -73,6 +75,9 @@ class RunEngine:
             return claimed
 
         start_time = time.monotonic()
+        recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+        recorder.finish_open("worker_wait")
+        execution_event = recorder.start("execution", "执行测评")
         LOGGER.info(
             "Run execution started: run_id=%s case_count=%d adapter_type=%s adapter_version=%s",
             run.id,
@@ -81,13 +86,17 @@ class RunEngine:
             target_adapter.adapter_version,
         )
         try:
-            self._validate_execution(running, target_adapter)
+            with recorder.operation("validation", "校验执行配置"):
+                self._validate_execution(running, target_adapter)
             self._execute_cases(running, target_adapter)
             self._raise_if_cancelled(running.id)
 
             completed = transition_run(running, RunStatus.COMPLETED)
-            summary = build_completed_run_summary(completed, self.repository.list_results(completed.id))
-            self.repository.save_completed_run(completed, summary)
+            with recorder.operation("summary", "汇总并保存测评报告"):
+                summary = build_completed_run_summary(completed, self.repository.list_results(completed.id))
+                self.repository.save_completed_run(completed, summary)
+            recorder.finish(execution_event)
+            recorder.finish_open("run", ended_at=utcnow())
             LOGGER.info(
                 "Run execution completed: run_id=%s duration=%.1fs",
                 run.id, time.monotonic() - start_time,
@@ -96,6 +105,7 @@ class RunEngine:
         except Exception as exc:
             current = self.repository.get_run(running.id)
             if current is not None and current.status is RunStatus.CANCELLED:
+                recorder.finish_open(None, status="cancelled", message="任务已取消")
                 LOGGER.warning("Run execution cancelled: run_id=%s", run.id)
                 return current
             terminal_status = (
@@ -106,6 +116,11 @@ class RunEngine:
             error = None if terminal_status == RunStatus.CANCELLED else self._safe_error(exc)
             terminal = transition_run(running, terminal_status, error=error)
             self.repository.save_run(terminal)
+            recorder.finish(execution_event, status="failed" if terminal_status is RunStatus.FAILED else "cancelled", error=exc)
+            recorder.finish_open("run", status="failed" if terminal_status is RunStatus.FAILED else "cancelled",
+                                 error_code=getattr(exc, "code", type(exc).__name__), message=safe_diagnostic(exc))
+            recorder.finish_open(None, status="interrupted", error_code="run_ended",
+                                 message="任务已结束，该阶段未正常完成")
             if terminal_status is RunStatus.FAILED:
                 LOGGER.error(
                     "Run execution failed: run_id=%s duration=%.1fs error=%s",
@@ -155,6 +170,7 @@ class RunEngine:
                     active.rotate(-1)
                     continue
                 except TargetExecutionError as error:
+                    self._finish_target(run, request, error=error)
                     if not can_retry_target_failure(
                         error,
                         retries_used=retries_used,
@@ -168,7 +184,10 @@ class RunEngine:
                     self._cancel(target_adapter, handle)
                     active.popleft()
                     retry_number = retries_used + 1
-                    self.retry_sleep(retry_delay_seconds(retry_number))
+                    with RunEventRecorder(self.repository, run.id, run.user_team_id).operation(
+                        "retry", "等待样本执行重试", case_id=case.id, attempt=retry_number + 1,
+                    ):
+                        self.retry_sleep(retry_delay_seconds(retry_number))
                     active.appendleft(
                         self._start_case(
                             run,
@@ -180,6 +199,7 @@ class RunEngine:
                     continue
 
                 self._raise_if_cancelled(run.id)
+                self._finish_target(run, request, error=outcome.error)
                 self._record_case(run, case, request, outcome)
                 active.popleft()
         except Exception:
@@ -212,6 +232,10 @@ class RunEngine:
         while True:
             self._raise_if_cancelled(run.id)
             request = self._build_request(run, case)
+            recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+            self.target_events[request.execution_id] = recorder.start(
+                "target", "智能体执行", case_id=case.id, attempt=retries_used + 1,
+            )
             try:
                 handle = target_adapter.start(request)
                 if not handle.strip():
@@ -224,6 +248,7 @@ class RunEngine:
                 )
                 return case, request, handle, retries_used
             except TargetExecutionError as error:
+                self._finish_target(run, request, error=error)
                 if not can_retry_target_failure(
                     error,
                     retries_used=retries_used,
@@ -235,7 +260,15 @@ class RunEngine:
                     "Case start failed, retrying: run_id=%s case_id=%s retry=%d/%d error=%s",
                     run.id, case.id, retries_used, run.manifest.max_retries, error.code,
                 )
-                self.retry_sleep(retry_delay_seconds(retries_used))
+                with recorder.operation("retry", "等待样本提交重试", case_id=case.id, attempt=retries_used + 1):
+                    self.retry_sleep(retry_delay_seconds(retries_used))
+
+    def _finish_target(self, run, request, *, error=None):
+        event = self.target_events.pop(request.execution_id, None)
+        if event is not None:
+            RunEventRecorder(self.repository, run.id, run.user_team_id).finish(
+                event, status="failed" if error else "completed", error=error,
+            )
 
     @staticmethod
     def _wait_for_target(
@@ -267,16 +300,19 @@ class RunEngine:
         request: CaseExecutionRequest,
         outcome: CaseExecutionResult,
     ) -> None:
-        trace = self.resolve_trace(request, outcome)
-        self._validate_trace(request, outcome, trace)
+        recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+        with recorder.operation("trace", "获取并保存执行轨迹", case_id=case.id):
+            trace = self.resolve_trace(request, outcome)
+            self._validate_trace(request, outcome, trace)
+            self._raise_if_cancelled(run.id)
+            self.repository.save_trace(trace)
+        recorder.record_trace(trace)
+        with recorder.operation("evaluation", "执行样本评估", case_id=case.id):
+            case_results = tuple(self.evaluate_case(case, trace, run.manifest.evaluator_specs))
         self._raise_if_cancelled(run.id)
-        self.repository.save_trace(trace)
-        case_results = tuple(
-            self.evaluate_case(case, trace, run.manifest.evaluator_specs)
-        )
-        self._raise_if_cancelled(run.id)
-        self._validate_results(run, case, trace, case_results)
-        self.repository.save_results(case_results)
+        with recorder.operation("result_save", "校验并保存样本结果", case_id=case.id):
+            self._validate_results(run, case, trace, case_results)
+            self.repository.save_results(case_results)
 
     def _raise_if_cancelled(self, run_id: str) -> None:
         current = self.repository.get_run(run_id)

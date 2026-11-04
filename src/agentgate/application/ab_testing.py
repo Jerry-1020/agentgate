@@ -152,6 +152,8 @@ def create_ab_runs(
         EvaluationTask(id=baseline_run.id, kind="ab", run_ids=(baseline_run.id, candidate_run.id)),
         [baseline_run, candidate_run],
     )
+    for run in (baseline_run, candidate_run):
+        run_management.record_created_run(run)
 
     dispatched_baseline = _dispatch_and_reload(
         run_management,

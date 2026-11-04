@@ -83,6 +83,8 @@ def launch(request: BankLaunch, dependencies: Dependencies):
         task = EvaluationTask(id=run.id, name=request.name.strip() if request.name else None, kind="stability" if request.repetitions > 1 else "single", run_ids=tuple(r.id for r in runs))
         dependencies.repository.save_task_runs(task, runs)
         for item in runs:
+            dependencies.runs.record_created_run(item)
+        for item in runs:
             if item.status == "scheduled":
                 continue
             try:

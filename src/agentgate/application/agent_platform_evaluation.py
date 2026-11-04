@@ -289,6 +289,8 @@ def submit_platform_evaluation(
     except Exception:  # noqa: BLE001 -- Persistence outcome must never become a 4xx rejection.
         # A commit error may be ambiguous: retain the encrypted credential for reconciliation.
         raise RuntimeError("task persistence outcome is uncertain") from None
+    for item in runs:
+        management.record_created_run(item)
     if platform_mode == "inbank":
         # Stability repetitions share the single-target side.
         for item in runs:
@@ -448,6 +450,8 @@ def submit_platform_comparison(
         repository.save_task_runs(task, tuple(prepared))
     except Exception:  # noqa: BLE001 -- Persistence outcome must never become a 4xx rejection.
         raise RuntimeError("task persistence outcome is uncertain") from None
+    for item in prepared:
+        management.record_created_run(item)
     if platform_mode == "inbank":
         for side, item in zip(("baseline", "candidate"), prepared):
             _log_inbank_run_saved(task, item, side)

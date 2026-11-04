@@ -77,6 +77,9 @@ def test_existing_database_prefix_and_identity_migration_preserves_payloads(tmp_
         tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'") if row[0].startswith("agentgate_")]
         original_payloads = {t: db.execute(f'SELECT payload FROM "{t}"').fetchall() for t in tables if t not in ("agentgate_api_keys", "agentgate_run_asset_refs", "agentgate_evaluation_task_runs") and "payload" in {row[1] for row in db.execute(f'PRAGMA table_info("{t}")')}}
         for table in tables:
+            # Execution logs have no historical unprefixed schema to simulate.
+            if table == "agentgate_run_events":
+                continue
             for name in ("user_team_id", "user_id", "user_name", "api_key"):
                 if name in {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}:
                     for index in db.execute(f'PRAGMA index_list("{table}")').fetchall():

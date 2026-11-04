@@ -12,6 +12,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
+from .protocol import JobSubmission
+
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 10
@@ -43,7 +45,7 @@ class BjsJobDispatcher:
             raise ValueError(f"{JOB_ID_ENV} must not be blank")
         self._job_id = self._job_id.strip()
 
-    def submit(self, run_id: str) -> None:
+    def submit(self, run_id: str) -> JobSubmission:
         """Submit one persisted Run to BJS and fail on rejected submissions."""
 
         self._validate_identifier(run_id, "run_id")
@@ -114,7 +116,9 @@ class BjsJobDispatcher:
             raise RuntimeError("BJS submission rejected")
         details = data.get("data") if isinstance(data, dict) else None
         batch_number = details.get("onlineBatchSeqNum") if isinstance(details, dict) else None
-        if isinstance(batch_number, str) and batch_number:
+        receipt: JobSubmission = {"bjs_job_id": job_id.strip()}
+        if isinstance(batch_number, str) and batch_number.strip():
+            receipt["bjs_batch_number"] = batch_number.strip()[:128]
             # Escape control characters and bound the external value in logs.
             LOGGER.info(
                 "BJS submission accepted: run_id=%s onlineBatchSeqNum=%r",
@@ -122,6 +126,7 @@ class BjsJobDispatcher:
             )
         else:
             LOGGER.info("BJS submission accepted: run_id=%s", run_id)
+        return receipt
 
     def cancel(self, run_id: str) -> None:
         """Validate a Run ID; the documented BJS API has no cancellation endpoint."""

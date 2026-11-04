@@ -18,6 +18,7 @@ from agentgate.integrations.targets.agent_platform import (
     resolve_platform_trace,
 )
 from agentgate.integrations.targets.execution_factory import TargetExecutionFactory
+from agentgate.run.events import RunEventRecorder
 from agentgate.storage.configuration import create_repository, load_database_config
 from agentgate.storage.repository import AgentGateRepository
 
@@ -55,6 +56,31 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
         raise ValueError(f"unknown EvaluationRun: {run_id}")
     if run.status is not RunStatus.PENDING:
         return run.status.value
+    recorder = RunEventRecorder(repository, run.id, run.user_team_id)
+    recorder.finish_open("worker_wait")
+    event = recorder.start("worker", "Worker 处理任务")
+    try:
+        status = _execute_initialized(repository, run_id, recorder)
+    except Exception as exc:
+        recorder.finish(event, status="failed", error=exc)
+        recorder.finish_open("initialization", status="failed", error_code=type(exc).__name__,
+                             message=str(exc))
+        raise
+    else:
+        recorder.finish(event, status="failed" if status == "failed" else "cancelled" if status == "cancelled" else "completed",
+                        message="Worker 执行结束")
+        if status in {"failed", "cancelled"}:
+            recorder.finish_open(None, status="failed" if status == "failed" else "cancelled",
+                                 message="Worker 执行结束")
+        return status
+
+
+def _execute_initialized(repository: AgentGateRepository, run_id: str, recorder: RunEventRecorder) -> str:
+    run = repository.get_run(run_id)
+    if run is None:
+        raise ValueError(f"unknown EvaluationRun: {run_id}")
+    if run.status is not RunStatus.PENDING:
+        return run.status.value
     target = run.manifest.target
     if target.adapter_type == "local_bank" and (
         run.manifest.max_retries != 0
@@ -63,6 +89,7 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
     if target.adapter_type in {"inbank_chatabc", "inbank_yunxia"} and run.manifest.max_retries != 0:
         raise ValueError(f"{target.adapter_type} execution requires no retries")
 
+    init_event = recorder.start("initialization", "初始化执行环境与凭据")
     with ExitStack() as resources:
         if target.adapter_type in {
             PlatformAdapter.adapter_type, "inbank_chatabc", "inbank_yunxia",
@@ -89,9 +116,10 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                     resources.callback(adapter.close)
                 else:
                     adapter, trace_resolver = TargetExecutionFactory.create(
-                        target, resources, trace_token=token,
+                        target, resources, trace_token=token, event_recorder=recorder,
                     )
             except (ValueError, LookupError, ConnectionError) as exc:
+                recorder.finish(init_event, status="failed", error=exc)
                 if diagnostic_context:
                     if stage == "credential_resolve":
                         reason = (
@@ -141,6 +169,7 @@ def _execute(repository: AgentGateRepository, run_id: str) -> str:
                 judge_credential_ref=configured_judge.credential_ref,
             )
         )
+        recorder.finish(init_event)
         completed = RunManagement(repository, evaluator_management).execute_run(
             run.id,
             adapter,
