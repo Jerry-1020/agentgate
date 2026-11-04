@@ -104,7 +104,6 @@ function creationTime(value: string) {
   const formatted = formatTaskTime(value);
   return formatted ? `${formatted.date} ${formatted.time}` : '未记录';
 }
-const taskStatusLabel = (status: string) => (status === 'waiting' ? '等待中' : statusLabel(status));
 const total = computed(() => data.value?.total ?? 0);
 watch(data, (value) => {
   if (!value) return;
@@ -342,7 +341,7 @@ onUnmounted(() => clearTimeout(debounce));
                     :value="done(r)!.done"
                     :max="done(r)!.total || 1"
                     :class="{ failed: r.status === 'failed' }" /></template
-                ><span v-else>—</span><small>{{ taskStatusLabel(r.status) }}</small>
+                ><span v-else>—</span><small>{{ statusLabel(r.status) }}</small>
               </td>
               <td
                 v-for="column in timeColumns"
