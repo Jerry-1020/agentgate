@@ -4,7 +4,12 @@ import logging
 from time import monotonic
 
 from agentgate.server.user_context import get_user_info
-from agentgate.storage.evaluation_query_models import EvaluationQuery, TaskSummaryQuery
+from agentgate.storage.evaluation_query_models import (
+    EvaluationQuery,
+    RelatedEvaluationTaskPage,
+    RelatedTaskCursor,
+    TaskSummaryQuery,
+)
 from agentgate.storage.repository import AgentGateRepository
 
 LOGGER = logging.getLogger(__name__)
@@ -28,6 +33,15 @@ class EvaluationQueries:
             "Evaluation overview summary loaded: latency_ms=%.1f", (monotonic() - start) * 1000
         )
         return result
+
+    def related_tasks(
+        self, evaluator_id: str, version: str, *, limit: int, cursor: RelatedTaskCursor | None,
+    ) -> RelatedEvaluationTaskPage:
+        info = get_user_info()
+        return self.repository.list_evaluator_related_tasks(
+            evaluator_id, version, user_team_id=info.user_team_id if info else "",
+            limit=limit, cursor=cursor,
+        )
 
     def tasks(self, query: TaskSummaryQuery):
         info = get_user_info()

@@ -10,6 +10,7 @@ import {
   promptVariableNames,
 } from '../utils/evaluator-templates';
 import LLMGroupTemplateCard from './LLMGroupTemplateCard.vue';
+import EvaluatorTaskHistory from './EvaluatorTaskHistory.vue';
 import { hasDimensionScoring } from '../utils/evaluator-design';
 import {
   emptyLLMGroup,
@@ -431,8 +432,8 @@ onUnmounted(() => {
     </header>
     <p v-if="loading" class="loading-state" role="status">正在读取评估器及子评估器配置…</p>
     <template v-else>
-      <section class="group-overview" aria-label="评估器基本信息">
-        <div v-if="detail" class="group-identity">
+      <section v-if="detail" class="group-overview" aria-label="评估器基本信息">
+        <div class="group-identity">
           <span class="group-symbol" aria-hidden="true">◇</span>
           <div class="group-title">
             <div class="title-row">
@@ -461,278 +462,289 @@ onUnmounted(() => {
             {{ basicsOpen ? '收起基本信息' : '基本信息' }}
           </button>
         </div>
-        <fieldset v-if="!detail || basicsOpen" class="basic-fields" :disabled="busy">
-          <label
-            >评估器名称 <em>*</em
-            ><input
-              v-model="form.name"
-              aria-label="评估器名称"
-              maxlength="50"
-              :readonly="!editing"
-              placeholder="请输入评估器名称"
-            /><small>{{ form.name.length }}/50</small></label
-          >
-          <label class="description-field"
-            >备注描述<input
-              v-model="form.description"
-              aria-label="评估器备注描述"
-              maxlength="200"
-              :readonly="!editing"
-              placeholder="请输入备注描述"
-            /><small>{{ form.description.length }}/200</small></label
-          >
-        </fieldset>
       </section>
-
-      <div class="group-workspace">
-        <aside class="child-sidebar" aria-label="子评估器列表">
-          <header>
-            <h2>
-              子评估器 <small>{{ form.children.length }}</small>
-            </h2>
-            <button
-              class="text-button"
-              :disabled="busy || loading || form.children.length >= 32"
-              @click="addCustomChild"
-            >
-              ＋ 新增
-            </button>
-          </header>
-          <p class="sidebar-help">每个子评估器独立配置模型和评分标准。</p>
-          <div
-            v-for="child in form.children"
-            :key="child.key"
-            class="child-row"
-            :class="{ active: selected === child.key }"
-          >
-            <button
-              class="child-select"
-              :aria-label="'配置子评估器 ' + (child.name || '未命名')"
-              :aria-pressed="selected === child.key"
-              :disabled="busy"
-              @click="
-                selected = child.key;
-                advancedOpen = false;
-              "
-            >
-              <span class="child-name">{{ child.name || '未命名子评估器' }}</span
-              ><small>{{ child.templateId ? '预置子项' : '自定义' }}</small>
-            </button>
-            <label v-if="editing" class="weight-input"
-              ><input
-                v-model.number="child.weight"
-                type="number"
-                min="0.01"
-                max="100"
-                step="0.01"
-                :disabled="busy"
-                :aria-label="(child.name || '未命名') + '权重'"
-              />%</label
-            ><span v-else class="weight-label">{{ child.weight }}%</span>
-            <button
-              v-if="editing"
-              class="text-button danger child-delete"
-              :disabled="busy"
-              :aria-label="'删除子评估器 ' + (child.name || '未命名')"
-              @click="removeChild(child.key)"
-            >
-              删除
-            </button>
-          </div>
-          <p v-if="!form.children.length" class="empty-state">
-            还没有子评估器<br />点击“新增”直接创建子评估器。
-          </p>
-          <section class="aggregation">
-            <div class="weight-total">
-              <span>权重合计</span
-              ><strong :class="{ invalid: totalWeight !== 100 }">{{ totalWeight }}%</strong>
-            </div>
-            <button
-              v-if="editing && form.children.length > 1"
-              class="text-button"
-              :disabled="busy"
-              @click="equalize"
-            >
-              均分权重
-            </button>
-            <p>综合得分 = 各子评估器得分按权重加权平均。权重合计须为 100%。</p>
+      <EvaluatorTaskHistory
+        :enabled="!!detail && !editing"
+        :evaluator-id="detail?.evaluator.id ?? ''"
+        :latest-version="detail?.latest_version"
+        :current-version="detail?.viewing_draft ? null : detail?.definition.version"
+      >
+        <section v-if="!detail || basicsOpen" class="group-overview" aria-label="评估器基本配置">
+          <fieldset class="basic-fields" :disabled="busy">
             <label
-              >综合通过分数<input
-                v-model.number="form.threshold"
-                aria-label="综合通过分数"
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                :readonly="!editing"
-                :disabled="busy"
-            /></label>
-          </section>
-        </aside>
-
-        <fieldset v-if="active" class="child-configuration" :disabled="busy">
-          <header class="child-heading">
-            <div>
-              <h2>{{ active.name || '配置子评估器' }}</h2>
-              <p>
-                {{
-                  currentTemplate
-                    ? '综合模板子项：' +
-                      currentTemplate.name +
-                      (promptAdjusted ? ' · 提示词已调整' : '')
-                    : '自定义子评估器'
-                }}
-              </p>
-            </div>
-          </header>
-          <div class="child-basics">
-            <label
-              >子评估器名称 <em>*</em
+              >评估器名称 <em>*</em
               ><input
-                v-model="active.name"
-                aria-label="子评估器名称"
+                v-model="form.name"
+                aria-label="评估器名称"
                 maxlength="50"
                 :readonly="!editing"
-                placeholder="请输入子评估器名称" /></label
-            ><label
+                placeholder="请输入评估器名称"
+              /><small>{{ form.name.length }}/50</small></label
+            >
+            <label class="description-field"
               >备注描述<input
-                v-model="active.description"
-                aria-label="子评估器备注描述"
+                v-model="form.description"
+                aria-label="评估器备注描述"
                 maxlength="200"
                 :readonly="!editing"
-                placeholder="描述此评估维度"
-            /></label>
-          </div>
-          <label class="field-label" for="group-child-model">模型选择 <em>*</em></label>
-          <div class="model-row">
-            <select
-              v-if="editing"
-              id="group-child-model"
-              v-model="active.modelKey"
-              aria-label="子评估器模型"
+                placeholder="请输入备注描述"
+              /><small>{{ form.description.length }}/200</small></label
             >
-              <option value="">{{ modelLoading ? '正在读取模型…' : '请选择模型' }}</option>
-              <option v-if="currentModelMissing" :value="active.modelKey">
-                {{ modelRefLabel(active.modelKey) }}（原配置）
-              </option>
-              <option v-for="[key, model] in modelOptions" :key="key" :value="key">
-                {{ model.model_id }} · {{ model.provider_id }}
-              </option>
-            </select>
-            <div v-else class="model-readonly">{{ modelRefLabel(active.modelKey) }}</div>
-            <button
-              class="settings-button"
-              aria-label="子评估器高级设置"
-              :aria-expanded="advancedOpen"
-              @click="advancedOpen = !advancedOpen"
-            >
-              ⚙
-            </button>
-          </div>
-          <p v-if="modelError" class="help-text" role="alert">
-            {{ modelError }} <button class="text-button" @click="loadModels">重试</button>
-          </p>
-          <p v-else-if="!modelLoading && !modelOptions.length && editing" class="help-text">
-            暂无可选模型，请先在配置中接入模型。<a href="#/settings">前往配置</a>
-          </p>
-          <div v-if="advancedOpen" class="advanced-settings">
-            <label
-              >通过分数（0.0—1.0）<input
-                v-model.number="active.threshold"
-                aria-label="子评估器通过分数"
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                :readonly="!editing"
-            /></label>
-            <p>子评估器按此阈值判定通过；综合得分使用左侧的权重和综合通过分数。</p>
-            <p
-              v-if="
-                active.original?.config.input_selection &&
-                active.original.config.input_selection !== 'final_output'
-              "
-            >
-              此版本保留原有的评审输入范围。
-            </p>
-            <details v-if="originalRubric">
-              <summary>此版本保留的评分标准</summary>
-              <pre>{{ JSON.stringify(originalRubric, null, 2) }}</pre>
-            </details>
-          </div>
+          </fieldset>
+        </section>
 
-          <div class="prompt-toolbar">
-            <h3>Prompt <em>*</em></h3>
-            <div v-if="editing" class="actions">
-              <button class="text-button" @click="clearPrompts">清空</button>
-            </div>
-          </div>
-          <div class="prompt-editor">
+        <div class="group-workspace">
+          <aside class="child-sidebar" aria-label="子评估器列表">
             <header>
-              <strong>System</strong>
-              <div class="actions">
-                <button
-                  class="text-button"
-                  aria-label="展开 System Prompt"
-                  @click="expanded = true"
-                >
-                  ⤢ 全屏</button
-                ><button class="text-button" aria-label="复制 System Prompt" @click="copyPrompt">
-                  ⧉ 复制
-                </button>
-              </div>
-            </header>
-            <textarea
-              v-model="active.instruction"
-              aria-label="System Prompt"
-              :readonly="!editing"
-              :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
-              spellcheck="false"
-              rows="15"
-            />
-          </div>
-          <div v-if="active.userPrompt !== null" class="prompt-editor user-prompt">
-            <header>
-              <strong>User</strong
-              ><button v-if="editing" class="text-button" @click="active.userPrompt = null">
-                移除 User Prompt
+              <h2>
+                子评估器 <small>{{ form.children.length }}</small>
+              </h2>
+              <button
+                class="text-button"
+                :disabled="busy || loading || form.children.length >= 32"
+                @click="addCustomChild"
+              >
+                ＋ 新增
               </button>
             </header>
-            <textarea
-              v-model="active.userPrompt"
-              aria-label="User Prompt"
-              :readonly="!editing"
-              rows="5"
-              :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
-              spellcheck="false"
-            />
-          </div>
-          <button v-else-if="editing" class="add-user-button" @click="active.userPrompt = ''">
-            ＋ 添加 User Prompt
-          </button>
-          <p v-if="promptVariables.length" class="help-text" aria-label="Prompt 变量">
-            变量
-            <template v-for="(variable, index) in promptVariables" :key="variable">
-              <span v-if="index">；</span>
-              <code v-text="'{{ ' + variable + ' }}'"></code>
-              <span v-if="variable === 'input'"> 为用例输入</span>
-              <span v-else-if="variable === 'output'"> 为被测 Agent 的最终回答</span>
-            </template>
-          </p>
-          <section class="output-description">
-            <h3>输出</h3>
-            <p><strong>得分：</strong>0.0—1.0，表示满足评分标准的程度。</p>
-            <p><strong>原因：</strong>说明评分依据与扣分原因。任务保留每个子评估器的得分和原因。</p>
+            <p class="sidebar-help">每个子评估器独立配置模型和评分标准。</p>
+            <div
+              v-for="child in form.children"
+              :key="child.key"
+              class="child-row"
+              :class="{ active: selected === child.key }"
+            >
+              <button
+                class="child-select"
+                :aria-label="'配置子评估器 ' + (child.name || '未命名')"
+                :aria-pressed="selected === child.key"
+                :disabled="busy"
+                @click="
+                  selected = child.key;
+                  advancedOpen = false;
+                "
+              >
+                <span class="child-name">{{ child.name || '未命名子评估器' }}</span
+                ><small>{{ child.templateId ? '预置子项' : '自定义' }}</small>
+              </button>
+              <label v-if="editing" class="weight-input"
+                ><input
+                  v-model.number="child.weight"
+                  type="number"
+                  min="0.01"
+                  max="100"
+                  step="0.01"
+                  :disabled="busy"
+                  :aria-label="(child.name || '未命名') + '权重'"
+                />%</label
+              ><span v-else class="weight-label">{{ child.weight }}%</span>
+              <button
+                v-if="editing"
+                class="text-button danger child-delete"
+                :disabled="busy"
+                :aria-label="'删除子评估器 ' + (child.name || '未命名')"
+                @click="removeChild(child.key)"
+              >
+                删除
+              </button>
+            </div>
+            <p v-if="!form.children.length" class="empty-state">
+              还没有子评估器<br />点击“新增”直接创建子评估器。
+            </p>
+            <section class="aggregation">
+              <div class="weight-total">
+                <span>权重合计</span
+                ><strong :class="{ invalid: totalWeight !== 100 }">{{ totalWeight }}%</strong>
+              </div>
+              <button
+                v-if="editing && form.children.length > 1"
+                class="text-button"
+                :disabled="busy"
+                @click="equalize"
+              >
+                均分权重
+              </button>
+              <p>综合得分 = 各子评估器得分按权重加权平均。权重合计须为 100%。</p>
+              <label
+                >综合通过分数<input
+                  v-model.number="form.threshold"
+                  aria-label="综合通过分数"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  :readonly="!editing"
+                  :disabled="busy"
+              /></label>
+            </section>
+          </aside>
+
+          <fieldset v-if="active" class="child-configuration" :disabled="busy">
+            <header class="child-heading">
+              <div>
+                <h2>{{ active.name || '配置子评估器' }}</h2>
+                <p>
+                  {{
+                    currentTemplate
+                      ? '综合模板子项：' +
+                        currentTemplate.name +
+                        (promptAdjusted ? ' · 提示词已调整' : '')
+                      : '自定义子评估器'
+                  }}
+                </p>
+              </div>
+            </header>
+            <div class="child-basics">
+              <label
+                >子评估器名称 <em>*</em
+                ><input
+                  v-model="active.name"
+                  aria-label="子评估器名称"
+                  maxlength="50"
+                  :readonly="!editing"
+                  placeholder="请输入子评估器名称" /></label
+              ><label
+                >备注描述<input
+                  v-model="active.description"
+                  aria-label="子评估器备注描述"
+                  maxlength="200"
+                  :readonly="!editing"
+                  placeholder="描述此评估维度"
+              /></label>
+            </div>
+            <label class="field-label" for="group-child-model">模型选择 <em>*</em></label>
+            <div class="model-row">
+              <select
+                v-if="editing"
+                id="group-child-model"
+                v-model="active.modelKey"
+                aria-label="子评估器模型"
+              >
+                <option value="">{{ modelLoading ? '正在读取模型…' : '请选择模型' }}</option>
+                <option v-if="currentModelMissing" :value="active.modelKey">
+                  {{ modelRefLabel(active.modelKey) }}（原配置）
+                </option>
+                <option v-for="[key, model] in modelOptions" :key="key" :value="key">
+                  {{ model.model_id }} · {{ model.provider_id }}
+                </option>
+              </select>
+              <div v-else class="model-readonly">{{ modelRefLabel(active.modelKey) }}</div>
+              <button
+                class="settings-button"
+                aria-label="子评估器高级设置"
+                :aria-expanded="advancedOpen"
+                @click="advancedOpen = !advancedOpen"
+              >
+                ⚙
+              </button>
+            </div>
+            <p v-if="modelError" class="help-text" role="alert">
+              {{ modelError }} <button class="text-button" @click="loadModels">重试</button>
+            </p>
+            <p v-else-if="!modelLoading && !modelOptions.length && editing" class="help-text">
+              暂无可选模型，请先在配置中接入模型。<a href="#/settings">前往配置</a>
+            </p>
+            <div v-if="advancedOpen" class="advanced-settings">
+              <label
+                >通过分数（0.0—1.0）<input
+                  v-model.number="active.threshold"
+                  aria-label="子评估器通过分数"
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  :readonly="!editing"
+              /></label>
+              <p>子评估器按此阈值判定通过；综合得分使用左侧的权重和综合通过分数。</p>
+              <p
+                v-if="
+                  active.original?.config.input_selection &&
+                  active.original.config.input_selection !== 'final_output'
+                "
+              >
+                此版本保留原有的评审输入范围。
+              </p>
+              <details v-if="originalRubric">
+                <summary>此版本保留的评分标准</summary>
+                <pre>{{ JSON.stringify(originalRubric, null, 2) }}</pre>
+              </details>
+            </div>
+
+            <div class="prompt-toolbar">
+              <h3>Prompt <em>*</em></h3>
+              <div v-if="editing" class="actions">
+                <button class="text-button" @click="clearPrompts">清空</button>
+              </div>
+            </div>
+            <div class="prompt-editor">
+              <header>
+                <strong>System</strong>
+                <div class="actions">
+                  <button
+                    class="text-button"
+                    aria-label="展开 System Prompt"
+                    @click="expanded = true"
+                  >
+                    ⤢ 全屏</button
+                  ><button class="text-button" aria-label="复制 System Prompt" @click="copyPrompt">
+                    ⧉ 复制
+                  </button>
+                </div>
+              </header>
+              <textarea
+                v-model="active.instruction"
+                aria-label="System Prompt"
+                :readonly="!editing"
+                :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
+                spellcheck="false"
+                rows="15"
+              />
+            </div>
+            <div v-if="active.userPrompt !== null" class="prompt-editor user-prompt">
+              <header>
+                <strong>User</strong
+                ><button v-if="editing" class="text-button" @click="active.userPrompt = null">
+                  移除 User Prompt
+                </button>
+              </header>
+              <textarea
+                v-model="active.userPrompt"
+                aria-label="User Prompt"
+                :readonly="!editing"
+                rows="5"
+                :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
+                spellcheck="false"
+              />
+            </div>
+            <button v-else-if="editing" class="add-user-button" @click="active.userPrompt = ''">
+              ＋ 添加 User Prompt
+            </button>
+            <p v-if="promptVariables.length" class="help-text" aria-label="Prompt 变量">
+              变量
+              <template v-for="(variable, index) in promptVariables" :key="variable">
+                <span v-if="index">；</span>
+                <code v-text="'{{ ' + variable + ' }}'"></code>
+                <span v-if="variable === 'input'"> 为用例输入</span>
+                <span v-else-if="variable === 'output'"> 为被测 Agent 的最终回答</span>
+              </template>
+            </p>
+            <section class="output-description">
+              <h3>输出</h3>
+              <p><strong>得分：</strong>0.0—1.0，表示满足评分标准的程度。</p>
+              <p>
+                <strong>原因：</strong>说明评分依据与扣分原因。任务保留每个子评估器的得分和原因。
+              </p>
+            </section>
+          </fieldset>
+          <section v-else class="child-configuration empty-configuration">
+            <h2>添加第一个子评估器</h2>
+            <p>新增子评估器，填写名称、模型和评分标准。</p>
+            <button class="primary-button" :disabled="busy" @click="addCustomChild">
+              ＋ 新增子评估器
+            </button>
           </section>
-        </fieldset>
-        <section v-else class="child-configuration empty-configuration">
-          <h2>添加第一个子评估器</h2>
-          <p>新增子评估器，填写名称、模型和评分标准。</p>
-          <button class="primary-button" :disabled="busy" @click="addCustomChild">
-            ＋ 新增子评估器
-          </button>
-        </section>
-      </div>
+        </div>
+      </EvaluatorTaskHistory>
     </template>
     <p v-if="notice" class="notice-message" role="status">{{ notice }}</p>
     <p v-if="error" class="error-message" role="alert">
@@ -882,6 +894,7 @@ onUnmounted(() => {
 
 <style scoped>
 .llm-group-editor {
+  --group-content-inset: 24px;
   color: var(--el-text-color-primary);
   background: var(--el-fill-color-extra-light);
   border: 1px solid var(--el-border-color-lighter);
@@ -950,11 +963,21 @@ button:disabled {
   color: var(--el-color-danger);
 }
 .group-overview {
-  margin: 20px 24px;
+  margin: 20px var(--group-content-inset);
   padding: 24px;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 10px;
+}
+.llm-group-editor > :deep(.evaluator-detail-tabs > .el-tabs__header) {
+  margin: 0 var(--group-content-inset) 16px;
+}
+.llm-group-editor > :deep(.evaluator-detail-tabs .history-content) {
+  margin: 0 var(--group-content-inset) var(--group-content-inset);
+  padding: clamp(12px, 2vw, 20px);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-bg-color);
 }
 .group-identity {
   display: flex;
@@ -1080,7 +1103,7 @@ em {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
   gap: 20px;
-  margin: 0 24px 24px;
+  margin: 0 var(--group-content-inset) var(--group-content-inset);
   align-items: start;
 }
 .child-sidebar,
@@ -1475,8 +1498,11 @@ h3 {
   }
 }
 @media (max-width: 760px) {
+  .llm-group-editor {
+    --group-content-inset: 14px;
+  }
   .group-overview {
-    margin: 14px;
+    margin-block: 14px;
     padding: 18px;
   }
   .group-toolbar {
@@ -1495,7 +1521,6 @@ h3 {
   }
   .group-workspace {
     display: block;
-    margin: 0 14px 14px;
   }
   .child-sidebar {
     margin-bottom: 14px;
