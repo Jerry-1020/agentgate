@@ -453,6 +453,8 @@ for (const mode of ['external', 'bank', 'integrated'] as const) {
             ? { agent_id: 'agent-1', baseline_version: oldA, candidate_version: oldB }
             : { agent_id: 'agent-1', agent_version: oldA },
         );
+        if (mode === 'external') expect(write.body.target).not.toHaveProperty('agent_name');
+        else expect(write.body.target).toHaveProperty('agent_name', '原智能体');
         expect(write.headers['x-agent-platform-token']).toBe(
           mode === 'external' ? 'local' : 'current-bank-token',
         );

@@ -52,6 +52,7 @@ def _build_inbank_descriptor(
     *,
     team_id: str,
     agent_id: str,
+    agent_name: str | None,
     type_group: Literal["base/workflow", "abcclaw"],
     agent_version: str,
     arrange_type: Literal["base", "workflow"] | None,
@@ -82,7 +83,7 @@ def _build_inbank_descriptor(
             external_target_id=agent_id,
             external_version_id=agent_version,
         ),
-        display_name=agent_id,
+        display_name=agent_name if agent_name is not None else agent_id,
         metadata=metadata,
         input_schema=(
             {"type": "object", "minProperties": 1}
@@ -111,6 +112,7 @@ def _platform_target_snapshot(
     token: str,
     team_id: str | None,
     agent_id: str,
+    agent_name: str | None,
     type_group: Literal["base/workflow", "abcclaw"],
     agent_version: str,
     arrange_type: Literal["base", "workflow"] | None,
@@ -150,6 +152,7 @@ def _platform_target_snapshot(
         descriptor = _build_inbank_descriptor(
             team_id=team_id,
             agent_id=agent_id,
+            agent_name=agent_name,
             type_group=type_group,
             agent_version=agent_version,
             arrange_type=arrange_type,
@@ -185,6 +188,7 @@ def submit_platform_evaluation(
     user_id: str,
     user_name: str,
     name: str | None = None,
+    agent_name: str | None = None,
     evaluator_refs: tuple[EvaluatorRef, ...] | None = None,
 ) -> EvaluationTask:
     if credentials is None:
@@ -205,6 +209,7 @@ def submit_platform_evaluation(
         token=token,
         team_id=team_id,
         agent_id=agent_id,
+        agent_name=agent_name,
         type_group=type_group,
         agent_version=agent_version,
         arrange_type=arrange_type,
@@ -324,6 +329,7 @@ def submit_platform_comparison(
     user_id: str,
     user_name: str,
     name: str | None = None,
+    agent_name: str | None = None,
     evaluator_refs: tuple[EvaluatorRef, ...] | None = None,
     max_parallel_cases: int = 1,
 ) -> tuple[EvaluationRun, EvaluationRun]:
@@ -374,6 +380,7 @@ def submit_platform_comparison(
                 token=token,
                 team_id=team_id,
                 agent_id=agent_id,
+                agent_name=agent_name,
                 type_group=type_group,
                 agent_version=version,
                 arrange_type=arrange_type,
