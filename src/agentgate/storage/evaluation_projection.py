@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import UTC
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -18,6 +18,9 @@ from agentgate.domain import RunStatus, content_sha256
 from .evaluation_query_models import (
     SUMMARY_VERSION,
     OverviewSummary,
+    RelatedEvaluationTask,
+    RelatedEvaluationTaskPage,
+    RelatedTaskCursor,
     RunListSummary,
     SummarySourceChanged,
     TaskListSummary,
@@ -236,17 +239,20 @@ def run_relation(db):
                    FROM agentgate_run_case_progress GROUP BY {rk}) p ON p.{rk}=r.{pk}"""
 
 
+_TASK_STATUS = """CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0 THEN 'failed'
+             WHEN SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled'
+             WHEN MIN(CASE WHEN r.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed'
+             WHEN SUM(CASE WHEN r.status IN ('running','completed') THEN 1 ELSE 0 END)>0 THEN 'running'
+             ELSE first_run.status END"""
+
+
 def task_relation(db):
     pk, rk, tk, _, _, team = keys(db)
     first = "first_run_key" if mysql(db) else "first_run_id"
     return f"""SELECT t.{pk} AS k,t.id,t.id AS task_id,COALESCE(t.name,s.fallback_name,t.id) AS name,
         t.kind,t.created_at,first_run.id AS search_run_id,
         MAX(1-({valid_summary(db, "r", "member_summary")})) AS summary_pending,
-        CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0 THEN 'failed'
-             WHEN SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled'
-             WHEN MIN(CASE WHEN r.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed'
-             WHEN SUM(CASE WHEN r.status IN ('running','completed') THEN 1 ELSE 0 END)>0 THEN 'running'
-             ELSE first_run.status END AS status
+        {_TASK_STATUS} AS status
         FROM agentgate_evaluation_tasks t
         JOIN agentgate_evaluation_task_runs a ON a.{tk}=t.{pk} AND a.is_current=1
         JOIN agentgate_runs r ON r.{pk}=a.{rk}
@@ -265,6 +271,100 @@ def task_relation(db):
         FROM agentgate_runs r LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
         WHERE r.{team}=:team AND NOT EXISTS (
             SELECT 1 FROM agentgate_evaluation_task_runs a WHERE a.{rk}=r.{pk})"""
+
+
+def related_tasks(
+    db, evaluator_id: str, version: str, team_id: str, limit: int,
+    cursor: RelatedTaskCursor | None,
+) -> RelatedEvaluationTaskPage:
+    pk, rk, tk, _, _, team = keys(db)
+    is_mysql = mysql(db)
+    first = "first_run_key" if is_mysql else "first_run_id"
+    params = {"evaluator_id": evaluator_id, "version": version, "team": key(db, team_id),
+              "limit": limit + 1}
+    asset = "ref.asset_kind='evaluator' AND ref.source_id='' AND ref.asset_id=:evaluator_id AND ref.version=:version"
+    if is_mysql:
+        from .mysql import _digest
+
+        asset += " AND ref.asset_lookup_key=:asset_key"
+        params["asset_key"] = _digest("evaluator", "", evaluator_id, version)
+
+    # Task IDs and legacy run IDs come from separate namespaces.
+    item_id = "CAST(item_id AS BINARY)" if is_mysql else "item_id"
+    outer_id = "CAST(page.item_id AS BINARY)" if is_mysql else "page.item_id"
+    cursor_id = "CAST(:cursor_id AS BINARY)" if is_mysql else ":cursor_id"
+    after = ""
+    if cursor is not None:
+        after = f"""AND (created_at<:cursor_at OR (
+            created_at=:cursor_at AND ({item_id}>{cursor_id}
+            OR ({item_id}={cursor_id} AND is_task>:cursor_is_task))))"""
+        params.update(cursor_at=stamp(db, cursor.created_at), cursor_id=cursor.item_id,
+                      cursor_is_task=int(cursor.is_task))
+
+    # Historical associations can match. Current ones determine visibility and status.
+    page = rows(db, f"""
+        SELECT page.item_id, page.is_task, page.created_at, first_run.id AS run_id,
+               COALESCE(page.name, s.fallback_name, page.item_id) AS name,
+               page.kind, {_TASK_STATUS} AS status
+        FROM (
+            SELECT * FROM (
+                SELECT DISTINCT COALESCE(t.{pk}, matched.{pk}) AS row_key,
+                    COALESCE(t.id, matched.id) AS item_id, (t.{pk} IS NOT NULL) AS is_task,
+                    COALESCE(t.{first}, matched.{pk}) AS first_key,
+                    COALESCE(t.created_at, matched.created_at) AS created_at,
+                    t.name, COALESCE(t.kind, 'single') AS kind
+                FROM agentgate_run_asset_refs ref
+                JOIN agentgate_runs matched ON matched.{pk}=ref.{rk} AND matched.{team}=:team
+                LEFT JOIN agentgate_evaluation_task_runs link ON link.{rk}=matched.{pk}
+                LEFT JOIN agentgate_evaluation_tasks t ON t.{pk}=link.{tk}
+                WHERE {asset} AND (link.{tk} IS NULL OR t.{first} IS NOT NULL)
+            ) candidates
+            WHERE (is_task=0 OR (
+                EXISTS (
+                    SELECT 1 FROM agentgate_runs representative
+                    WHERE representative.{pk}=candidates.first_key AND representative.{team}=:team
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM agentgate_evaluation_task_runs member
+                    LEFT JOIN agentgate_runs member_run ON member_run.{pk}=member.{rk}
+                    WHERE member.{tk}=candidates.row_key AND member.is_current=1
+                      AND (member_run.{pk} IS NULL OR member_run.{team}<>:team)
+                )
+            ))
+            {after}
+            ORDER BY created_at DESC, {item_id}, is_task
+            LIMIT :limit
+        ) page
+        JOIN agentgate_runs first_run ON first_run.{pk}=page.first_key
+        LEFT JOIN agentgate_run_summaries s ON s.{rk}=page.first_key
+        LEFT JOIN agentgate_evaluation_task_runs current_run
+          ON page.is_task=1 AND current_run.{tk}=page.row_key AND current_run.is_current=1
+        LEFT JOIN agentgate_runs r ON r.{pk}=current_run.{rk}
+        GROUP BY page.row_key, page.item_id, page.is_task, page.created_at, first_run.id,
+                 page.name, s.fallback_name, page.kind, first_run.status
+        ORDER BY page.created_at DESC, {outer_id}, page.is_task
+        """, params)
+
+    items = [
+        RelatedEvaluationTask(
+            task_id=row["item_id"] if row["is_task"] else None,
+            run_id=row["run_id"],
+            name=row["name"],
+            kind=row["kind"],
+            status=row["status"],
+            created_at=(row["created_at"].replace(tzinfo=UTC) if is_mysql
+                        else datetime.fromisoformat(row["created_at"])),
+            evaluator_version=version,
+        )
+        for row in page[:limit]
+    ]
+    next_cursor = None
+    if len(page) > limit:
+        last = items[-1]
+        next_cursor = RelatedTaskCursor(
+            last.created_at, last.task_id or last.run_id, last.task_id is not None,
+        ).encode()
+    return RelatedEvaluationTaskPage(items=items, next_cursor=next_cursor)
 
 
 def filters(db, query, alias="q"):
