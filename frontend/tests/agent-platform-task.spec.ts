@@ -913,7 +913,7 @@ test(`${mode} workflow accepts business JSON while cloudshrimp retains its nativ
   await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
   const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
   expect(sent.body.target).toEqual({
-    team_id: 'team', agent_id: 'workflow', type_group: 'base/workflow',
+    team_id: 'team', agent_id: 'workflow', agent_name: '工作流', type_group: 'base/workflow',
     agent_version: bankVersionOne, arrange_type: 'workflow',
   });
   expect(sent.headers['x-agent-platform-token']).toBe(mode === 'integrated' ? 'integrated-secret' : 'form-secret');
@@ -945,7 +945,7 @@ test(`${mode} base accepts both initialization arrays and retains initialization
   await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
   const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
   expect(sent.body.target).toEqual({
-    team_id: 'team', agent_id: 'base', type_group: 'base/workflow',
+    team_id: 'team', agent_id: 'base', agent_name: '基础编排', type_group: 'base/workflow',
     agent_version: bankVersionOne, arrange_type: 'base',
   });
   expect(sent.headers['x-agent-platform-token']).toBe(mode === 'integrated' ? 'integrated-secret' : 'form-secret');
@@ -1043,7 +1043,7 @@ test('integrated cloudshrimp submits native input with the platform session toke
   await expect.poll(() => requests.filter(r => r.path === '/api/agent-platform/evaluations').length).toBe(1);
   const sent = requests.find(r => r.path === '/api/agent-platform/evaluations')!;
   expect(sent.body.target).toEqual({
-    team_id: 'team', agent_id: 'claw', type_group: 'abcclaw',
+    team_id: 'team', agent_id: 'claw', agent_name: '云虾', type_group: 'abcclaw',
     agent_version: 'v2', branch_id: 'branch/raw',
   });
   expect(sent.headers['x-agent-platform-token']).toBe('integrated-secret');
@@ -1222,6 +1222,7 @@ test('form submits workflow target and selected source cases with isolated token
     target: {
       team_id: 'team',
       agent_id: 'workflow',
+      agent_name: '工作流',
       type_group: 'base/workflow',
       agent_version: '2026-05-06 17:21:16',
       arrange_type: 'workflow',
@@ -1312,6 +1313,7 @@ test('platform A/B submits both versions to the comparison endpoint', async ({
     target: {
       team_id: 'team',
       agent_id: 'workflow',
+      agent_name: '工作流',
       type_group: 'base/workflow',
       baseline_version: '2026-05-06 17:21:16',
       candidate_version: '2026-05-06 17:20:34',
@@ -1464,6 +1466,7 @@ for (const [mode, target, kind] of [
       expect(submission.headers['x-agent-platform-token']).toBe(token);
       expect(submission.body.target).toEqual({
         team_id: 'team', agent_id: target,
+        agent_name: { workflow: '工作流', base: '基础编排', claw: '云虾' }[target],
         type_group: target === 'claw' ? 'abcclaw' : 'base/workflow',
         ...(target === 'claw' ? { branch_id: 'branch/raw' } : { arrange_type: target }),
         ...(kind === 'ab'
@@ -1579,6 +1582,7 @@ test('personal space submits without a team_id field', async ({ page }) => {
   const submission = requests.find((r) => r.path === '/api/agent-platform/evaluations')!;
   expect(submission.body.target).toEqual({
     agent_id: 'workflow',
+    agent_name: '工作流',
     type_group: 'base/workflow',
     agent_version: '2026-05-06 17:21:16',
     arrange_type: 'workflow',
@@ -1600,6 +1604,7 @@ test('abcclaw single sends original branchId and keeps hidden execution defaults
     target: {
       team_id: 'team',
       agent_id: 'claw',
+      agent_name: '云虾',
       type_group: 'abcclaw',
       agent_version: 'v2',
       branch_id: 'branch/raw',
