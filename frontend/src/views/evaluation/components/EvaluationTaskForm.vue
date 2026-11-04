@@ -800,6 +800,7 @@ async function submit() {
           target: {
             ...(target.teamId ? { team_id: target.teamId } : {}),
             agent_id: target.agentId,
+            ...(auth.usesPlatformDirectory ? { agent_name: target.agentName } : {}),
             type_group: target.typeGroup,
             baseline_version: target.agentVersion,
             candidate_version: platformCandidateVersion.value,
@@ -848,6 +849,7 @@ async function submit() {
           target: {
             ...(target.teamId ? { team_id: target.teamId } : {}),
             agent_id: target.agentId,
+            ...(auth.usesPlatformDirectory ? { agent_name: target.agentName } : {}),
             type_group: target.typeGroup,
             agent_version: target.agentVersion,
             ...(target.typeGroup === 'abcclaw'

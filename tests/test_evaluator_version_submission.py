@@ -350,3 +350,44 @@ def test_composite_dependencies_are_pinned_without_becoming_primary(
         assert manifest.primary_evaluator_ids == (evaluator_id,)
         assert {spec.id for spec in manifest.evaluator_specs} == {evaluator_id, *dependencies_ids}
         assert manifest.evaluator_specs == manifests[0].evaluator_specs
+
+@pytest.mark.parametrize("kind,versions", [("platform", ("v1",)), ("platform-ab", ("v1", "v2"))])
+def test_inbank_agent_name_is_pinned_only_to_new_submissions(system, kind, versions):
+    client, dependencies, dispatcher, dataset_id = system
+    evaluator_id, _ = create_published_versions(client)
+    path, body = submission(kind, dataset_id, evaluator_id)
+    headers = {"X-Agent-Platform-Token": "real-session-test-token"}
+
+    def submit():
+        dispatcher.ids.clear()
+        response = client.post(path, json=body, headers=headers)
+        assert response.status_code == 202, response.text
+        return [dependencies.repository.get_run(run_id) for run_id in dispatcher.ids]
+
+    legacy_runs = submit()
+    body["target"]["agent_name"] = "理财助手"
+    named_runs = submit()
+
+    assert len(legacy_runs) == len(named_runs) == len(versions)
+    for legacy, named, version in zip(legacy_runs, named_runs, versions, strict=True):
+        old_target = legacy.manifest.target
+        target = named.manifest.target
+        assert old_target.display_name == "selected-agent"
+        assert target.display_name == "理财助手"
+        assert target.ref == old_target.ref
+        assert target.ref.external_version_id == version
+        assert target.invocation_config == old_target.invocation_config
+        descriptor = dependencies.repository.get_target_descriptor(target.descriptor_sha256)
+        assert descriptor.display_name == target.display_name
+        assert dependencies.repository.get_run(legacy.id).manifest == legacy.manifest
+
+    body["target"]["agent_name"] = None
+    assert [run.manifest.target.display_name for run in submit()] == ["selected-agent"] * len(
+        versions
+    )
+
+    for invalid_name in ("   ", 42):
+        body["target"]["agent_name"] = invalid_name
+        dispatcher.ids.clear()
+        assert client.post(path, json=body, headers=headers).status_code == 422
+        assert not dispatcher.ids
