@@ -189,9 +189,19 @@ export function displayValue(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 export function traceSeconds(trace: any): number | null {
-  const spans = (trace?.spans ?? []).filter((s: any) => s.operation_type === 'case');
-  if (!spans.length) return null;
-  const start = Date.parse(spans[0].started_at),
-    end = Date.parse(spans[0].ended_at);
-  return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, (end - start) / 1000) : null;
+  const spans = (trace?.spans ?? []).flatMap((span: any) => {
+    if (typeof span.started_at !== 'string' || typeof span.ended_at !== 'string') return [];
+    const start = Date.parse(span.started_at),
+      end = Date.parse(span.ended_at);
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start
+      ? [{ operationType: span.operation_type, start, end }]
+      : [];
+  });
+  const cases = spans.filter((span: any) => span.operationType === 'case');
+  // In-bank traces may contain only turns/nodes; use elapsed time, not summed span durations.
+  const timings = cases.length ? cases : spans;
+  if (!timings.length) return null;
+  const start = timings.reduce((value: number, span: any) => Math.min(value, span.start), Infinity),
+    end = timings.reduce((value: number, span: any) => Math.max(value, span.end), -Infinity);
+  return (end - start) / 1000;
 }
