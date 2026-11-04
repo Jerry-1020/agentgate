@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentgate.application import (
@@ -36,6 +36,7 @@ from agentgate.domain import (
 from agentgate.evaluator.models import EvaluatorError
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
 from agentgate.server.errors import raise_conflict, raise_not_found, raise_unprocessable
+from agentgate.storage.evaluation_query_models import RelatedEvaluationTaskPage, RelatedTaskCursor
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -396,6 +397,24 @@ def evaluator_version(
         return dependencies.evaluators.get_version(evaluator_id, version)
     except (EvaluatorError, ValueError) as error:
         _raise_catalog_error(error)
+
+
+@router.get("/{evaluator_id}/versions/{version}/related-tasks")
+def evaluator_related_tasks(
+    evaluator_id: str,
+    version: str,
+    dependencies: Dependencies,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: str | None = None,
+) -> RelatedEvaluationTaskPage:
+    try:
+        dependencies.evaluators.get_version(evaluator_id, version)
+        position = RelatedTaskCursor.decode(cursor) if cursor is not None else None
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+    return dependencies.evaluation_queries.related_tasks(
+        evaluator_id, version, limit=limit, cursor=position,
+    )
 
 
 @router.get("/{evaluator_id}/drafts/current")

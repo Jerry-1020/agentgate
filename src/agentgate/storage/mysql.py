@@ -986,6 +986,10 @@ class MySQLRepository:
         with self._transaction() as db:
             return projection.task_page(db, query, user_team_id)
 
+    def list_evaluator_related_tasks(self, evaluator_id, version, *, user_team_id, limit, cursor):
+        with self._transaction() as db:
+            return projection.related_tasks(db, evaluator_id, version, user_team_id, limit, cursor)
+
     def save_run(self, run: EvaluationRun) -> None:
         with self._transaction() as db:
             stored = _one(db, s.runs, EvaluationRun, id=run.id, lock=True)

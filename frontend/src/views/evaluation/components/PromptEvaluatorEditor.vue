@@ -5,6 +5,7 @@ import { request, type Definition, type EvaluatorDetail } from '../../../api/eva
 import { loadReviewAssets } from '../../../stores/review-assets';
 import { modelRefLabel, type EvaluatorModelRef } from '../utils/evaluator-model';
 import { copyEvaluatorDefinition } from '../utils/evaluator-group';
+import EvaluatorTaskHistory from './EvaluatorTaskHistory.vue';
 import {
   emptyPromptEvaluator,
   promptEvaluatorDefinition,
@@ -269,7 +270,7 @@ onUnmounted(() => {
       <button class="back-button" aria-label="返回评估器列表" :disabled="busy" @click="close">
         ←
       </button>
-      <h1>{{ detail ? '评估器详情' : '新建评估器' }}</h1>
+      <h1>{{ detail?.evaluator.name ?? '新建评估器' }}</h1>
       <span v-if="detail" class="version-tag">{{
         viewingDraft ? '草稿' : 'v' + definition?.version
       }}</span>
@@ -287,169 +288,176 @@ onUnmounted(() => {
       <span>创建时间：{{ evaluatorDate(detail.evaluator.created_at) }}</span>
       <span>更新时间：{{ evaluatorDate(detail.evaluator.updated_at) }}</span>
     </div>
-    <div class="prompt-form-body">
-      <fieldset :disabled="busy">
-        <section class="form-section">
-          <h2>基础信息</h2>
-          <label class="prompt-field" for="prompt-evaluator-name">名称 <em>*</em></label>
-          <div class="counted-field">
-            <input
-              id="prompt-evaluator-name"
-              v-model="form.name"
-              aria-label="评估器名称"
-              maxlength="50"
-              placeholder="请输入名称"
-              :readonly="!editing"
-            />
-            <span>{{ form.name.length }}/50</span>
-          </div>
-          <label class="prompt-field" for="prompt-evaluator-description">描述</label>
-          <div class="counted-field description-field">
-            <textarea
-              id="prompt-evaluator-description"
-              v-model="form.description"
-              aria-label="评估器描述"
-              maxlength="200"
-              placeholder="请输入描述"
-              :readonly="!editing"
-              rows="4"
-            />
-            <span>{{ form.description.length }}/200</span>
-          </div>
-        </section>
-        <section class="form-section">
-          <h2>配置信息</h2>
-          <label class="prompt-field" for="prompt-evaluator-model">模型选择 <em>*</em></label>
-          <div class="model-select-row">
-            <select
-              v-if="editing"
-              id="prompt-evaluator-model"
-              v-model="form.modelKey"
-              aria-label="评估器模型"
-            >
-              <option value="">{{ modelLoading ? '正在读取模型…' : '请选择模型' }}</option>
-              <option v-if="currentModelMissing" :value="form.modelKey">
-                {{ modelRefLabel(form.modelKey) }}（原配置）
-              </option>
-              <option v-for="[key, model] in modelOptions" :key="key" :value="key">
-                {{ model.model_id }} · {{ model.provider_id }}
-              </option>
-            </select>
-            <div v-else class="model-readonly">{{ modelRefLabel(form.modelKey) }}</div>
-            <button
-              class="settings-button"
-              aria-label="高级设置"
-              :aria-expanded="advancedOpen"
-              @click="advancedOpen = !advancedOpen"
-            >
-              ⚙
-            </button>
-          </div>
-          <p v-if="modelError" class="field-help" role="alert">
-            {{ modelError }} <button class="text-button" @click="loadModels">重试</button>
-          </p>
-          <p v-else-if="!modelLoading && !modelOptions.length && editing" class="field-help">
-            暂无可选模型，请先在配置中接入模型。 <a href="#/settings">前往配置</a>
-          </p>
-          <div v-if="advancedOpen" class="advanced-settings">
-            <label class="prompt-field"
-              >通过分数（0.0—1.0）<input
-                v-model.number="form.threshold"
-                type="number"
-                aria-label="评估器通过分数"
-                min="0"
-                max="1"
-                step="0.05"
+    <EvaluatorTaskHistory
+      :enabled="!!detail && !editing"
+      :evaluator-id="detail?.evaluator.id ?? ''"
+      :latest-version="detail?.latest?.version"
+      :current-version="viewingDraft ? null : definition?.version"
+    >
+      <div class="prompt-form-body">
+        <fieldset :disabled="busy">
+          <section class="form-section">
+            <h2>基础信息</h2>
+            <label class="prompt-field" for="prompt-evaluator-name">名称 <em>*</em></label>
+            <div class="counted-field">
+              <input
+                id="prompt-evaluator-name"
+                v-model="form.name"
+                aria-label="评估器名称"
+                maxlength="50"
+                placeholder="请输入名称"
                 :readonly="!editing"
-            /></label>
-            <p>得分达到此值时评估通过。模型连接由本地服务配置管理。</p>
-            <p
-              v-if="
-                definition?.config.input_selection &&
-                definition.config.input_selection !== 'final_output'
-              "
-            >
-              此版本保留原有的评审输入范围。
-            </p>
-            <div v-if="originalRubric">
-              <p>此版本原有评分标准（保留用于执行）：</p>
-              <pre>{{ JSON.stringify(originalRubric, null, 2) }}</pre>
+              />
+              <span>{{ form.name.length }}/50</span>
             </div>
-          </div>
-        </section>
-        <section class="form-section prompt-section">
-          <div class="prompt-toolbar">
-            <h2>Prompt <em>*</em></h2>
-            <div v-if="editing" class="toolbar-actions">
-              <button class="text-button" @click="clearPrompts">清空</button>
+            <label class="prompt-field" for="prompt-evaluator-description">描述</label>
+            <div class="counted-field description-field">
+              <textarea
+                id="prompt-evaluator-description"
+                v-model="form.description"
+                aria-label="评估器描述"
+                maxlength="200"
+                placeholder="请输入描述"
+                :readonly="!editing"
+                rows="4"
+              />
+              <span>{{ form.description.length }}/200</span>
             </div>
-          </div>
-          <div class="prompt-editor">
-            <header>
-              <strong>System</strong>
-              <div>
-                <button
-                  class="icon-button"
-                  aria-label="展开 System Prompt"
-                  @click="expanded = true"
-                >
-                  ⤢</button
-                ><button class="icon-button" aria-label="复制 System Prompt" @click="copyPrompt">
-                  ⧉
-                </button>
-              </div>
-            </header>
-            <textarea
-              v-model="form.instruction"
-              aria-label="System Prompt"
-              :readonly="!editing"
-              :placeholder="'请输入内容，支持按此格式书写变量：{{input}}、{{output}}'"
-              spellcheck="false"
-              rows="16"
-            />
-          </div>
-          <div v-if="form.userPrompt !== null" class="prompt-editor user-prompt-editor">
-            <header>
-              <strong>User</strong
-              ><button v-if="editing" class="text-button" @click="form.userPrompt = null">
-                移除 User Prompt
+          </section>
+          <section class="form-section">
+            <h2>配置信息</h2>
+            <label class="prompt-field" for="prompt-evaluator-model">模型选择 <em>*</em></label>
+            <div class="model-select-row">
+              <select
+                v-if="editing"
+                id="prompt-evaluator-model"
+                v-model="form.modelKey"
+                aria-label="评估器模型"
+              >
+                <option value="">{{ modelLoading ? '正在读取模型…' : '请选择模型' }}</option>
+                <option v-if="currentModelMissing" :value="form.modelKey">
+                  {{ modelRefLabel(form.modelKey) }}（原配置）
+                </option>
+                <option v-for="[key, model] in modelOptions" :key="key" :value="key">
+                  {{ model.model_id }} · {{ model.provider_id }}
+                </option>
+              </select>
+              <div v-else class="model-readonly">{{ modelRefLabel(form.modelKey) }}</div>
+              <button
+                class="settings-button"
+                aria-label="高级设置"
+                :aria-expanded="advancedOpen"
+                @click="advancedOpen = !advancedOpen"
+              >
+                ⚙
               </button>
-            </header>
-            <textarea
-              v-model="form.userPrompt"
-              aria-label="User Prompt"
-              :readonly="!editing"
-              :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
-              rows="6"
-              spellcheck="false"
-            />
-          </div>
-          <button v-else-if="editing" class="add-user-button" @click="form.userPrompt = ''">
-            ＋ 添加 User Prompt
-          </button>
-          <p v-if="promptVariables.length" class="field-help" aria-label="Prompt 变量">
-            变量
-            <template v-for="(variable, index) in promptVariables" :key="variable">
-              <span v-if="index">；</span>
-              <code v-text="'{{ ' + variable + ' }}'"></code>
-              <span v-if="variable === 'input'"> 为用例输入</span>
-              <span v-else-if="variable === 'output'"> 为被测 Agent 的最终回答</span>
-            </template>
-          </p>
-        </section>
-        <section class="output-description">
-          <h2>输出 <span class="info-symbol" title="每条测评结果包含得分和原因">ⓘ</span></h2>
-          <p>
-            <strong>得分：</strong>最终得分，必须输出一个数字，表示满足 Prompt
-            中评分标准的程度。得分范围为 0.0 到 1.0，1.0 表示完全满足评分标准，0.0
-            表示完全不满足评分标准。
-          </p>
-          <p><strong>原因：</strong>对得分的可读解释，说明评分依据与扣分原因。</p>
-        </section>
-      </fieldset>
-      <p v-if="notice" class="notice-message" role="status">{{ notice }}</p>
-      <p v-if="error" class="error-message" role="alert">{{ error }}</p>
-    </div>
+            </div>
+            <p v-if="modelError" class="field-help" role="alert">
+              {{ modelError }} <button class="text-button" @click="loadModels">重试</button>
+            </p>
+            <p v-else-if="!modelLoading && !modelOptions.length && editing" class="field-help">
+              暂无可选模型，请先在配置中接入模型。 <a href="#/settings">前往配置</a>
+            </p>
+            <div v-if="advancedOpen" class="advanced-settings">
+              <label class="prompt-field"
+                >通过分数（0.0—1.0）<input
+                  v-model.number="form.threshold"
+                  type="number"
+                  aria-label="评估器通过分数"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  :readonly="!editing"
+              /></label>
+              <p>得分达到此值时评估通过。模型连接由本地服务配置管理。</p>
+              <p
+                v-if="
+                  definition?.config.input_selection &&
+                  definition.config.input_selection !== 'final_output'
+                "
+              >
+                此版本保留原有的评审输入范围。
+              </p>
+              <div v-if="originalRubric">
+                <p>此版本原有评分标准（保留用于执行）：</p>
+                <pre>{{ JSON.stringify(originalRubric, null, 2) }}</pre>
+              </div>
+            </div>
+          </section>
+          <section class="form-section prompt-section">
+            <div class="prompt-toolbar">
+              <h2>Prompt <em>*</em></h2>
+              <div v-if="editing" class="toolbar-actions">
+                <button class="text-button" @click="clearPrompts">清空</button>
+              </div>
+            </div>
+            <div class="prompt-editor">
+              <header>
+                <strong>System</strong>
+                <div>
+                  <button
+                    class="icon-button"
+                    aria-label="展开 System Prompt"
+                    @click="expanded = true"
+                  >
+                    ⤢</button
+                  ><button class="icon-button" aria-label="复制 System Prompt" @click="copyPrompt">
+                    ⧉
+                  </button>
+                </div>
+              </header>
+              <textarea
+                v-model="form.instruction"
+                aria-label="System Prompt"
+                :readonly="!editing"
+                :placeholder="'请输入内容，支持按此格式书写变量：{{input}}、{{output}}'"
+                spellcheck="false"
+                rows="16"
+              />
+            </div>
+            <div v-if="form.userPrompt !== null" class="prompt-editor user-prompt-editor">
+              <header>
+                <strong>User</strong
+                ><button v-if="editing" class="text-button" @click="form.userPrompt = null">
+                  移除 User Prompt
+                </button>
+              </header>
+              <textarea
+                v-model="form.userPrompt"
+                aria-label="User Prompt"
+                :readonly="!editing"
+                :placeholder="'请输入内容，支持 {{input}}、{{output}}'"
+                rows="6"
+                spellcheck="false"
+              />
+            </div>
+            <button v-else-if="editing" class="add-user-button" @click="form.userPrompt = ''">
+              ＋ 添加 User Prompt
+            </button>
+            <p v-if="promptVariables.length" class="field-help" aria-label="Prompt 变量">
+              变量
+              <template v-for="(variable, index) in promptVariables" :key="variable">
+                <span v-if="index">；</span>
+                <code v-text="'{{ ' + variable + ' }}'"></code>
+                <span v-if="variable === 'input'"> 为用例输入</span>
+                <span v-else-if="variable === 'output'"> 为被测 Agent 的最终回答</span>
+              </template>
+            </p>
+          </section>
+          <section class="output-description">
+            <h2>输出 <span class="info-symbol" title="每条测评结果包含得分和原因">ⓘ</span></h2>
+            <p>
+              <strong>得分：</strong>最终得分，必须输出一个数字，表示满足 Prompt
+              中评分标准的程度。得分范围为 0.0 到 1.0，1.0 表示完全满足评分标准，0.0
+              表示完全不满足评分标准。
+            </p>
+            <p><strong>原因：</strong>对得分的可读解释，说明评分依据与扣分原因。</p>
+          </section>
+        </fieldset>
+        <p v-if="notice" class="notice-message" role="status">{{ notice }}</p>
+        <p v-if="error" class="error-message" role="alert">{{ error }}</p>
+      </div>
+    </EvaluatorTaskHistory>
     <footer class="prompt-page-footer">
       <button class="secondary-button" :disabled="busy" @click="close">
         {{ editing ? '取消' : '返回列表' }}

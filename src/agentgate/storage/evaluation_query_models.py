@@ -1,7 +1,9 @@
 """Typed read contracts for the evaluation workspace."""
 
-from datetime import datetime
-from typing import Literal
+import json
+from base64 import b64decode, urlsafe_b64encode
+from datetime import UTC, datetime
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -88,6 +90,50 @@ class TaskSummaryPage(BaseModel):
     total: int = Field(ge=0)
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
+
+
+class RelatedTaskCursor(NamedTuple):
+    created_at: datetime
+    item_id: str
+    is_task: bool
+
+    @classmethod
+    def decode(cls, token: str) -> "RelatedTaskCursor":
+        try:
+            created, item_id, is_task = json.loads(b64decode(token, altchars=b"-_", validate=True))
+            if (
+                not isinstance(created, str)
+                or not isinstance(item_id, str)
+                or not item_id.strip()
+                or not isinstance(is_task, bool)
+            ):
+                raise ValueError("invalid cursor fields")
+            item_id.encode("utf-8")
+            created_at = datetime.fromisoformat(created)
+            if created_at.utcoffset() is None:
+                raise ValueError("cursor timestamp must include a timezone")
+            return cls(created_at.astimezone(UTC), item_id, is_task)
+        except (ValueError, TypeError, OverflowError, RecursionError) as exc:
+            raise ValueError("invalid related task cursor") from exc
+
+    def encode(self) -> str:
+        payload = json.dumps((self.created_at.isoformat(), self.item_id, self.is_task))
+        return urlsafe_b64encode(payload.encode()).decode()
+
+
+class RelatedEvaluationTask(BaseModel):
+    task_id: str | None
+    run_id: str
+    name: str
+    kind: EvaluationTaskKind
+    status: RunStatus
+    created_at: datetime
+    evaluator_version: str
+
+
+class RelatedEvaluationTaskPage(BaseModel):
+    items: list[RelatedEvaluationTask]
+    next_cursor: str | None
 
 
 class CompletedRunSummary(BaseModel):
