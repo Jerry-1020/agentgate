@@ -4,9 +4,11 @@ const router = useRouter();
 import { computed, onMounted, onUnmounted, watch, ref, shallowRef } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ApiError } from '../../api/client';
-import { request as revisionRequest } from '../../api/evaluations';
-import type { EvaluationRun } from '../evaluation/types/run';
-import { datasetApi } from '../../api/datasets';
+import { statusLabel } from '../../api/evaluations';
+import { datasetApi, type DatasetRelatedTaskPage } from '../../api/datasets';
+import { useAuthStore } from '../../stores/modules/auth';
+import { taskPath } from '../evaluation/utils/summary-query';
+import { formatTaskTime } from '../evaluation/utils/task-timing';
 import DatasetCatalog from './components/DatasetCatalog.vue';
 import DatasetCreateForm from './components/DatasetCreateForm.vue';
 import DatasetExportDialog from './components/DatasetExportDialog.vue';
@@ -170,47 +172,60 @@ async function restoreDataset(item: DatasetSummary) {
 }
 const detailTab = ref('samples'),
   versionHistoryDialog = ref(false);
-let historyRequest = 0;
-const history = shallowRef<EvaluationRun[]>([]);
-const historyPage = ref(1),
-  historyTotal = ref(0);
-watch(historyPage, () => void showHistory());
+const auth = useAuthStore();
+let historyRequest: AbortController | undefined;
+const history = shallowRef<DatasetRelatedTaskPage | null>(null);
+const historyCursors = ref<(string | null)[]>([null]);
+const historyLoading = ref(false);
+const historyError = ref(false);
 watch(activeDatasetId, () => {
-  historyPage.value = 1;
-  history.value = [];
-  historyTotal.value = 0;
   detailTab.value = 'samples';
   sampleView.value = false;
 });
-async function showHistory() {
-  detailTab.value = 'history';
-  const ticket = ++historyRequest,
-    datasetId = activeDatasetId.value,
-    selected = versions.value.find((v) => v.id === activeVersionId.value);
-  history.value = [];
-  historyTotal.value = 0;
-  if (!selected || selected.status === 'draft') return;
+
+async function loadHistory() {
+  historyRequest?.abort();
+  history.value = null;
+  historyError.value = false;
+  historyLoading.value = false;
+  const datasetId = activeDatasetId.value;
+  const selected = activeVersion.value;
+  if (
+    !auth.authenticated ||
+    !showingDetail.value ||
+    detailTab.value !== 'history' ||
+    !datasetId ||
+    selected?.status !== 'published' ||
+    selected.version == null
+  )
+    return;
+  const request = (historyRequest = new AbortController());
+  const cursor = historyCursors.value[historyCursors.value.length - 1];
+  historyLoading.value = true;
   try {
-    const records = await revisionRequest<EvaluationRun[]>('/runs?limit=200');
-    if (ticket !== historyRequest) return;
-    const matched = records.filter(
-      (r) =>
-        r.manifest.dataset.dataset_id === datasetId &&
-        r.manifest.dataset.version === selected.version,
-    );
-    history.value = matched.slice((historyPage.value - 1) * 20, historyPage.value * 20);
-    historyTotal.value = matched.length;
-  } catch (error) {
-    if (ticket === historyRequest) showError(error, '无法加载测评历史');
+    const result = await datasetApi.relatedTasks(datasetId, selected.version, cursor, request.signal);
+    if (!request.signal.aborted) history.value = result;
+  } catch {
+    if (!request.signal.aborted) historyError.value = true;
+  } finally {
+    if (!request.signal.aborted) historyLoading.value = false;
   }
 }
-watch(activeVersionId, () => {
-  historyRequest++;
-  historyPage.value = 1;
-  history.value = [];
-  historyTotal.value = 0;
-  if (detailTab.value === 'history') void showHistory();
-});
+
+function previousHistoryPage() {
+  historyCursors.value.pop();
+  void loadHistory();
+}
+function nextHistoryPage() {
+  const cursor = history.value?.next_cursor;
+  if (!cursor) return;
+  historyCursors.value.push(cursor);
+  void loadHistory();
+}
+function creationTime(value: string) {
+  const time = formatTaskTime(value);
+  return time ? `${time.date} ${time.time}` : '—';
+}
 const loading = ref(true);
 const validationIssues = ref<ValidationIssue[]>([]);
 const datasetDialog = ref(false);
@@ -248,6 +263,24 @@ const cloneJson = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const activeVersion = computed<DatasetVersion | null>(
   () => versions.value.find((item) => item.id === activeVersionId.value) ?? null,
+);
+watch(
+  [
+    detailTab,
+    showingDetail,
+    activeDatasetId,
+    activeVersionId,
+    () => activeVersion.value?.version,
+    () => auth.loginMode,
+    () => auth.platformReady,
+    () => auth.token,
+    () => auth.teamId,
+    () => auth.userId,
+  ],
+  () => {
+    historyCursors.value = [null];
+    void loadHistory();
+  },
 );
 const editable = computed(
   () => activeVersion.value?.status === 'draft' && !activeDataset.value?.archived,
@@ -296,6 +329,7 @@ function warnBeforeUnload(event: BeforeUnloadEvent) {
 }
 onMounted(() => window.addEventListener('beforeunload', warnBeforeUnload));
 onUnmounted(() => {
+  historyRequest?.abort();
   window.removeEventListener('beforeunload', warnBeforeUnload);
   emit('dirtyChange', false);
 });
@@ -751,14 +785,21 @@ onMounted(async () => {
         @discard="discardDraft"
       />
 
-      <div class="dataset-detail-tabs tabs">
+      <div class="dataset-detail-tabs tabs" role="group" aria-label="测评集详情">
         <button
+          type="button"
           :class="['tab', { active: detailTab === 'samples' }]"
+          :aria-pressed="detailTab === 'samples'"
           @click="detailTab = 'samples'"
         >
           数据样本
         </button>
-        <button :class="['tab', { active: detailTab === 'history' }]" @click="showHistory">
+        <button
+          type="button"
+          :class="['tab', { active: detailTab === 'history' }]"
+          :aria-pressed="detailTab === 'history'"
+          @click="detailTab = 'history'"
+        >
           关联测评历史
         </button>
       </div>
@@ -797,39 +838,77 @@ onMounted(async () => {
           </table>
         </section></el-dialog
       >
-      <section v-if="detailTab === 'history'" class="dataset-tab-content">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>任务</th>
-              <th>版本</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in history" :key="r.id">
-              <td>{{ r.id }}</td>
-              <td>v{{ r.manifest.dataset.version }}</td>
-              <td>{{ r.status }}</td>
-              <td><a class="link" :href="'#tasks/' + r.id">查看任务</a></td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="!history.length" class="empty">
-          {{
-            activeVersion?.status === 'draft'
-              ? '草稿尚未发布，暂无关联测评任务'
-              : '当前版本暂无关联测评任务'
-          }}
+      <section v-if="detailTab === 'history'" class="dataset-tab-content" aria-label="关联测评历史">
+        <p v-if="activeVersion?.status === 'draft'" class="empty" role="status">
+          草稿尚未发布，暂无关联测评任务
         </p>
-        <p class="muted">
-          最近 200 条任务中，{{ historyTotal }} 条关联任务 · 第 {{ historyPage }} 页
-          <button class="link" :disabled="historyPage <= 1" @click="historyPage--">上一页</button
-          ><button class="link" :disabled="historyPage * 20 >= historyTotal" @click="historyPage++">
-            下一页
-          </button>
-        </p>
+        <template v-else-if="activeVersion?.status === 'published'">
+          <p v-if="historyLoading" role="status">正在加载关联测评任务…</p>
+          <p v-else-if="historyError" role="alert">
+            无法加载测评历史。
+            <button type="button" class="link" @click="loadHistory">重试</button>
+          </p>
+          <template v-else>
+            <div class="history-table-wrap" role="region" aria-label="关联测评任务表格" tabindex="0">
+              <table class="data-table history-table" aria-label="关联测评任务">
+                <thead>
+                  <tr>
+                    <th scope="col">任务名称</th>
+                    <th scope="col">版本</th>
+                    <th scope="col">状态</th>
+                    <th scope="col" aria-sort="descending">创建时间</th>
+                    <th scope="col">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="task in history?.items"
+                    :key="task.task_id === null ? 'run:' + task.run_id : 'task:' + task.task_id"
+                  >
+                    <th scope="row">{{ task.name }}</th>
+                    <td><span class="history-version">v{{ task.dataset_version }}</span></td>
+                    <td>
+                      <span class="history-status" :data-status="task.status">
+                        {{ task.status === 'waiting' ? '等待中' : statusLabel(task.status) }}
+                      </span>
+                    </td>
+                    <td>
+                      <time :datetime="task.created_at">{{ creationTime(task.created_at) }}</time>
+                    </td>
+                    <td>
+                      <RouterLink
+                        class="link"
+                        :to="'/' + taskPath(task)"
+                        :aria-label="'查看任务 ' + task.name"
+                        >查看任务</RouterLink
+                      >
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="!history?.items.length" class="empty" role="status">当前版本暂无关联测评任务</p>
+          </template>
+          <div class="history-pagination">
+            <span class="muted" aria-live="polite">第 {{ historyCursors.length }} 页</span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="historyLoading || historyCursors.length === 1"
+              @click="previousHistoryPage"
+            >
+              上一页
+            </button>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="historyLoading || !history?.next_cursor"
+              @click="nextHistoryPage"
+            >
+              下一页
+            </button>
+          </div>
+        </template>
       </section>
 
       <el-alert
@@ -1030,6 +1109,60 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+.history-table {
+  min-width: 390px;
+}
+.history-table tbody th {
+  width: 100%;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.history-table time {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: normal;
+}
+.history-table td {
+  white-space: nowrap;
+}
+.history-status,
+.history-version {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+.history-status[data-status='completed'] {
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success-dark-2);
+}
+.history-status[data-status='running'] {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary-dark-2);
+}
+.history-status[data-status='failed'] {
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger-dark-2);
+}
+.history-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.history-pagination > span {
+  margin-inline-end: auto;
+}
 .sample-toolbar {
   flex-wrap: wrap;
 }

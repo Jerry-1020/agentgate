@@ -9,6 +9,7 @@ import json
 import logging
 import sqlite3
 from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -18,8 +19,11 @@ from agentgate.domain import RunStatus, content_sha256
 from .evaluation_query_models import (
     SUMMARY_VERSION,
     OverviewSummary,
+    RelatedDatasetTask,
+    RelatedDatasetTaskPage,
     RelatedEvaluationTask,
     RelatedEvaluationTaskPage,
+    RelatedTask,
     RelatedTaskCursor,
     RunListSummary,
     SummarySourceChanged,
@@ -277,17 +281,44 @@ def related_tasks(
     db, evaluator_id: str, version: str, team_id: str, limit: int,
     cursor: RelatedTaskCursor | None,
 ) -> RelatedEvaluationTaskPage:
+    items, next_cursor = _related_tasks(db, "evaluator", evaluator_id, version, team_id, limit, cursor)
+    return RelatedEvaluationTaskPage(
+        items=[RelatedEvaluationTask(**item.model_dump(), evaluator_version=version) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+def dataset_related_tasks(
+    db, dataset_id: str, version: int, team_id: str, limit: int,
+    cursor: RelatedTaskCursor | None,
+) -> RelatedDatasetTaskPage:
+    items, next_cursor = _related_tasks(db, "dataset", dataset_id, str(version), team_id, limit, cursor)
+    return RelatedDatasetTaskPage(
+        items=[RelatedDatasetTask(**item.model_dump(), dataset_version=version) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+def _related_tasks(
+    db, asset_kind: Literal["dataset", "evaluator"], asset_id: str, version: str,
+    team_id: str, limit: int, cursor: RelatedTaskCursor | None,
+) -> tuple[list[RelatedTask], str | None]:
     pk, rk, tk, _, _, team = keys(db)
     is_mysql = mysql(db)
     first = "first_run_key" if is_mysql else "first_run_id"
-    params = {"evaluator_id": evaluator_id, "version": version, "team": key(db, team_id),
-              "limit": limit + 1}
-    asset = "ref.asset_kind='evaluator' AND ref.source_id='' AND ref.asset_id=:evaluator_id AND ref.version=:version"
+    params = {
+        "asset_kind": asset_kind, "asset_id": asset_id, "version": version,
+        "team": key(db, team_id), "limit": limit + 1,
+    }
+    asset = (
+        "ref.asset_kind=:asset_kind AND ref.source_id='' "
+        "AND ref.asset_id=:asset_id AND ref.version=:version"
+    )
     if is_mysql:
         from .mysql import _digest
 
         asset += " AND ref.asset_lookup_key=:asset_key"
-        params["asset_key"] = _digest("evaluator", "", evaluator_id, version)
+        params["asset_key"] = _digest(asset_kind, "", asset_id, version)
 
     # Task IDs and legacy run IDs come from separate namespaces.
     item_id = "CAST(item_id AS BINARY)" if is_mysql else "item_id"
@@ -346,7 +377,7 @@ def related_tasks(
         """, params)
 
     items = [
-        RelatedEvaluationTask(
+        RelatedTask(
             task_id=row["item_id"] if row["is_task"] else None,
             run_id=row["run_id"],
             name=row["name"],
@@ -354,7 +385,6 @@ def related_tasks(
             status=row["status"],
             created_at=(row["created_at"].replace(tzinfo=UTC) if is_mysql
                         else datetime.fromisoformat(row["created_at"])),
-            evaluator_version=version,
         )
         for row in page[:limit]
     ]
@@ -364,7 +394,7 @@ def related_tasks(
         next_cursor = RelatedTaskCursor(
             last.created_at, last.task_id or last.run_id, last.task_id is not None,
         ).encode()
-    return RelatedEvaluationTaskPage(items=items, next_cursor=next_cursor)
+    return items, next_cursor
 
 
 def filters(db, query, alias="q"):
