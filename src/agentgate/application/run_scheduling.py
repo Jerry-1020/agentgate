@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from agentgate.domain import EvaluationRun, RunStatus, normalize_utc, transition_run, utcnow
 from agentgate.integrations.job_dispatchers import JobDispatcher
+from agentgate.run.events import RunEventRecorder
 from agentgate.run.retry import retry_delay_seconds
 from agentgate.storage.repository import AgentGateRepository
 
@@ -63,6 +64,9 @@ def _handle_dispatch_failure(
         waiting = transition_run(run, RunStatus.WAITING)
         waiting = waiting.model_copy(update={"dispatch_attempts": attempts})
         repository.save_run(waiting)
+        recorder = RunEventRecorder(repository, run.id, run.user_team_id)
+        recorder.finish_open("worker_wait", status="failed", error_code="dispatch_failed")
+        recorder.start("waiting", "等待派发重试", key=f"waiting:{attempts}")
         LOGGER.warning(
             "Run dispatch failed (attempt %d/%d): run_id=%s, %s",
             attempts, MAX_DISPATCH_ATTEMPTS, run.id, type(exc).__name__,
@@ -75,6 +79,9 @@ def _handle_dispatch_failure(
         error=f"Run dispatch failed after {attempts} attempts: {type(exc).__name__}",
     )
     repository.save_run(failed)
+    RunEventRecorder(repository, run.id, run.user_team_id).finish_open(
+        None, status="failed", error_code="dispatch_exhausted", message="任务派发重试耗尽",
+    )
     return failed
 
 
@@ -127,6 +134,10 @@ class RunScheduling:
                 if failed is None:
                     LOGGER.debug("Run recovery skipped after concurrent update: run_id=%s", run.id)
                     continue
+                RunEventRecorder(self.repository, run.id, run.user_team_id).finish_open(
+                    None, status="interrupted", error_code="recovery_deadline",
+                    message="执行恢复期限已超过，具体中断时间未知", ended_at=current_time,
+                )
                 recovered.append(failed)
                 LOGGER.warning(
                     "Run timed out: run_id=%s previous_status=%s deadline=%s",
@@ -161,17 +172,30 @@ class RunScheduling:
             LOGGER.debug("Scheduler: dispatch_due_runs starting, %d due runs", len(due_runs))
         dispatched: list[EvaluationRun] = []
         for run in due_runs:
+            recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+            recorder.finish_open("schedule")
             active = self.repository.count_active_runs_by_team(run.user_team_id)
             if active > MAX_CONCURRENT_RUNS_PER_TEAM:
                 waiting = _transition_to_waiting(run)
                 self.repository.save_run(waiting)
+                recorder.start("waiting", "等待并发额度", key=f"waiting:{run.dispatch_attempts}",
+                               message=f"当前占用 {active}，并发上限 {MAX_CONCURRENT_RUNS_PER_TEAM}")
                 LOGGER.warning(
                     "Scheduled run throttled to waiting: run_id=%s active_count=%d max=%d user_team_id=%r",
                     run.id, active, MAX_CONCURRENT_RUNS_PER_TEAM, run.user_team_id,
                 )
                 continue
             try:
-                dispatcher.submit(run.id)
+                recorder.start("worker_wait", "等待 Worker 接收", key=f"worker_wait:{run.dispatch_attempts}")
+                event = recorder.start("dispatch", "派发执行任务", attempt=run.dispatch_attempts + 1)
+                try:
+                    receipt = dispatcher.submit(run.id) or {}
+                except Exception as exc:
+                    recorder.finish(event, status="cancelled" if getattr(exc, "code", None) == "cancelled" else "failed", error=exc)
+                    raise
+                else:
+                    recorder.finish(event, bjs_job_id=receipt.get("bjs_job_id"),
+                                    bjs_batch_number=receipt.get("bjs_batch_number"))
             except Exception as exc:
                 _handle_dispatch_failure(
                     run, exc, occurred_at=release_time, repository=self.repository
@@ -206,8 +230,19 @@ class RunScheduling:
             claimed = self.repository.claim_waiting_run(run.id, utcnow())
             if claimed is None:
                 continue
+            recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+            recorder.finish_open("waiting")
             try:
-                dispatcher.submit(claimed.id)
+                recorder.start("worker_wait", "等待 Worker 接收", key=f"worker_wait:{claimed.dispatch_attempts}")
+                event = recorder.start("dispatch", "重新派发执行任务", attempt=claimed.dispatch_attempts + 1)
+                try:
+                    receipt = dispatcher.submit(claimed.id) or {}
+                except Exception as exc:
+                    recorder.finish(event, status="cancelled" if getattr(exc, "code", None) == "cancelled" else "failed", error=exc)
+                    raise
+                else:
+                    recorder.finish(event, bjs_job_id=receipt.get("bjs_job_id"),
+                                    bjs_batch_number=receipt.get("bjs_batch_number"))
             except Exception as exc:
                 _handle_dispatch_failure(
                     claimed, exc, occurred_at=utcnow(), repository=self.repository

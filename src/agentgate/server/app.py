@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from uuid import uuid4
+from starlette.concurrency import run_in_threadpool
+from agentgate.run.events import RunEventRecorder, request_id_context, request_started_at_context
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -177,6 +184,41 @@ def create_app(
                 reset_user_info(token)
 
     application.add_middleware(UserContextMiddleware)
+
+    class ExecutionRequestMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            launch = request.method == "POST" and (
+                request.url.path in {"/api/evaluations", "/api/bank-evaluations", "/api/run-comparisons",
+                    "/api/stability-experiments", "/api/agent-platform/evaluations", "/api/agent-platform/comparisons"}
+                or re.fullmatch(r"/api/(?:runs|evaluation-tasks)/[^/]+/rerun", request.url.path)
+            )
+            if not launch:
+                return await call_next(request)
+            request_id = uuid4().hex
+            token = request_id_context.set(request_id)
+            recorder = RunEventRecorder(dependencies.repository,
+                user_team_id=request.headers.get("X-Team-Id", ""), request_id=request_id)
+            event = await run_in_threadpool(recorder.start, "submission", "接收、校验并提交任务")
+            request.state.execution_event = event
+            request.state.execution_recorder = recorder
+            started_token = request_started_at_context.set(event.started_at)
+            try:
+                response = await call_next(request)
+                failed = response.status_code >= 400
+                await run_in_threadpool(recorder.finish, event,
+                    status="failed" if failed else "completed",
+                    error_code=f"HTTP_{response.status_code}" if failed else None,
+                    message=f"HTTP {response.status_code}")
+                response.headers["X-Execution-Request-Id"] = request_id
+                return response
+            except Exception as exc:
+                await run_in_threadpool(recorder.finish, event, status="failed", error=exc)
+                raise
+            finally:
+                request_id_context.reset(token)
+                request_started_at_context.reset(started_token)
+
+    application.add_middleware(ExecutionRequestMiddleware)
     application.add_middleware(ResponseEnvelopeMiddleware)
 
     class RequestLogMiddleware(BaseHTTPMiddleware):
@@ -233,8 +275,28 @@ def create_app(
     application.include_router(optimizer.router)
     application.include_router(telemetry.router)
 
+    async def record_request_failure(request: Request, *, code: str, message: str):
+        event = getattr(request.state, "execution_event", None)
+        if event is not None:
+            await run_in_threadpool(request.state.execution_recorder.finish, event,
+                                    status="failed", error_code=code, message=message)
+
+    @application.exception_handler(RequestValidationError)
+    async def handle_validation_exception(request: Request, exc: RequestValidationError):
+        # Pydantic errors include raw input/ctx; only persist field locations and messages.
+        message = "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+        await record_request_failure(request, code="HTTP_422", message=message)
+        return await request_validation_exception_handler(request, exc)
+
+    @application.exception_handler(StarletteHTTPException)
+    async def handle_http_exception(request: Request, exc: StarletteHTTPException):
+        detail = exc.detail if isinstance(exc.detail, str) else "请求未通过业务校验"
+        await record_request_failure(request, code=f"HTTP_{exc.status_code}", message=detail)
+        return await http_exception_handler(request, exc)
+
     @application.exception_handler(Exception)
     async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+        await record_request_failure(request, code=type(exc).__name__, message=str(exc))
         LOGGER.exception(
             "Unhandled error on %s %s",
             request.method,

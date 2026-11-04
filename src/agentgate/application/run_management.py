@@ -21,6 +21,7 @@ from agentgate.domain import (
 from agentgate.domain.run import RunTiming
 from agentgate.integrations.job_dispatchers import JobDispatcher
 from agentgate.run.engine import RunEngine, TraceResolver
+from agentgate.run.events import RunEventRecorder
 from agentgate.run.target_protocol import TargetAdapterProtocol
 from agentgate.server.user_context import get_user_info
 from agentgate.storage.repository import AgentGateRepository
@@ -130,6 +131,7 @@ class RunManagement:
         )
         if persist:
             self.repository.save_run(run)
+            self.record_created_run(run)
         key_display = "None" if run.api_key is None else "***"
         LOGGER.info(
             "Run created: run_id=%s status=%s dataset_id=%s case_count=%d user_id=%s api_key=%s",
@@ -141,6 +143,14 @@ class RunManagement:
             key_display,
         )
         return run
+
+    def record_created_run(self, run: EvaluationRun) -> None:
+        """Record only the final persisted identity, including scheduled Runs."""
+        recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
+        recorder.start("run", "任务全流程", key="run", started_at=run.created_at,
+                       agent_id=run.manifest.target.ref.external_target_id)
+        if run.status is RunStatus.SCHEDULED:
+            recorder.start("schedule", "等待预约时间", key="schedule")
 
     def create_rerun(self, source_run_id: str, *, persist: bool = True) -> EvaluationRun:
         """Create a pending Run from one terminal Run's exact manifest."""
@@ -172,6 +182,10 @@ class RunManagement:
         )
         if persist:
             self.repository.save_run(rerun)
+        RunEventRecorder(self.repository, rerun.id, rerun.user_team_id).start(
+            "run", "任务全流程", key="run", started_at=rerun.created_at,
+            agent_id=rerun.manifest.target.ref.external_target_id,
+        )
         return rerun
 
     def execute_run(
@@ -206,11 +220,14 @@ class RunManagement:
             raise ValueError(f"unknown EvaluationRun: {run_id}")
         if run.status is not RunStatus.PENDING:
             raise ValueError("only a pending EvaluationRun can be dispatched")
+        recorder = RunEventRecorder(self.repository, run.id, run.user_team_id)
 
         active = self.repository.count_active_runs_by_team(run.user_team_id)
         if active > MAX_CONCURRENT_RUNS_PER_TEAM:
             waiting = transition_run(run, RunStatus.WAITING)
             self.repository.save_run(waiting)
+            recorder.start("waiting", "等待并发额度", key=f"waiting:{run.dispatch_attempts}",
+                           message=f"当前占用 {active}，并发上限 {MAX_CONCURRENT_RUNS_PER_TEAM}")
             LOGGER.warning(
                 "Run throttled to waiting: run_id=%s active_count=%d max=%d user_team_id=%r",
                 run.id, active, MAX_CONCURRENT_RUNS_PER_TEAM, run.user_team_id,
@@ -218,13 +235,27 @@ class RunManagement:
             return waiting
 
         try:
-            dispatcher.submit(run.id)
+            recorder.finish_open("waiting")
+            recorder.start("worker_wait", "等待 Worker 接收", key=f"worker_wait:{run.dispatch_attempts}")
+            dispatch_event = recorder.start("dispatch", "派发执行任务", attempt=run.dispatch_attempts + 1)
+            try:
+                receipt = dispatcher.submit(run.id) or {}
+            except Exception as exc:
+                recorder.finish(dispatch_event,
+                                status="cancelled" if getattr(exc, "code", None) == "cancelled" else "failed",
+                                error=exc)
+                raise
+            else:
+                recorder.finish(dispatch_event, bjs_job_id=receipt.get("bjs_job_id"),
+                                bjs_batch_number=receipt.get("bjs_batch_number"))
         except Exception as exc:
             attempts = run.dispatch_attempts + 1
             if attempts < MAX_DISPATCH_ATTEMPTS:
                 waiting = transition_run(run, RunStatus.WAITING)
                 waiting = waiting.model_copy(update={"dispatch_attempts": attempts})
                 self.repository.save_run(waiting)
+                recorder.finish_open("worker_wait", status="failed", error_code="dispatch_failed")
+                recorder.start("waiting", "等待派发重试", key=f"waiting:{attempts}")
                 LOGGER.warning(
                     "Run dispatch failed, retrying: run_id=%s attempt=%d/%d error=%s",
                     run.id, attempts, MAX_DISPATCH_ATTEMPTS, type(exc).__name__,
@@ -245,6 +276,8 @@ class RunManagement:
                 "Run dispatch exhausted retries: run_id=%s attempts=%d status=failed",
                 run.id, attempts,
             )
+            recorder.finish_open(None, status="failed", error_code="dispatch_exhausted",
+                                 message="任务派发重试耗尽")
             raise RuntimeError("Run dispatch failed") from exc
         LOGGER.info(
             "Run dispatched: run_id=%s active_count=%d max=%d",
@@ -285,6 +318,9 @@ class RunManagement:
                 )
             raise RuntimeError("Run cancellation could not be persisted")
 
+        RunEventRecorder(self.repository, run.id, run.user_team_id).finish_open(
+            None, status="cancelled", message="用户取消任务", ended_at=cancelled.completed_at,
+        )
         if not was_dispatched:
             return cancelled
         LOGGER.info(

@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping
-from typing import cast
+from typing import TYPE_CHECKING, cast
+if TYPE_CHECKING:
+    from agentgate.run.events import RunEventRecorder
 
 from agentgate.domain import (
     Case,
@@ -315,6 +317,7 @@ def execute_evaluators(
     trace: Trace,
     evaluator_specs: tuple[EvaluatorSpec, ...],
     implementations: EvaluatorImplementations,
+    recorder: RunEventRecorder | None = None,
 ) -> tuple[EvaluationResult, ...]:
     """Execute selected evaluator implementations for one completed Case."""
 
@@ -350,6 +353,7 @@ def execute_evaluators(
         resolving.add(spec_id)
         spec = specs_by_id[spec_id]
         implementation = resolved_implementations[spec_id]
+        event = recorder.start("evaluator", spec.name, case_id=case.id, evaluator_id=spec.id) if recorder else None
         try:
             checks: list[CheckDraft] = []
             judge_record = None
@@ -446,6 +450,11 @@ def execute_evaluators(
         finally:
             resolving.discard(spec_id)
         cache[spec_id] = result
+        if recorder and event:
+            detail = result.error_detail
+            recorder.finish(event, status="failed" if detail else "completed",
+                            error_code=detail.category if detail else None,
+                            message=detail.message if detail else "")
         return result
 
     return tuple(resolve(spec.id) for spec in evaluator_specs)

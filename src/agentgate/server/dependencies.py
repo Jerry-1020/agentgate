@@ -147,6 +147,7 @@ class ServerDependencies:
             api_key=api_key,
         )
         self.repository.save_task_runs(EvaluationTask(id=run.id, kind="single", run_ids=(run.id,)), [run])
+        self.runs.record_created_run(run)
         if run.status is RunStatus.SCHEDULED:
             return run
         return self.runs.dispatch_run(run.id, self.dispatcher)
@@ -220,6 +221,8 @@ class ServerDependencies:
             for _ in range(repetitions - 1))]
         task = EvaluationTask(id=template.id, kind="stability", run_ids=tuple(r.id for r in runs))
         self.repository.save_task_runs(task, runs)
+        for run in runs:
+            self.runs.record_created_run(run)
         for run in runs:
             try:
                 self.runs.dispatch_run(run.id, self.dispatcher)

@@ -16,6 +16,8 @@ from agentgate.domain import (
     SkillAnalysisReport,
 )
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
+from agentgate.server.user_context import get_user_info
+from agentgate.domain.run_event import RunEvent
 from agentgate.server.errors import (
     raise_conflict,
     raise_not_found,
@@ -124,6 +126,19 @@ def run_status(run_id: str, dependencies: Dependencies) -> RunProgress:
     try:
         dependencies.runs.fail_stale_runs()
         return dependencies.results.get_run_progress(run_id)
+    except LookupError as error:
+        raise_not_found(error)
+
+
+@router.get("/runs/{run_id}/events")
+def run_events(run_id: str, dependencies: Dependencies,
+               offset: int = Query(default=0, ge=0),
+               limit: int = Query(default=100, ge=1, le=200)) -> list[RunEvent]:
+    info = get_user_info()
+    try:
+        return dependencies.repository.list_run_events(
+            run_id, user_team_id=info.user_team_id if info else "", offset=offset, limit=limit,
+        )
     except LookupError as error:
         raise_not_found(error)
 

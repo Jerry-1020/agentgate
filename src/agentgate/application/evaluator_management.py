@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from agentgate.run.events import RunEventRecorder
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -535,11 +536,13 @@ class EvaluatorManagement:
             "Evaluate case: run_id=%s case_id=%s evaluator_count=%d specs=[%s]",
             trace.run_id, case.id, len(evaluator_specs), spec_ids,
         )
+        run = self.repository.get_run(trace.run_id)
         results = execute_evaluators(
             case,
             trace,
             evaluator_specs,
             self._implementations,
+            recorder=RunEventRecorder(self.repository, trace.run_id, run.user_team_id if run else ""),
         )
         outcomes = ",".join(result.outcome.value for result in results)
         LOGGER.info(
