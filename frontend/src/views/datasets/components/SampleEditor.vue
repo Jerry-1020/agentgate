@@ -83,15 +83,13 @@ async function requestVariables() {
     const existing = configVariables.value[initializationField.value];
     configVariables.value[field] = variables.map((variable) => {
       const previous = existing.find((row) => row.name === variable.name);
-      const extra: JsonObject = { type: variable.type };
-      if (field === 'config_variables') extra.required = variable.required;
+      const extra: JsonObject = { type: variable.type, required: variable.required };
       return {
         id: previous?.id ?? crypto.randomUUID(),
         name: variable.name,
         value: previous?.value ?? '',
         format: previous?.format ?? 'text',
         extra,
-        requiredHint: variable.required,
       };
     });
     configVariablesRaw.value[field] = null;
@@ -126,7 +124,6 @@ type ConfigVariableRow = {
   value: string;
   format: 'text' | 'json';
   extra: JsonObject;
-  requiredHint?: boolean;
 };
 type InitializationField = 'config_variables' | 'prompt_variables';
 const initializationField = ref<InitializationField>('config_variables');
@@ -151,7 +148,7 @@ function initializationFieldForState(initial: JsonObject): InitializationField {
     : 'prompt_variables';
 }
 function requiredHint(variable: ConfigVariableRow) {
-  const required = variable.requiredHint ?? variable.extra.required;
+  const required = variable.extra.required;
   return typeof required === 'boolean' ? (required ? '是' : '否') : '-';
 }
 type OutputRule = Extract<Expectation, { kind: 'output' }>;
