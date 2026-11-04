@@ -217,6 +217,18 @@ def make_request(method: str, url: str, *, http=None, **kwargs) -> dict:
         return {"status": "fail", "error_code": failure["error_code"], "message": failure["error"]}
 
 
+def _prepare_initialization_variables(
+    variables: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    # Match customer variable entries; saved editor metadata stays in the Case.
+    return [
+        {key: variable[key] for key in ("name", "value", "type") if key in variable}
+        for variable in (variables or [])
+        if variable.get("value") is not None
+        and (not isinstance(variable["value"], str) or variable["value"].strip())
+    ]
+
+
 class AgentChatClient:
     """Customer ChatABC client; Case/Turn mapping stays in the adapter."""
 
@@ -257,22 +269,12 @@ class AgentChatClient:
         url = _url(
             self.base_url, f"/agent-api/{quote(self.agent_name, safe='')}/chatabc/init_session"
         )
+        prompt_variables = _prepare_initialization_variables(prompt_variables)
+        tool_variables = _prepare_initialization_variables(tool_variables)
         data = (
-            {
-                "config_variables": [
-                    {key: variable[key] for key in ("name", "value", "type") if key in variable}
-                    for variable in (prompt_variables or []) + (tool_variables or [])
-                    if variable.get("value") is not None
-                    and (
-                        not isinstance(variable["value"], str) or variable["value"].strip()
-                    )
-                ]
-            }
+            {"config_variables": prompt_variables + tool_variables}
             if self.arrange_type == "workflow"
-            else {
-                "prompt_variables": prompt_variables or [],
-                "tool_variables": tool_variables or [],
-            }
+            else {"prompt_variables": prompt_variables, "tool_variables": tool_variables}
         )
         payload = self._build_app_payload(data)
         for attempt in range(1, 11):
