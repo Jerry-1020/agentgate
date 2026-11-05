@@ -1,6 +1,7 @@
 import type { EvaluatorSummary } from '../../../api/evaluations';
 
 export const evaluatorScenarios: Record<string, string> = {
+  code_rule: '按已发布代码逐轮检查 Agent Trace，返回分数、理由和可选证据。',
   skill_routing: '检查实际路由是否命中样本期望的 Skill。',
   required_tool: '检查业务要求的工具是否被调用。',
   forbidden_tool: '检查是否调用了样本明确禁止的工具。',
@@ -59,6 +60,8 @@ export function recommendationReason(
   evaluator: EvaluatorSummary,
   cases: Parameters<typeof recommendEvaluators>[1],
 ): string {
+  if (evaluator.implementation_id === 'code_rule')
+    return '自定义 Code 不依赖内置样本期望。请确认代码适合当前 Agent 的 Trace 字段；任务使用选定的发布版本。';
   if (evaluator.kind !== 'rule')
     return (
       '当前 ' +
@@ -70,6 +73,11 @@ export function recommendationReason(
 }
 
 export function evaluatorTechnicalChecks(evaluator: EvaluatorSummary, cases: any[]): string[] {
+  if (evaluator.implementation_id === 'code_rule')
+    return [
+      '将每轮输入、期望、输出、状态和 Trace spans 传给已发布代码。',
+      '按通过阈值判断 PASS / FAIL；异常为 ERROR，output_only 证据不足为不适用。',
+    ];
   if (evaluator.kind === 'llm_group')
     return [
       '各子评估器使用独立的模型与提示词评分。',

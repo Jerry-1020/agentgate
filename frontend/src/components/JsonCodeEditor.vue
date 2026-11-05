@@ -3,7 +3,13 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, basicSetup } from 'codemirror';
 import { json } from '@codemirror/lang-json';
-const props = defineProps<{ modelValue: string; disabled?: boolean; label: string }>();
+import { python } from '@codemirror/lang-python';
+const props = defineProps<{
+  modelValue: string;
+  disabled?: boolean;
+  label: string;
+  language?: 'json' | 'python';
+}>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const container = ref<HTMLDivElement>(),
   editable = new Compartment();
@@ -15,7 +21,7 @@ onMounted(() => {
       doc: props.modelValue,
       extensions: [
         basicSetup,
-        json(),
+        props.language === 'python' ? python() : json(),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
           'aria-label': props.label,

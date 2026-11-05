@@ -1072,6 +1072,10 @@ class MySQLRepository:
         with self._transaction() as db:
             return projection.overview(db, query, user_team_id)
 
+    def list_code_trace_choices(self, **query):
+        with self._transaction() as db:
+            return projection.code_trace_choices(db, **query)
+
     def list_evaluation_task_summaries(self, query, *, user_team_id):
         with self._transaction() as db:
             return projection.task_page(db, query, user_team_id)

@@ -725,3 +725,55 @@ def audit(db):
             for r in rows(db, sql, {"v": SUMMARY_VERSION})
         )
     return issues
+
+
+# Only adapters with a known login-mode origin are offered as historical sources.
+TRACE_MODE_ADAPTERS = {
+    "inbank": ("inbank_chatabc", "inbank_yunxia"),
+    "external": ("demo_loan", "local_bank", "agent_platform_mock", "trace_sdk_replay"),
+}
+
+
+def code_trace_choices(db, *, user_team_id, mode, offset=0, limit=50,
+                       source_id=None, target_id=None, version=None):
+    """Bounded metadata projection; never load Trace bodies or whole Run manifests."""
+    if mode not in TRACE_MODE_ADAPTERS or offset < 0 or not 1 <= limit <= 100:
+        raise ValueError("invalid Trace query")
+    trace_list = source_id is not None
+    if trace_list and (not target_id or not version):
+        raise ValueError("请选择智能体及版本")
+    def field(path):
+        expr = "json_extract(r.payload, '$.manifest.target." + path + "')"
+        return "json_unquote(" + expr + ")" if mysql(db) else expr
+    fields = {
+        "source_id": field("ref.source_id"), "target_id": field("ref.external_target_id"),
+        "version": field("ref.external_version_id"), "name": field("display_name"),
+        "adapter_type": field("adapter_type"),
+        "branch": "COALESCE(NULLIF(" + field("invocation_config.branch_id") + ", 'null'), '')",
+    }
+    ik, rk, _, _, _, tk = keys(db)
+    params = {"team": key(db, user_team_id), "team_text": user_team_id,
+              "limit": limit + 1, "offset": offset}
+    adapters = TRACE_MODE_ADAPTERS[mode]
+    for i, adapter in enumerate(adapters):
+        params["adapter" + str(i)] = adapter
+    where = ["r." + tk + " = :team", "r.user_team_id = :team_text",
+             fields["adapter_type"] + " IN (" + ",".join(":adapter" + str(i) for i in range(len(adapters))) + ")",
+             field("ref.target_type") + " = 'agent'"]
+    if trace_list:
+        for key_name, value in (("source_id", source_id), ("target_id", target_id), ("version", version)):
+            params[key_name] = value
+            where.append(fields[key_name] + " = :" + key_name)
+        columns = "t.id AS trace_id,t.run_id,t.case_id,r.created_at"
+        distinct = ""
+        order = "r.created_at DESC, r.id, t.case_id, t.id"
+    else:
+        columns = ",".join(expr + " AS " + name for name, expr in fields.items())
+        distinct = "DISTINCT "
+        order = "adapter_type,target_id,source_id,version,name,branch"
+    query = ("SELECT " + distinct + columns + " FROM agentgate_runs r "
+             "JOIN agentgate_traces t ON t." + rk + " = r." + ik +
+             " WHERE " + " AND ".join(where) + " ORDER BY " + order +
+             " LIMIT :limit OFFSET :offset")
+    items = rows(db, query, params)
+    return {"items": items[:limit], "has_more": len(items) > limit, "offset": offset}

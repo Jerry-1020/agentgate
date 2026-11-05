@@ -133,7 +133,8 @@ function toggle(id: string, on: boolean) {
               </button>
             </div>
             <small class="tile-version"
-              >v{{ e.latest_version
+              >{{ e.implementation_id === 'code_rule' ? '自定义 Code · ' : '' }}v{{
+                e.latest_version
               }}{{ e.kind === 'llm_group' ? ` · ${e.child_count ?? 0} 个子评估器` : ''
               }}{{ recommended.includes(e.id) ? ' · 推荐' : '' }}</small
             >

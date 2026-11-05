@@ -717,10 +717,13 @@ async function submit() {
     } catch {
       invalid('所选评估器已在本地停用，请重新选择。');
     }
-    if (chosen.every((e) => e.kind === 'rule') && !recommendEvaluators(chosen, exact.cases).length)
+    const needsExpectations = chosen.every(
+      (e) => e.kind === 'rule' && e.implementation_id !== 'code_rule',
+    );
+    if (needsExpectations && !recommendEvaluators(chosen, exact.cases).length)
       invalid('所选评估器与样本期望没有适用检查。请补充期望或调整评估器。');
     const uncovered = exact.cases.filter(
-      (c) => chosen.every((e) => e.kind === 'rule') && !recommendEvaluators(chosen, [c]).length,
+      (c) => needsExpectations && !recommendEvaluators(chosen, [c]).length,
     );
     if (uncovered.length)
       await ElMessageBox.confirm(
