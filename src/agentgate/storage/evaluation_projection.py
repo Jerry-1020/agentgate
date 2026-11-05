@@ -246,28 +246,58 @@ _TASK_STATUS = """CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0
              ELSE first_run.status END"""
 
 
+def reference_task_condition(db, alias="t"):
+    pk, _, tk, _, _, _ = keys(db)
+    return f"""{alias}.kind='ab' AND NOT EXISTS (
+        SELECT 1 FROM agentgate_evaluation_task_runs owned WHERE owned.{tk}={alias}.{pk})"""
+
+
+def historical_task_members(db):
+    pk, rk, tk, _, _, _ = keys(db)
+    position = (
+        "CONCAT('$.run_ids[',p.position,']')"
+        if mysql(db)
+        else "('$.run_ids[' || p.position || ']')"
+    )
+    identifier = f"JSON_EXTRACT(t.payload,{position})"
+    match = f"BINARY r.id=BINARY JSON_UNQUOTE({identifier})" if mysql(db) else f"r.id={identifier}"
+    # Missing runs remain NULL members so the access predicate can reject the entire task.
+    return f"""SELECT t.{pk} AS {tk},r.{pk} AS {rk},p.position,1 AS is_current
+        FROM agentgate_evaluation_tasks t
+        CROSS JOIN (SELECT 0 AS position UNION ALL SELECT 1 AS position) p
+        LEFT JOIN agentgate_runs r ON {match}
+        WHERE {reference_task_condition(db)}"""
+
+
+def task_members(db):
+    _, rk, tk, _, _, _ = keys(db)
+    return f"""SELECT {tk},{rk},position,is_current FROM agentgate_evaluation_task_runs
+        UNION ALL {historical_task_members(db)}"""
+
+
 def task_relation(db):
     pk, rk, tk, _, _, team = keys(db)
     first = "first_run_key" if mysql(db) else "first_run_id"
     return f"""SELECT t.{pk} AS k,t.id,t.id AS task_id,COALESCE(t.name,s.fallback_name,t.id) AS name,
         t.kind,t.created_at,first_run.id AS search_run_id,
+        CASE WHEN {reference_task_condition(db)} THEN 1 ELSE 0 END AS historical_comparison,
         MAX(1-({valid_summary(db, "r", "member_summary")})) AS summary_pending,
         {_TASK_STATUS} AS status
         FROM agentgate_evaluation_tasks t
-        JOIN agentgate_evaluation_task_runs a ON a.{tk}=t.{pk} AND a.is_current=1
+        JOIN ({task_members(db)}) a ON a.{tk}=t.{pk} AND a.is_current=1
         JOIN agentgate_runs r ON r.{pk}=a.{rk}
         LEFT JOIN agentgate_run_summaries member_summary ON member_summary.{rk}=r.{pk}
         JOIN agentgate_runs first_run ON first_run.{pk}=t.{first}
         LEFT JOIN agentgate_run_summaries s ON s.{rk}=t.{first}
         WHERE NOT EXISTS (
-            SELECT 1 FROM agentgate_evaluation_task_runs bad
+            SELECT 1 FROM ({task_members(db)}) bad
             LEFT JOIN agentgate_runs br ON br.{pk}=bad.{rk}
             WHERE bad.{tk}=t.{pk} AND bad.is_current=1
                 AND (br.{pk} IS NULL OR br.{team}<>:team))
         GROUP BY t.{pk},t.id,t.name,s.fallback_name,t.kind,t.created_at,first_run.status,first_run.id
         UNION ALL
         SELECT r.{pk},r.id,NULL,COALESCE(s.fallback_name,r.id),'single',r.created_at,r.id,
-        1-({valid_summary(db)}),r.status
+        0,1-({valid_summary(db)}),r.status
         FROM agentgate_runs r LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
         WHERE r.{team}=:team AND NOT EXISTS (
             SELECT 1 FROM agentgate_evaluation_task_runs a WHERE a.{rk}=r.{pk})"""
@@ -419,7 +449,7 @@ def task_page(db, query, team):
     members = rows(
         db,
         f"""SELECT {tk} AS task_key,{rk} AS run_key,position
-        FROM agentgate_evaluation_task_runs WHERE is_current=1 AND {tk} IN ({tokens}) ORDER BY position""",
+        FROM ({task_members(db)}) members WHERE is_current=1 AND {tk} IN ({tokens}) ORDER BY position""",
         ids,
     )
     historical = {
@@ -477,6 +507,7 @@ def task_page(db, query, team):
             TaskListSummary(
                 **{k: row[k] for k in ("id", "task_id", "name", "kind", "created_at", "status")},
                 previous_run_count=historical.get(row["k"], 0) if row["task_id"] else 0,
+                historical_comparison=bool(row["historical_comparison"]),
                 runs=children,
                 summary_pending=any(r.summary_pending for r in children),
                 total_cases=None

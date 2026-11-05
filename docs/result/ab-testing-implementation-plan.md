@@ -2,6 +2,72 @@
 
 Status: implemented on `feature/ab-testing` for the POC.
 
+## Historical baseline comparison — 2026-11-04
+
+The controlled Run-pair workflow below remains unchanged. A separate, implemented
+workflow creates an A/B task from two completed executions owned by single tasks,
+without dispatching either execution again. Same-version agents and differing
+datasets/evaluators are allowed after UI confirmation. Sources must belong to the
+current team; a selected previous execution remains valid after a source rerun.
+
+Ownership and dependencies:
+
+- `result/historical_comparison.py`: pure comparison of two EvaluationReports;
+  immutable transient score/case rows, raw gates, comparability and reason codes.
+- `application/evaluation_task_management.py`: validate source tasks, read reports,
+  call pure comparison, construct an existing EvaluationTask and request storage.
+- `storage/historical_comparisons.py`: shared transaction-local reference validation,
+  idempotency and deletion protection; SQLite/MySQL adapters own transactions.
+- `storage/evaluation_projection.py`: derive non-owning references for paged task
+  lists and access checks. Existing ownership rows and run-level statistics remain
+  authoritative; no schema migration or persistent discriminator is introduced.
+- `server/routes/evaluation_tasks.py`: new POST `/history-comparisons` and GET
+  `/{task_id}/comparison` under `/api/evaluation-tasks`; additive read-only
+  `historical_comparison` flag on task summaries/reference task details.
+- `BaselineComparisonDialog.vue`: select A from all historical singles, show the
+  existing ConfigurationDiff, confirm, and save using a stable client request ID.
+  `Comparisons.vue` renders the persisted comparison with per-item Chinese reasons.
+
+Invariants: A precedes B; comparison tasks never acquire source ownership rows;
+source task/run access and status are rechecked atomically; an existing request ID
+can only return the exact same pair; no Run/Trace/Result is created or modified;
+source deletion is blocked while referenced; comparison deletion preserves sources.
+Following the user's 2026-11-05 revision, every row with two numeric scores carries
+the arithmetic difference B minus A regardless of condition differences. Missing
+reference runs make the entire task inaccessible, rather than exposing one side.
+
+Comparison rules: aggregate scope checks include target identity, dataset content,
+ordered execution Cases, evaluator definitions (including group descendants), metric
+plan and effective scoring population. Case rows independently compare frozen Case
+content and evaluator definitions. Condition checks supply concrete difference
+evidence, not a UI verdict or a barrier to subtraction. Case rows with both scores
+use the existing outcome/score change classification; rows missing either score
+have no delta or change classification. Zero scores are retained;
+missing/error/not-applicable results never become zero. Aggregate raw scores remain
+unchanged even if effective scoring populations differ. Changed gates retain both
+original decisions without assigning an overall winner.
+
+Presentation: retain per-row condition explanations, the condition-difference
+summary and ConfigurationDiff in their current positions. Show arithmetic deltas
+and case changes without an "incomparable" label. Missing values render as a dash
+with their concrete reason. The confirmation dialog and result header describe
+the same policy. Previously saved historical A/B tasks are recalculated on read,
+so this revision requires neither data migration nor task reruns. The existing
+`comparable` field remains condition metadata; it does not suppress arithmetic.
+
+Source assessment: the relevant `goal/p1-demo` and `integration/p1-new` comparison
+modules provide no usable implementation for this flow. The current refactor's
+report models, aggregation formulas, task ownership, team access and ConfigurationDiff
+are adapted/reused. Historical comparability and reference-only persistence are new.
+
+Acceptance: execute results → 与基线对比 → select A → 与历史任务执行条件比较 →
+confirm → 执行任务结果对比 → a completed A/B historical comparison appears in the
+task list. Reopen the result after login, expand LLM/rule triangles, check that raw
+scores, deltas and condition differences remain correct, and verify source results survive
+comparison deletion. Automated regression and local UI evidence are recorded in
+`docs/project-progress.md`. Real MySQL and customer in-bank acceptance remain
+environment-dependent checks.
+
 ## Scope
 
 AgentGate can create a controlled baseline/candidate pair of ordinary Evaluation Runs and

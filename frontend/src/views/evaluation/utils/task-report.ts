@@ -73,6 +73,7 @@ type ComparisonScore = {
   baseline: number | null;
   candidate: number | null;
   delta: number | null;
+  reasons?: string;
 };
 export type ComparisonScoreGroup = ComparisonScore & {
   key: 'overall' | 'llm' | 'rule';
