@@ -14,13 +14,13 @@ from agentgate.domain import (
     RunStatus,
     Trace,
 )
-from agentgate.domain.base import normalize_utc, utcnow
+from agentgate.domain.base import normalize_utc, utcnow, thaw_json
 from agentgate.result.analytics import ResultAnalytics, calculate_result_analytics
 from agentgate.result.comparison import EvaluationComparison, compare_reports
 from agentgate.result.report import build_evaluation_report
 from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
-from agentgate.trace.redaction import redact_trace
+from agentgate.trace.redaction import redact_trace, redact_value
 
 
 def _user_team_id() -> str:
@@ -198,6 +198,38 @@ class ResultReader:
         if trace is None:
             raise LookupError(f"unknown Trace: {run_id}/{case_id}")
         return redact_trace(trace)
+
+    def code_trace_data(self, run_id: str, case_id: str, mode: str):
+        from agentgate.evaluator.rule.code import trace_code_data
+        from agentgate.storage.evaluation_projection import TRACE_MODE_ADAPTERS
+        import json
+
+        run = self._get_run(run_id)
+        if run.manifest.target.adapter_type not in TRACE_MODE_ADAPTERS.get(mode, ()):
+            raise LookupError("当前模式不可使用此 Trace")
+        data = trace_code_data(self.get_trace(run_id, case_id))
+        # Reserve room for the maximum evaluator source within the trial input limit.
+        if len(json.dumps(data, ensure_ascii=True).encode()) > 1000000:
+            raise ValueError("Trace 测试数据过大，请选择较小的轨迹；未截断执行证据")
+        # Some adapters encode input/output JSON inside span attribute strings.
+        # Redact decoded objects too, retaining the original string/object types.
+        def redact_encoded(value):
+            if isinstance(value, dict):
+                return {k: redact_encoded(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [redact_encoded(v) for v in value]
+            if isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+                try:
+                    decoded = json.loads(value)
+                except ValueError:
+                    return value
+                return json.dumps(redact_encoded(thaw_json(redact_value(decoded))), ensure_ascii=False)
+            return value
+        data = redact_encoded(thaw_json(redact_value(data)))
+        warnings = ["来自完整历史 Trace 的脱敏副本；可编辑，不会调用 Agent 或修改原始轨迹。"]
+        if not data["turn_outcomes"] or any(t.get("input") is None for t in data["turn_outcomes"].values()):
+            warnings.append("部分轮次未记录可解析的输入；依赖输入的规则需补充模拟值。")
+        return {"trace": data, "warnings": warnings}
 
     def overview(self) -> dict[str, Any]:
         team_id = _user_team_id()

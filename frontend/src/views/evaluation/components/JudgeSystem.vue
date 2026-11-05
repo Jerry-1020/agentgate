@@ -9,6 +9,7 @@ import {
   type EvaluatorSummary,
 } from '../../../api/evaluations';
 import RuleEvaluatorCreate from './RuleEvaluatorCreate.vue';
+import CodeRuleDialog from './CodeRuleDialog.vue';
 import { dimensionNames, isLlmEvaluator, ruleExamples } from '../utils/evaluator-display';
 import { evaluatorScenarios, evaluatorTechnicalChecks } from '../utils/evaluator-guidance';
 import EvaluatorModelSelect from './EvaluatorModelSelect.vue';
@@ -46,6 +47,9 @@ const category = ref<'rule' | 'llm_judge'>('rule'),
   query = ref(''),
   creatingRule = ref(false),
   rule = ref<EvaluatorSummary | null>(null);
+const codeOpen = ref(false),
+  codeDirty = ref(false),
+  codeId = ref<string>();
 const design = ref<EvaluatorDesign | null>(null),
   detail = ref<EvaluatorDetail | null>(null),
   definition = ref<Definition | null>(null);
@@ -99,6 +103,13 @@ function hiddenEvaluator(evaluator: EvaluatorSummary) {
     (evaluator.source === 'builtin' && evaluator.implementation_id === 'policy_compliance')
   );
 }
+const rulePresets = computed(() =>
+  evaluatorCatalog.value
+    .filter(
+      (e) => e.source === 'builtin' && e.kind === 'rule' && e.latest_version && !hiddenEvaluator(e),
+    )
+    .map((e) => ({ ...e, name: displayName(e) })),
+);
 const entries = computed(() =>
   evaluatorCatalog.value.filter(
     (e) =>
@@ -106,7 +117,8 @@ const entries = computed(() =>
       !(e.source === 'builtin' && isLlmEvaluator(e.kind)) &&
       !e.owner_evaluator_id &&
       !hiddenEvaluator(e) &&
-      (e.latest_version || (isLlmEvaluator(e.kind) && e.has_draft)) &&
+      (e.latest_version ||
+        ((isLlmEvaluator(e.kind) || e.implementation_id === 'code_rule') && e.has_draft)) &&
       `${displayName(e)} ${e.name}`.toLowerCase().includes(query.value.trim().toLowerCase()),
   ),
 );
@@ -139,7 +151,7 @@ const canLaunch = computed(
     !viewingDraft.value &&
     design.value?.version === detail.value.latest.version,
 );
-watch([dirty, busy, promptDirty, groupDirty], (values) =>
+watch([dirty, busy, promptDirty, groupDirty, codeDirty], (values) =>
   emit('dirtyChange', values.some(Boolean)),
 );
 let openSequence = 0;
@@ -234,6 +246,11 @@ async function refreshDetail(id: string) {
 }
 async function open(e: EvaluatorSummary) {
   if (busy.value) return;
+  if (e.implementation_id === 'code_rule') {
+    codeId.value = e.id;
+    codeOpen.value = true;
+    return;
+  }
   if (e.kind === 'llm_group') {
     openSequence++;
     groupInitialId.value = e.id;
@@ -500,6 +517,17 @@ const templateLabels1: Record<string, string> = {
           LLM 评估
         </button>
       </div>
+      <button
+        v-if="category === 'rule'"
+        class="asset-primary"
+        :disabled="busy"
+        @click="
+          codeId = undefined;
+          codeOpen = true;
+        "
+      >
+        ＋ 新建规则评估器
+      </button>
       <button
         v-if="category === 'llm_judge'"
         class="asset-primary"
@@ -829,6 +857,18 @@ const templateLabels1: Record<string, string> = {
     @created="
       creatingRule = false;
       loadReviewAssets();
+    "
+  />
+  <CodeRuleDialog
+    v-if="codeOpen"
+    :initial-id="codeId"
+    :presets="rulePresets"
+    @close="codeOpen = false"
+    @dirty-change="codeDirty = $event"
+    @changed="loadReviewAssets()"
+    @launch="
+      codeOpen = false;
+      emit('launch', $event);
     "
   />
 </template>

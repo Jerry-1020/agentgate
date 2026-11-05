@@ -382,7 +382,9 @@ def execute_evaluators(
                 "Evaluator started: run_id=%s case_id=%s evaluator_id=%s kind=%s dimension=%s metric=%s",
                 trace.run_id, case.id, spec.id, spec.kind.value, spec.dimension, spec.metric,
             )
-            if spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
+            whole_trace_code = (spec.implementation_id == "code_rule"
+                                and spec.config.get("input_format") == "trace-v1")
+            if whole_trace_code or spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "evaluate_case", None))):
                 case_implementation = _require_case_evaluator(implementation)
                 skipped = _output_only_check(spec, trace)
                 case_evaluation = Evaluation(checks=()) if execution_errors else (

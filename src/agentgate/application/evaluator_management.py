@@ -51,6 +51,7 @@ from agentgate.evaluator.rule import (
     ToolArgumentsEvaluator,
 )
 from agentgate.evaluator.rule.execution import ExecutionPathEvaluator
+from agentgate.evaluator.rule.code import CodeRuleEvaluator
 from agentgate.evaluator.rule.json_schema import validate_json_schema
 from agentgate.evaluator.rule.operators import resolve_condition_operator
 from agentgate.evaluator.rule.policy import validate_policy_id
@@ -593,7 +594,9 @@ class EvaluatorManagement:
                 f"{spec.implementation_id} implements "
                 f"{implementation.kind}, not {spec.kind}"
             )
-        if spec.kind == EvaluatorKind.RULE and spec.config:
+        if spec.kind == EvaluatorKind.RULE and spec.implementation_id == "code_rule":
+            implementation.validate_spec(spec)
+        elif spec.kind == EvaluatorKind.RULE and spec.config:
             raise ValueError("Rule Evaluator config must be empty")
         if spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "validate_spec", None))):
             validate_spec = getattr(implementation, "validate_spec", None)
@@ -747,6 +750,7 @@ _BUILTIN_EVALUATOR_SPECS = (
 )
 
 _BUILTIN_IMPLEMENTATIONS = {
+    ("code_rule", "1"): CodeRuleEvaluator(),
     ("execution_path", "1"): ExecutionPathEvaluator(),
     ("skill_routing", "1"): SkillRoutingEvaluator(),
     ("required_tool", "1"): RequiredToolEvaluator(),
