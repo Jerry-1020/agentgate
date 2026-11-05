@@ -372,6 +372,32 @@ class SQLiteRepository:
                 ORDER BY started_at,id LIMIT ? OFFSET ?""", (user_team_id, run_id, run_id, user_team_id, limit, offset)).fetchall()
         return [RunEvent.model_validate_json(row[0]) for row in rows]
 
+    def save_historical_comparison(
+        self,
+        task: EvaluationTask,
+        *,
+        baseline_task_id: str,
+        candidate_task_id: str,
+        user_team_id: str,
+    ) -> EvaluationTask:
+        from .historical_comparisons import save_reference
+
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return save_reference(
+                db,
+                task,
+                baseline_task_id=baseline_task_id,
+                candidate_task_id=candidate_task_id,
+                user_team_id=user_team_id,
+            )
+
+    def is_historical_comparison(self, task_id: str, *, user_team_id: str) -> bool:
+        from .historical_comparisons import accessible_reference
+
+        with self._connect() as db:
+            return accessible_reference(db, task_id, user_team_id)
+
     def delete_task_record(self, task_id: str, *, user_team_id: str) -> None:
         """Permanently delete one task with all its runs, traces and results."""
         with self._connect() as db:
@@ -382,6 +408,16 @@ class SQLiteRepository:
             ).fetchone()
             if row is None:
                 raise ValueError("task does not exist")
+            task = EvaluationTask.model_validate_json(row["payload"])
+            from .historical_comparisons import accessible_reference, ensure_unreferenced
+            try:
+                reference_only = accessible_reference(db, task_id, user_team_id)
+            except LookupError as exc:
+                raise ValueError("task does not exist") from exc
+            if reference_only:
+                db.execute(f"DELETE FROM {_T_EVALUATION_TASKS} WHERE id=?", (task_id,))
+                return
+            ensure_unreferenced(db, task.run_ids + task.previous_run_ids)
             run_ids = [
                 r[0]
                 for r in db.execute(

@@ -1,6 +1,117 @@
 # AgentGate Project Progress
 
-Last updated: 2026-11-02
+Last updated: 2026-11-05
+
+## 2026-11-05 — Historical comparison release verification
+
+At the user's request, prepared the historical A/B comparison feature and its
+approved task-list/display dependencies for `release_20261109`. The final local
+backend regression passed **3171 tests / 127 skipped**; frontend stack validation,
+ESLint, type checking, **159 unit tests**, production build and whitespace checks
+passed. MySQL and other environment-dependent skipped checks are not counted as
+verified. Database schema, BJS submission and Agent execution code remain unchanged.
+
+Integrated onto the current release tip `78c68db` in a separate worktree, preserving
+upstream execution diagnostics, evaluator task history, selected-Agent display names
+and the centralized waiting-status translation. Resolved overlaps in task-list
+presentation, unit-test registration and task-summary SQL without replacing those
+upstream changes. The integrated backend suite passed **3208 tests / 127 skipped**;
+frontend stack validation, ESLint, type checking, **159 unit tests**, production
+build, focused Ruff and whitespace checks passed. The feature adds no schema or
+BJS/Agent execution changes relative to that release tip. The running local preview
+and its database were not used for integration tests or changed during integration.
+
+## 2026-11-05 — A/B list labels and summary-card colors
+
+The task list now displays only `A/B试验` in the type badge, without the historical
+comparison suffix. In comparison results, a positive regression count remains red;
+a zero regression count follows the overall-score-change color. The unchanged/other
+changes value follows that same overall color. This is a frontend presentation
+change only. ESLint, type checking and whitespace checks passed. Browser checks
+confirmed the simplified badges, four regressions in red, and zero regressions plus
+unchanged/other counts matching the green overall value. Screenshots are saved at
+`/private/tmp/agentgate-ab-task-badges.jpg` and
+`/private/tmp/agentgate-ab-zero-regression-colors.jpg`.
+
+## 2026-11-05 — Historical A/B arithmetic deltas with condition differences
+
+Applied the user's revised display policy: every historical comparison row with
+two numeric scores now returns B minus A, even when Agent, dataset, sample scope,
+evaluator or scoring conditions differ. Case changes use the existing outcome/score
+classification whenever both scores exist. Missing scores still yield no delta or
+change classification and render as a dash; zero remains a real score.
+
+Removed the "不可直接比较" verdict and exclusion count from the result UI. Concrete
+condition reasons remain in the same summary/metric/case positions, and the existing
+ConfigurationDiff and LLM/rule expansion controls are preserved. Updated the result
+header and confirmation explanation to match. The transient comparison calculation
+and frontend presentation changed; storage schema, BJS submission and Agent execution
+did not. Saved historical comparisons use the new calculation on read without
+recreating or rerunning tasks. This supersedes the delta-suppression rule recorded
+in the initial 2026-11-04 implementation below.
+
+Verification: focused backend comparison/application/storage/API tests **116 passed,
+3 skipped** (the unconfigured MySQL cases); frontend **159 unit tests passed**;
+ESLint, type checking, production build, focused Ruff and whitespace checks passed.
+Reloaded the local API on port 9197 using its existing configuration. Browser
+verification reopened an existing historical A/B task: 90.0 versus 80.0 now shows
+**-10.0** for overall, LLM, rule and expanded evaluator scores, retains the dataset
+difference explanation, and shows four regressions in the case table. Screenshot:
+`/private/tmp/agentgate-history-score-deltas.jpg`. No task data was edited for this
+verification.
+
+## 2026-11-04 — Historical single-task baseline comparison
+
+Implemented locally on `feature/history-baseline-comparison`, based on the current
+`refactor-1` (`4e71f94`). The user explicitly authorized autonomous continuation after
+the historical-result design checkpoints. No commit, push or merge is included.
+Preserved the previously approved task timing layout and A/B wording changes from
+the existing `feature/task-list-timing` worktree as UI dependencies; the original
+worktree and its running services remain unchanged.
+
+The single-task execution results page now offers **与基线对比** above completion
+progress. Its paged selector covers all dates and only single tasks, displaying one
+task per row with task name, tested Agent, dataset, start time and score. Completed
+associated tasks are selectable; the current task and incomplete/orphan records
+are disabled with explanations. A is the selected historical baseline and B is the
+current execution. The existing ConfigurationDiff component supplies the condition
+check; execution scope now reads frozen manifest Cases instead of querying a live
+dataset version. Explicit confirmation precedes saving a comparison task.
+
+`result/historical_comparison.py` performs pure, typed comparison of completed
+reports, preserving original scores and per-item reasons. Incomparable rows never
+carry a delta or improvement/regression classification. Aggregate and case-level
+comparability are independent: identical Cases and evaluator definitions can remain
+comparable even when aggregate dataset scopes differ. Existing controlled A/B
+execution and strict comparison routes retain their behavior.
+
+New A/B tasks reuse the existing ordered run_ids payload and have no owning rows in
+the task/run association table. Original single tasks retain ownership. Storage
+revalidates team access, completed state and ownership inside a transaction, locks
+source tasks, and supports idempotent retry with a client comparison ID. Fixed run
+references survive source reruns. Deleting a comparison removes only its task;
+deleting a referenced source returns 409. Task pages include reference tasks while
+overview run/score/sample totals do not double-count their evidence. No database
+schema, persistent model fields, BJS submission, agent adapters or execution
+pipeline changed. All modes use the existing authenticated evaluation client and
+frozen tested-Agent snapshots, without a new directory lookup or token route.
+
+Verification: full backend suite **3167 passed / 127 skipped**, plus two subsequently
+added SQLite deletion-race/missing-reference checks passed; frontend **159 unit
+tests passed**, ESLint and type checking passed, production build passed. Real UI
+verification used a separate local SQLite database and ports 9197/6297: paginated
+selection, disabled current task, explicit condition confirmation, saved list entry,
+incomparable raw scores, triangle expansion and reopen after login all passed.
+SQLite schema identity and source preservation were checked. MySQL contracts are
+implemented and parametrized tests are present, but real MySQL was not configured
+in this environment; those checks are skipped, not claimed as passed. No live
+in-bank/BJS acceptance was performed.
+
+Deploy the matching backend and frontend together. Reference-only tasks require the
+new deletion/query semantics; do not run old API deletion handlers against a database
+containing these tasks. Any rollback should first account for saved comparison
+tasks; their underlying single tasks and results are still owned by the original
+records. See the historical-comparison section of the A/B implementation plan.
 
 ## 2026-11-02 — Chinese Judge output instructions
 

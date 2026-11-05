@@ -82,6 +82,7 @@ class TaskListSummary(BaseModel):
     total_cases: int | None = Field(default=None, ge=0)
     completed_cases: int | None = Field(default=None, ge=0)
     previous_run_count: int = Field(default=0, ge=0)
+    historical_comparison: bool = False
     runs: tuple[RunListSummary, ...]
 
 

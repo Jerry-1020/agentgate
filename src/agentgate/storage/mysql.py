@@ -488,6 +488,31 @@ class MySQLRepository:
             )
             db.execute(s.datasets.delete().where(s.datasets.c.id_key == _digest(dataset_id)))
 
+    def save_historical_comparison(
+        self,
+        task: EvaluationTask,
+        *,
+        baseline_task_id: str,
+        candidate_task_id: str,
+        user_team_id: str,
+    ) -> EvaluationTask:
+        from .historical_comparisons import save_reference
+
+        with self._transaction() as db:
+            return save_reference(
+                db,
+                task,
+                baseline_task_id=baseline_task_id,
+                candidate_task_id=candidate_task_id,
+                user_team_id=user_team_id,
+            )
+
+    def is_historical_comparison(self, task_id: str, *, user_team_id: str) -> bool:
+        from .historical_comparisons import accessible_reference
+
+        with self._transaction() as db:
+            return accessible_reference(db, task_id, user_team_id)
+
     def delete_task_record(self, task_id: str, *, user_team_id: str) -> None:
         with self._transaction() as db:
             task = _one(
@@ -498,6 +523,11 @@ class MySQLRepository:
             if any(_one(db, s.runs, EvaluationRun, id=run_id, user_team_id=user_team_id) is None
                    for run_id in task.run_ids + task.previous_run_ids):
                 raise ValueError("task does not exist")
+            from .historical_comparisons import ensure_unreferenced, is_reference
+            if is_reference(db, task_id):
+                db.execute(s.evaluation_tasks.delete().where(s.evaluation_tasks.c.id_key == _digest(task_id)))
+                return
+            ensure_unreferenced(db, task.run_ids + task.previous_run_ids)
             for run_id in task.run_ids + task.previous_run_ids:
                 db.execute(s.run_events.delete().where(s.run_events.c.run_key == _digest(run_id)))
                 projection.remove_run(db, run_id)

@@ -25,6 +25,8 @@ import {
 } from '../utils/task-report';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import RerunDialog from './RerunDialog.vue';
+import BaselineComparisonDialog from './BaselineComparisonDialog.vue';
+import { ElMessage } from 'element-plus';
 import TraceExplorer from './TraceExplorer.vue';
 import TaskExecutionFlow from './TaskExecutionFlow.vue';
 import { sameJson } from '../utils/report-presentation';
@@ -86,7 +88,17 @@ let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false,
   loadTicket = 0;
 const manifest = computed<any>(() => data.value?.run.manifest);
-const associatedTask = computed(() => readTaskLinks().find((t) => t.runIds.includes(props.id)));
+const baselineComparison = ref(false);
+const associatedTask = computed(() =>
+  readTaskLinks().find((t) =>
+    props.taskId ? t.id === props.taskId : t.kind === 'single' && t.runIds.includes(props.id),
+  ),
+);
+function comparisonCreated() {
+  baselineComparison.value = false;
+  ElMessage.success('已创建 A/B 历史结果对比任务，可在任务列表中查看。');
+  emit('navigate', 'tasks');
+}
 const canRerun = computed(
   () =>
     associatedTask.value?.kind === 'single' &&
@@ -369,6 +381,21 @@ watch(sampleId, () => {
         </nav>
         <p v-if="progress.error" class="notice error">{{ progress.error }}</p>
         <template v-if="tab === 'results' || tab === 'low-samples'">
+          <div
+            v-if="tab === 'results' && associatedTask?.kind === 'single'"
+            class="baseline-action"
+          >
+            <button
+              class="secondary"
+              :disabled="report?.run.status !== 'completed'"
+              @click="baselineComparison = true"
+            >
+              与基线对比
+            </button>
+            <small v-if="report?.run.status !== 'completed'" class="muted"
+              >任务完成后可选择历史基线。</small
+            >
+          </div>
           <section v-if="tab === 'results'" class="task-kpis">
             <article>
               <span>完成进度</span><b>{{ Math.round(progress.progress * 100) }}%</b>
@@ -713,6 +740,13 @@ watch(sampleId, () => {
       </p>
     </template>
     <p v-else-if="!error" class="empty">正在加载任务…</p>
+    <BaselineComparisonDialog
+      v-if="baselineComparison && report && associatedTask?.kind === 'single'"
+      :task-id="associatedTask.id"
+      :candidate="report"
+      @close="baselineComparison = false"
+      @created="comparisonCreated"
+    />
     <RerunDialog
       v-if="rerun"
       :id="id"
@@ -728,6 +762,12 @@ watch(sampleId, () => {
   </div>
 </template>
 <style scoped>
+.baseline-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
 .tabs {
   overflow-x: auto;
 }

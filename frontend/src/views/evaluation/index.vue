@@ -66,7 +66,11 @@ watch(
 function syncTaskLinks() {
   taskLinks.value = readTaskLinks();
 }
-const currentLink = computed(() => taskLinks.value.find((t) => t.runIds.includes(runId.value)));
+const currentLink = computed(
+  () =>
+    taskLinks.value.find((t) => t.id === route.value.split('/')[1]?.split('?')[0]) ??
+    taskLinks.value.find((t) => t.kind === 'single' && t.runIds.includes(runId.value)),
+);
 const pairLink = computed(() =>
   currentLink.value?.kind === 'ab' && !route.value.includes('/samples/') ? currentLink.value : null,
 );
@@ -401,7 +405,13 @@ async function taskRerunCreated(taskId: string) {
           <a href="#tasks" class="link">← 返回测评任务</a>
           <h3>A/B试验</h3>
           <template v-if="pairLink"
-            ><p>两侧使用相同测评集与评估器版本。</p>
+            ><p>
+              {{
+                pairLink.historicalComparison
+                  ? '历史任务结果对比；展示两侧原始得分、分数差及执行条件差异。'
+                  : '两侧使用相同测评集与评估器版本。'
+              }}
+            </p>
             <div class="actions">
               <button
                 v-for="(id, index) in pairLink.runIds"
@@ -419,6 +429,7 @@ async function taskRerunCreated(taskId: string) {
           v-if="pairLink"
           :key="pairLink.id"
           :initial-pair="{ a: pairLink.runIds[0], b: pairLink.runIds[1] }"
+          :history-task-id="pairLink.historicalComparison ? pairLink.id : undefined"
           embedded
           @status="pairStatuses = $event" />
         <details v-if="pairLink" class="card" @toggle="pairFlowOpen = ($event.target as HTMLDetailsElement).open">

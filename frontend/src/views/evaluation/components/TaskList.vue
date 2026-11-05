@@ -100,10 +100,6 @@ function timeTooltip(row: TaskListSummary, column: (typeof timeColumns)[number])
     })
     .join('\n');
 }
-function creationTime(value: string) {
-  const formatted = formatTaskTime(value);
-  return formatted ? `${formatted.date} ${formatted.time}` : '未记录';
-}
 const total = computed(() => data.value?.total ?? 0);
 watch(data, (value) => {
   if (!value) return;
@@ -130,9 +126,12 @@ const done = (row: TaskListSummary) =>
     ? null
     : { done: row.completed_cases, total: row.total_cases };
 async function deleteTask(id: string) {
+  const historical = rows.value.find((row) => row.id === id)?.historical_comparison;
   try {
     await ElMessageBox.confirm(
-      '删除后任务及其运行记录、Trace 和结果将不可恢复。确定删除？',
+      historical
+        ? '删除此历史对比任务？两侧原单任务及其结果会保留。'
+        : '删除后任务及其运行记录、Trace 和结果将不可恢复。已被历史对比引用的单任务需先删除关联对比。确定删除？',
       '删除任务',
       { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' },
     );
@@ -247,14 +246,14 @@ onUnmounted(() => clearTimeout(debounce));
                 />
               </td>
               <td class="name-cell">
-                <span class="task-kind">{{
-                  r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
-                }}</span>
-                <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
-                  {{ r.name }}</button
-                ><small :title="'创建 ' + creationTime(r.created_at)"
-                  >创建 {{ creationTime(r.created_at) }}</small
+                <span class="task-kind"
+                  >{{
+                    r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
+                  }}</span
                 >
+                <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
+                  {{ r.name }}
+                </button>
                 <small v-if="r.summary_pending" role="status">{{
                   r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新'
                 }}</small>
@@ -397,6 +396,7 @@ onUnmounted(() => clearTimeout(debounce));
                 <button
                   v-if="
                     ['single', 'ab'].includes(r.kind ?? 'single') &&
+                    !r.historical_comparison &&
                     ['completed', 'failed', 'cancelled'].includes(r.status)
                   "
                   class="link"
