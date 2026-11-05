@@ -8,7 +8,8 @@ from typing import Protocol, Literal
 
 from .evaluation_query_models import (
     EvaluationQuery, TaskSummaryQuery, OverviewSummary, TaskSummaryPage,
-    CompletedRunSummary, RunSummarySource, RelatedEvaluationTaskPage, RelatedTaskCursor,
+    CompletedRunSummary, RunSummarySource, RelatedDatasetTaskPage, RelatedEvaluationTaskPage,
+    RelatedTaskCursor,
 )
 from agentgate.domain.run_event import RunEvent
 
@@ -48,6 +49,10 @@ class AgentGateRepository(Protocol):
         self, evaluator_id: str, version: str, *, user_team_id: str, limit: int,
         cursor: RelatedTaskCursor | None,
     ) -> RelatedEvaluationTaskPage: ...
+    def list_dataset_related_tasks(
+        self, dataset_id: str, version: int, *, user_team_id: str, limit: int,
+        cursor: RelatedTaskCursor | None,
+    ) -> RelatedDatasetTaskPage: ...
     def list_summary_backfill_ids(self, *, entity: Literal["run", "task", "dataset_version"], after_id: str | None = None, limit: int = 50) -> list[str]: ...
     def read_run_summary_source(self, run_id: str) -> RunSummarySource | None: ...
     def rebuild_run_summary(self, source: RunSummarySource, summary: CompletedRunSummary | None) -> bool: ...

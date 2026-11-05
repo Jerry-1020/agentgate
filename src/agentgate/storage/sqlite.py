@@ -1693,6 +1693,10 @@ class SQLiteRepository:
         with self._connect() as db:
             return projection.related_tasks(db, evaluator_id, version, user_team_id, limit, cursor)
 
+    def list_dataset_related_tasks(self, dataset_id, version, *, user_team_id, limit, cursor):
+        with self._connect() as db:
+            return projection.dataset_related_tasks(db, dataset_id, version, user_team_id, limit, cursor)
+
     def save_run(self, run: EvaluationRun) -> None:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")

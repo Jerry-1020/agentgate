@@ -121,18 +121,30 @@ class RelatedTaskCursor(NamedTuple):
         return urlsafe_b64encode(payload.encode()).decode()
 
 
-class RelatedEvaluationTask(BaseModel):
+class RelatedTask(BaseModel):
     task_id: str | None
     run_id: str
     name: str
     kind: EvaluationTaskKind
     status: RunStatus
     created_at: datetime
+
+
+class RelatedEvaluationTask(RelatedTask):
     evaluator_version: str
 
 
 class RelatedEvaluationTaskPage(BaseModel):
     items: list[RelatedEvaluationTask]
+    next_cursor: str | None
+
+
+class RelatedDatasetTask(RelatedTask):
+    dataset_version: int
+
+
+class RelatedDatasetTaskPage(BaseModel):
+    items: list[RelatedDatasetTask]
     next_cursor: str | None
 
 

@@ -6,7 +6,7 @@ import json
 from io import BytesIO
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -20,7 +20,7 @@ from agentgate.dataset.formats.xlsx import (
 from agentgate.domain import Case, DatasetVersionStatus
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
 from agentgate.server.errors import raise_not_found, raise_unprocessable, raise_xlsx_error
-
+from agentgate.storage.evaluation_query_models import RelatedDatasetTaskPage, RelatedTaskCursor
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -202,6 +202,27 @@ def dataset_version(dataset_id: str, version: int, dependencies: Dependencies):
         return dependencies.datasets.get_version(dataset_id, version)
     except ValueError as error:
         raise_not_found(error)
+
+
+@router.get("/{dataset_id}/versions/{version}/related-tasks")
+def dataset_related_tasks(
+    dataset_id: str,
+    version: Annotated[int, Path(ge=1)],
+    dependencies: Dependencies,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: str | None = None,
+) -> RelatedDatasetTaskPage:
+    try:
+        dependencies.datasets.get_version(dataset_id, version)
+    except ValueError as error:
+        raise_not_found(error)
+    try:
+        position = RelatedTaskCursor.decode(cursor) if cursor is not None else None
+    except ValueError as error:
+        raise_unprocessable(error)
+    return dependencies.evaluation_queries.dataset_related_tasks(
+        dataset_id, version, limit=limit, cursor=position,
+    )
 
 
 @router.get("/{dataset_id}/versions/{version}/export")

@@ -1,4 +1,6 @@
 import { request } from './client';
+import type { TaskKind } from './evaluation-summaries';
+import type { RunStatus } from '../views/evaluation/types/run';
 import type {
   CaseTurn,
   Condition,
@@ -15,6 +17,19 @@ import type {
 
 const headers = { 'Content-Type': 'application/json' };
 const id = encodeURIComponent;
+
+export interface DatasetRelatedTaskPage {
+  items: {
+    task_id: string | null;
+    run_id: string;
+    name: string;
+    kind: TaskKind;
+    status: RunStatus | 'waiting';
+    created_at: string;
+    dataset_version: number;
+  }[];
+  next_cursor: string | null;
+}
 
 interface ApiExpectationBase {
   id: string;
@@ -206,6 +221,14 @@ export const datasetApi = {
     request<ApiDatasetVersion>(`/api/datasets/${id(datasetId)}/versions/${version}`).then(
       toEditorVersion,
     ),
+  relatedTasks: (datasetId: string, version: number, cursor: string | null, signal: AbortSignal) => {
+    const params = new URLSearchParams({ limit: '20' });
+    if (cursor !== null) params.set('cursor', cursor);
+    return request<DatasetRelatedTaskPage>(
+      `/api/datasets/${id(datasetId)}/versions/${version}/related-tasks?${params}`,
+      { signal },
+    );
+  },
   currentDraft: (datasetId: string) =>
     request<ApiDatasetVersion>(`/api/datasets/${id(datasetId)}/drafts/current`).then(
       toEditorVersion,
