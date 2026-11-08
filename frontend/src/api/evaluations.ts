@@ -178,11 +178,22 @@ export const api = {
     ),
   versions: () => request<{ id: string; label: string }[]>('/versions'),
   report: (id: string) => request<Report>(`/runs/${encodeURIComponent(id)}`),
+  sampleResourceUsage: (id: string) =>
+    request<{ items: SampleResourceUsage[] }>(
+      `/runs/${encodeURIComponent(id)}/sample-resource-usage`,
+    ),
   samples: (id: string) => request<RunSamples>(`/runs/${encodeURIComponent(id)}/samples`),
   status: (id: string) => request<RunProgress>(`/runs/${encodeURIComponent(id)}/status`),
   trace: (id: string, caseId: string) =>
     request<Trace>(`/runs/${encodeURIComponent(id)}/traces/${encodeURIComponent(caseId)}`),
 };
+export interface SampleResourceUsage {
+  case_id: string;
+  total_tokens: number | null;
+  duration_ms: number | null;
+  token_status: 'available' | 'partial' | 'unavailable';
+  duration_source: 'case_span' | 'turn_bounds' | 'unavailable';
+}
 export const kindLabel = (kind: string) =>
   ({ rule: '规则评估器', llm_judge: 'LLM 评估器', llm_group: 'LLM 评估器', hybrid: '复合评估器' })[
     kind

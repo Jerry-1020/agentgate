@@ -7,6 +7,7 @@ import ElementPlus from 'element-plus';
 import { pinia } from '../src/stores';
 import { useAuthStore } from '../src/stores/modules/auth';
 import Parent from '../src/views/evaluation/index.vue';
+import TaskResults from '../src/views/evaluation/components/TaskResults.vue';
 import TaskList from '../src/views/evaluation/components/TaskList.vue';
 import OverviewMetrics from '../src/views/evaluation/components/OverviewMetrics.vue';
 import * as helpers from '../src/views/evaluation/utils/summary-query';
@@ -25,6 +26,12 @@ const layout = { props: ['hideHeader'], template: `<main><button v-if="!hideHead
   auth: (values: object) => auth.$patch(values),
   async mount(path='/tasks', component='parent', props={}) {
     wrapper?.unmount();
+    if (component === 'results') {
+      router=createRouter({history:createMemoryHistory(), routes:[{path:'/:pathMatch(.*)*',component:TaskResults}]});
+      await router.push(path); await router.isReady();
+      wrapper=mount(TaskResults,{attachTo:'#app',props,global:{plugins:[pinia,ElementPlus,router]}});
+      return;
+    }
     if (component !== 'parent') {
       wrapper = mount(component === 'list' ? TaskList : OverviewMetrics, { attachTo: '#app', props,
         global: { plugins: [pinia, ElementPlus] } });
