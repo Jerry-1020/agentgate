@@ -12,6 +12,7 @@ import {
   type RunProgress,
   type Report,
   type Trace,
+  type SampleResourceUsage,
 } from '../../../api/evaluations';
 import { ElMessageBox } from 'element-plus';
 import {
@@ -20,7 +21,6 @@ import {
   sampleSummary,
   downloadCsv,
   displayValue,
-  traceSeconds,
   groupEvaluatorResults,
 } from '../utils/task-report';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
@@ -83,6 +83,83 @@ const traces = ref<Record<string, Trace>>({}),
   traceErrors = ref<Record<string, string>>({}),
   exporting = ref(false),
   exportError = ref('');
+const resourceItems = shallowRef<Record<string, SampleResourceUsage>>({});
+const resourceError = ref('');
+const resourceLoading = ref(false);
+let resourcePending: Promise<boolean> | undefined;
+let resourceRunId = '';
+let resourceStatus = '';
+let resourceLoaded = false;
+let resourceFetchedAt = 0;
+const terminalStatus = (value: string) => ['completed', 'failed', 'cancelled'].includes(value);
+function resourceText(id: string, field: 'tokens' | 'duration') {
+  const item = resourceItems.value[id];
+  if (resourceError.value) return '加载失败';
+  if (!item) return resourceLoading.value ? '加载中…' : '未采集';
+  if (field === 'duration')
+    return item.duration_ms === null ? '未记录' : `${(item.duration_ms / 1000).toFixed(3)} 秒`;
+  return item.total_tokens === null
+    ? '未采集'
+    : `${item.total_tokens.toLocaleString()}${item.token_status === 'partial' ? '（部分）' : ''}`;
+}
+function loadResources(force = false): Promise<boolean> {
+  if (
+    disposed ||
+    document.hidden ||
+    sampleId.value ||
+    !['results', 'low-samples'].includes(tab.value)
+  )
+    return Promise.resolve(false);
+  if (resourceRunId !== props.id) {
+    resourceRunId = props.id;
+    resourceItems.value = {};
+    resourceLoaded = false;
+    resourceFetchedAt = 0;
+    resourceError.value = '';
+  }
+  if (resourcePending) return resourcePending;
+  const status = progress.value?.status ?? '';
+  if (!status) return Promise.resolve(false);
+  if (
+    !force &&
+    resourceLoaded &&
+    resourceStatus === status &&
+    (terminalStatus(status) || Date.now() - resourceFetchedAt < 30000)
+  )
+    return Promise.resolve(true);
+  if (!force && resourceError.value && Date.now() - resourceFetchedAt < 30000)
+    return Promise.resolve(false);
+  const runId = props.id;
+  resourceLoading.value = true;
+  resourceError.value = '';
+  resourceFetchedAt = Date.now();
+  resourcePending = api
+    .sampleResourceUsage(runId)
+    .then(({ items }) => {
+      if (disposed || runId !== props.id) return false;
+      resourceItems.value = Object.fromEntries(items.map((item) => [item.case_id, item]));
+      resourceLoaded = true;
+      resourceStatus = status;
+      return true;
+    })
+    .catch(() => {
+      if (!disposed && runId === props.id)
+        resourceError.value = '资源统计加载失败，不影响评估结果。';
+      return false;
+    })
+    .finally(() => {
+      resourcePending = undefined;
+      resourceLoading.value = false;
+      if (
+        !disposed &&
+        runId === props.id &&
+        terminalStatus(progress.value?.status ?? '') &&
+        status !== progress.value?.status
+      )
+        void loadResources(true);
+    });
+  return resourcePending;
+}
 const traceRequests = new Map<string, Promise<boolean>>();
 let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false,
@@ -254,6 +331,7 @@ async function load() {
     report.value = r;
     data.value = s;
     error.value = '';
+    void loadResources();
     loadSelectedTrace();
   } catch (e) {
     if (!disposed && ticket === loadTicket) error.value = String(e);
@@ -277,27 +355,40 @@ async function exportRows() {
   exporting.value = true;
   exportError.value = '';
   const rows = [...filtered.value];
-  const ids = rows.filter((c: any) => caseResults(c.id).length).map((c: any) => c.id);
   try {
-    for (let start = 0; start < ids.length; start += 4) {
-      if (disposed) return;
-      const loaded = await Promise.all(ids.slice(start, start + 4).map(loadTrace));
-      if (loaded.some((success) => !success)) {
-        exportError.value = '部分样本执行轨迹读取失败，未导出；请重试，以免遗漏耗时数据。';
-        return;
-      }
+    const loaded = await loadResources();
+    if (!loaded) {
+      exportError.value = '资源统计读取失败，未导出；请重试。';
+      return;
     }
     if (disposed) return;
     downloadCsv(
       [
-        ['用户输入', '场景', '状态', '综合分', ...columns.value.map((c) => c.name), '耗时（秒）'],
+        [
+          '用户输入',
+          '场景',
+          '状态',
+          '综合分',
+          ...columns.value.map((c) => c.name),
+          '总 Token',
+          'Token 完整性',
+          '总耗时（秒）',
+        ],
         ...rows.map((c: any) => [
           displayValue(c.turns[0]?.input),
           c.tags.join('、'),
           statusLabel(summary(c.id).outcome),
           score(summary(c.id).score),
           ...columns.value.map((col) => score(columnScore(caseResults(c.id), col))),
-          traceSeconds(traces.value[c.id]),
+          resourceItems.value[c.id]?.total_tokens ?? null,
+          resourceItems.value[c.id]?.token_status === 'partial'
+            ? '部分'
+            : resourceItems.value[c.id]?.token_status === 'available'
+              ? '已采集'
+              : '未采集',
+          resourceItems.value[c.id]?.duration_ms == null
+            ? null
+            : resourceItems.value[c.id].duration_ms! / 1000,
         ]),
       ],
       `测评结果-${props.id}.csv`,
@@ -320,6 +411,9 @@ watch(
   () => router.currentRoute.value.query.tab,
   (value) => (tab.value = detailTabs.find(([key]) => key === value)?.[0] ?? 'results'),
 );
+watch([sampleId, tab, () => props.id], () => {
+  void loadResources();
+});
 watch(sampleId, () => {
   turnIndex.value = 0;
   continuous.value = false;
@@ -453,6 +547,12 @@ watch(sampleId, () => {
               {{ exporting ? '正在准备导出…' : '导出 CSV' }}
             </button>
           </div>
+          <p v-if="resourceError" class="notice warn" role="status">
+            {{ resourceError }}
+            <button class="link" :disabled="resourceLoading" @click="loadResources(true)">
+              重试资源统计
+            </button>
+          </p>
           <p v-if="exportError" class="notice error" role="alert">{{ exportError }}</p>
           <div
             class="table-wrap sample-results-scroll"
@@ -470,6 +570,8 @@ watch(sampleId, () => {
                 <col class="sample-status-column" />
                 <col class="sample-score-column" />
                 <col v-for="c in columns" :key="c.key" />
+                <col style="width: 120px" />
+                <col style="width: 120px" />
                 <col class="sample-action-column" />
               </colgroup>
               <thead>
@@ -480,6 +582,18 @@ watch(sampleId, () => {
                   <th scope="col">综合分</th>
                   <th v-for="c in columns" :key="c.key" scope="col" :title="c.name">
                     {{ c.name }}
+                  </th>
+                  <th
+                    scope="col"
+                    title="被测智能体输入与输出 Token，不含评估器消耗；部分表示采集不完整"
+                  >
+                    总 Token
+                  </th>
+                  <th
+                    scope="col"
+                    title="被测智能体执行时间，不含排队与评估器判分；缺少样本级时间时使用轮次时间范围"
+                  >
+                    总耗时
                   </th>
                   <th scope="col">操作</th>
                 </tr>
@@ -502,6 +616,16 @@ watch(sampleId, () => {
                   <td v-for="col in columns" :key="col.key" class="violet">
                     {{ score(columnScore(caseResults(c.id), col)) }}
                   </td>
+                  <td>{{ resourceText(c.id, 'tokens') }}</td>
+                  <td
+                    :title="
+                      resourceItems[c.id]?.duration_source === 'turn_bounds'
+                        ? '按轮次起止时间范围计算'
+                        : '样本执行时间'
+                    "
+                  >
+                    {{ resourceText(c.id, 'duration') }}
+                  </td>
                   <td><button class="link" @click="openSample(c.id)">样本详情</button></td>
                 </tr>
               </tbody>
@@ -511,7 +635,11 @@ watch(sampleId, () => {
             {{ tab === 'low-samples' ? '暂无匹配的低分样本' : '暂无匹配样本' }}
           </p>
         </template>
-        <TaskExecutionFlow v-else-if="tab === 'flow'" :run-ids="[id]" :statuses="{ [id]: progress.status }" />
+        <TaskExecutionFlow
+          v-else-if="tab === 'flow'"
+          :run-ids="[id]"
+          :statuses="{ [id]: progress.status }"
+        />
         <section v-else-if="tab === 'iteration'" aria-label="优化迭代">
           <p class="empty">能力构建中</p>
         </section>
@@ -885,7 +1013,7 @@ watch(sampleId, () => {
   outline-offset: 2px;
 }
 .sample-table {
-  min-width: calc(470px + var(--score-column-count) * 80px);
+  min-width: calc(710px + var(--score-column-count) * 80px);
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;

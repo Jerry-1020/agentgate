@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentgate.application.sample_resource_usage import SampleResourceUsageResponse, summarize_sample
 from agentgate.domain import (
     EvaluationReport,
     EvaluationRun,
@@ -21,6 +24,9 @@ from agentgate.result.report import build_evaluation_report
 from agentgate.storage.repository import AgentGateRepository
 from agentgate.server.user_context import get_user_info
 from agentgate.trace.redaction import redact_trace, redact_value
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _user_team_id() -> str:
@@ -191,6 +197,24 @@ class ResultReader:
             self.get_report(baseline_run_id),
             self.get_report(candidate_run_id),
         )
+
+    def get_sample_resource_usage(self, run_id: str) -> SampleResourceUsageResponse:
+        run = self._get_run(run_id)
+        started = monotonic()
+        LOGGER.debug("Sample resource summary started: run_id=%s", run_id)
+        try:
+            traces = {trace.case_id: trace for trace in self.repository.list_traces(run_id)}
+            items = [summarize_sample(case.id, traces.get(case.id), (turn.id for turn in case.turns))
+                     for case in run.manifest.execution_cases]
+        except Exception as exc:
+            LOGGER.error("Sample resource summary failed: run_id=%s error_type=%s", run_id, type(exc).__name__)
+            raise
+        LOGGER.info(
+            "Sample resource summary loaded: run_id=%s sample_count=%d token_missing=%d token_partial=%d latency_ms=%.1f",
+            run_id, len(items), sum(i.token_status == "unavailable" for i in items),
+            sum(i.token_status == "partial" for i in items), (monotonic() - started) * 1000,
+        )
+        return SampleResourceUsageResponse(items=items)
 
     def get_trace(self, run_id: str, case_id: str) -> Trace:
         self._get_run(run_id)
