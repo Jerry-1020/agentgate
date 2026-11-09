@@ -6,12 +6,15 @@ export function dayWindow(days: number, now: Date = new Date()): SummaryQuery {
   start.setDate(start.getDate() - (days - 1));
   return { start_at: start.toISOString() };
 }
-export function taskPath(row: TaskListSummary): string {
-  return `${row.kind === 'stability' ? 'stability' : 'tasks'}/${row.task_id ?? row.runs[0].run_id}`;
+export function taskPath(
+  row: Pick<TaskListSummary, 'kind' | 'task_id'> & (Pick<TaskListSummary, 'runs'> | { run_id: string }),
+): string {
+  const id = row.task_id ?? ('run_id' in row ? row.run_id : row.runs[0].run_id);
+  return `${row.kind === 'stability' ? 'stability' : 'tasks'}/${id}`;
 }
 export function hasActiveRuns(rows: TaskListSummary[]): boolean {
   return rows.some((row) =>
-    row.runs.some((run) => ['pending', 'scheduled', 'running'].includes(run.status)),
+    row.runs.some((run) => ['pending', 'scheduled', 'waiting', 'running'].includes(run.status)),
   );
 }
 export function evaluatorStrategy(kinds: string[]): string {

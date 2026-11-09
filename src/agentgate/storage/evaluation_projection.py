@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import UTC
+from datetime import UTC, datetime
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -18,6 +19,12 @@ from agentgate.domain import RunStatus, content_sha256
 from .evaluation_query_models import (
     SUMMARY_VERSION,
     OverviewSummary,
+    RelatedDatasetTask,
+    RelatedDatasetTaskPage,
+    RelatedEvaluationTask,
+    RelatedEvaluationTaskPage,
+    RelatedTask,
+    RelatedTaskCursor,
     RunListSummary,
     SummarySourceChanged,
     TaskListSummary,
@@ -236,35 +243,188 @@ def run_relation(db):
                    FROM agentgate_run_case_progress GROUP BY {rk}) p ON p.{rk}=r.{pk}"""
 
 
+_TASK_STATUS = """CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0 THEN 'failed'
+             WHEN SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled'
+             WHEN MIN(CASE WHEN r.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed'
+             WHEN SUM(CASE WHEN r.status IN ('running','completed') THEN 1 ELSE 0 END)>0 THEN 'running'
+             ELSE first_run.status END"""
+
+
+def reference_task_condition(db, alias="t"):
+    pk, _, tk, _, _, _ = keys(db)
+    return f"""{alias}.kind='ab' AND NOT EXISTS (
+        SELECT 1 FROM agentgate_evaluation_task_runs owned WHERE owned.{tk}={alias}.{pk})"""
+
+
+def historical_task_members(db):
+    pk, rk, tk, _, _, _ = keys(db)
+    position = (
+        "CONCAT('$.run_ids[',p.position,']')"
+        if mysql(db)
+        else "('$.run_ids[' || p.position || ']')"
+    )
+    identifier = f"JSON_EXTRACT(t.payload,{position})"
+    match = f"BINARY r.id=BINARY JSON_UNQUOTE({identifier})" if mysql(db) else f"r.id={identifier}"
+    # Missing runs remain NULL members so the access predicate can reject the entire task.
+    return f"""SELECT t.{pk} AS {tk},r.{pk} AS {rk},p.position,1 AS is_current
+        FROM agentgate_evaluation_tasks t
+        CROSS JOIN (SELECT 0 AS position UNION ALL SELECT 1 AS position) p
+        LEFT JOIN agentgate_runs r ON {match}
+        WHERE {reference_task_condition(db)}"""
+
+
+def task_members(db):
+    _, rk, tk, _, _, _ = keys(db)
+    return f"""SELECT {tk},{rk},position,is_current FROM agentgate_evaluation_task_runs
+        UNION ALL {historical_task_members(db)}"""
+
+
 def task_relation(db):
     pk, rk, tk, _, _, team = keys(db)
     first = "first_run_key" if mysql(db) else "first_run_id"
     return f"""SELECT t.{pk} AS k,t.id,t.id AS task_id,COALESCE(t.name,s.fallback_name,t.id) AS name,
         t.kind,t.created_at,first_run.id AS search_run_id,
+        CASE WHEN {reference_task_condition(db)} THEN 1 ELSE 0 END AS historical_comparison,
         MAX(1-({valid_summary(db, "r", "member_summary")})) AS summary_pending,
-        CASE WHEN SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END)>0 THEN 'failed'
-             WHEN SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled'
-             WHEN MIN(CASE WHEN r.status='completed' THEN 1 ELSE 0 END)=1 THEN 'completed'
-             WHEN SUM(CASE WHEN r.status IN ('running','completed') THEN 1 ELSE 0 END)>0 THEN 'running'
-             ELSE first_run.status END AS status
+        {_TASK_STATUS} AS status
         FROM agentgate_evaluation_tasks t
-        JOIN agentgate_evaluation_task_runs a ON a.{tk}=t.{pk} AND a.is_current=1
+        JOIN ({task_members(db)}) a ON a.{tk}=t.{pk} AND a.is_current=1
         JOIN agentgate_runs r ON r.{pk}=a.{rk}
         LEFT JOIN agentgate_run_summaries member_summary ON member_summary.{rk}=r.{pk}
         JOIN agentgate_runs first_run ON first_run.{pk}=t.{first}
         LEFT JOIN agentgate_run_summaries s ON s.{rk}=t.{first}
         WHERE NOT EXISTS (
-            SELECT 1 FROM agentgate_evaluation_task_runs bad
+            SELECT 1 FROM ({task_members(db)}) bad
             LEFT JOIN agentgate_runs br ON br.{pk}=bad.{rk}
             WHERE bad.{tk}=t.{pk} AND bad.is_current=1
                 AND (br.{pk} IS NULL OR br.{team}<>:team))
         GROUP BY t.{pk},t.id,t.name,s.fallback_name,t.kind,t.created_at,first_run.status,first_run.id
         UNION ALL
         SELECT r.{pk},r.id,NULL,COALESCE(s.fallback_name,r.id),'single',r.created_at,r.id,
-        1-({valid_summary(db)}),r.status
+        0,1-({valid_summary(db)}),r.status
         FROM agentgate_runs r LEFT JOIN agentgate_run_summaries s ON s.{rk}=r.{pk}
         WHERE r.{team}=:team AND NOT EXISTS (
             SELECT 1 FROM agentgate_evaluation_task_runs a WHERE a.{rk}=r.{pk})"""
+
+
+def related_tasks(
+    db, evaluator_id: str, version: str, team_id: str, limit: int,
+    cursor: RelatedTaskCursor | None,
+) -> RelatedEvaluationTaskPage:
+    items, next_cursor = _related_tasks(db, "evaluator", evaluator_id, version, team_id, limit, cursor)
+    return RelatedEvaluationTaskPage(
+        items=[RelatedEvaluationTask(**item.model_dump(), evaluator_version=version) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+def dataset_related_tasks(
+    db, dataset_id: str, version: int, team_id: str, limit: int,
+    cursor: RelatedTaskCursor | None,
+) -> RelatedDatasetTaskPage:
+    items, next_cursor = _related_tasks(db, "dataset", dataset_id, str(version), team_id, limit, cursor)
+    return RelatedDatasetTaskPage(
+        items=[RelatedDatasetTask(**item.model_dump(), dataset_version=version) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+def _related_tasks(
+    db, asset_kind: Literal["dataset", "evaluator"], asset_id: str, version: str,
+    team_id: str, limit: int, cursor: RelatedTaskCursor | None,
+) -> tuple[list[RelatedTask], str | None]:
+    pk, rk, tk, _, _, team = keys(db)
+    is_mysql = mysql(db)
+    first = "first_run_key" if is_mysql else "first_run_id"
+    params = {
+        "asset_kind": asset_kind, "asset_id": asset_id, "version": version,
+        "team": key(db, team_id), "limit": limit + 1,
+    }
+    asset = (
+        "ref.asset_kind=:asset_kind AND ref.source_id='' "
+        "AND ref.asset_id=:asset_id AND ref.version=:version"
+    )
+    if is_mysql:
+        from .mysql import _digest
+
+        asset += " AND ref.asset_lookup_key=:asset_key"
+        params["asset_key"] = _digest(asset_kind, "", asset_id, version)
+
+    # Task IDs and legacy run IDs come from separate namespaces.
+    item_id = "CAST(item_id AS BINARY)" if is_mysql else "item_id"
+    outer_id = "CAST(page.item_id AS BINARY)" if is_mysql else "page.item_id"
+    cursor_id = "CAST(:cursor_id AS BINARY)" if is_mysql else ":cursor_id"
+    after = ""
+    if cursor is not None:
+        after = f"""AND (created_at<:cursor_at OR (
+            created_at=:cursor_at AND ({item_id}>{cursor_id}
+            OR ({item_id}={cursor_id} AND is_task>:cursor_is_task))))"""
+        params.update(cursor_at=stamp(db, cursor.created_at), cursor_id=cursor.item_id,
+                      cursor_is_task=int(cursor.is_task))
+
+    # Historical associations can match. Current ones determine visibility and status.
+    page = rows(db, f"""
+        SELECT page.item_id, page.is_task, page.created_at, first_run.id AS run_id,
+               COALESCE(page.name, s.fallback_name, page.item_id) AS name,
+               page.kind, {_TASK_STATUS} AS status
+        FROM (
+            SELECT * FROM (
+                SELECT DISTINCT COALESCE(t.{pk}, matched.{pk}) AS row_key,
+                    COALESCE(t.id, matched.id) AS item_id, (t.{pk} IS NOT NULL) AS is_task,
+                    COALESCE(t.{first}, matched.{pk}) AS first_key,
+                    COALESCE(t.created_at, matched.created_at) AS created_at,
+                    t.name, COALESCE(t.kind, 'single') AS kind
+                FROM agentgate_run_asset_refs ref
+                JOIN agentgate_runs matched ON matched.{pk}=ref.{rk} AND matched.{team}=:team
+                LEFT JOIN agentgate_evaluation_task_runs link ON link.{rk}=matched.{pk}
+                LEFT JOIN agentgate_evaluation_tasks t ON t.{pk}=link.{tk}
+                WHERE {asset} AND (link.{tk} IS NULL OR t.{first} IS NOT NULL)
+            ) candidates
+            WHERE (is_task=0 OR (
+                EXISTS (
+                    SELECT 1 FROM agentgate_runs representative
+                    WHERE representative.{pk}=candidates.first_key AND representative.{team}=:team
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM agentgate_evaluation_task_runs member
+                    LEFT JOIN agentgate_runs member_run ON member_run.{pk}=member.{rk}
+                    WHERE member.{tk}=candidates.row_key AND member.is_current=1
+                      AND (member_run.{pk} IS NULL OR member_run.{team}<>:team)
+                )
+            ))
+            {after}
+            ORDER BY created_at DESC, {item_id}, is_task
+            LIMIT :limit
+        ) page
+        JOIN agentgate_runs first_run ON first_run.{pk}=page.first_key
+        LEFT JOIN agentgate_run_summaries s ON s.{rk}=page.first_key
+        LEFT JOIN agentgate_evaluation_task_runs current_run
+          ON page.is_task=1 AND current_run.{tk}=page.row_key AND current_run.is_current=1
+        LEFT JOIN agentgate_runs r ON r.{pk}=current_run.{rk}
+        GROUP BY page.row_key, page.item_id, page.is_task, page.created_at, first_run.id,
+                 page.name, s.fallback_name, page.kind, first_run.status
+        ORDER BY page.created_at DESC, {outer_id}, page.is_task
+        """, params)
+
+    items = [
+        RelatedTask(
+            task_id=row["item_id"] if row["is_task"] else None,
+            run_id=row["run_id"],
+            name=row["name"],
+            kind=row["kind"],
+            status=row["status"],
+            created_at=(row["created_at"].replace(tzinfo=UTC) if is_mysql
+                        else datetime.fromisoformat(row["created_at"])),
+        )
+        for row in page[:limit]
+    ]
+    next_cursor = None
+    if len(page) > limit:
+        last = items[-1]
+        next_cursor = RelatedTaskCursor(
+            last.created_at, last.task_id or last.run_id, last.task_id is not None,
+        ).encode()
+    return items, next_cursor
 
 
 def filters(db, query, alias="q"):
@@ -319,7 +479,7 @@ def task_page(db, query, team):
     members = rows(
         db,
         f"""SELECT {tk} AS task_key,{rk} AS run_key,position
-        FROM agentgate_evaluation_task_runs WHERE is_current=1 AND {tk} IN ({tokens}) ORDER BY position""",
+        FROM ({task_members(db)}) members WHERE is_current=1 AND {tk} IN ({tokens}) ORDER BY position""",
         ids,
     )
     historical = {
@@ -377,6 +537,7 @@ def task_page(db, query, team):
             TaskListSummary(
                 **{k: row[k] for k in ("id", "task_id", "name", "kind", "created_at", "status")},
                 previous_run_count=historical.get(row["k"], 0) if row["task_id"] else 0,
+                historical_comparison=bool(row["historical_comparison"]),
                 runs=children,
                 summary_pending=any(r.summary_pending for r in children),
                 total_cases=None
@@ -564,3 +725,55 @@ def audit(db):
             for r in rows(db, sql, {"v": SUMMARY_VERSION})
         )
     return issues
+
+
+# Only adapters with a known login-mode origin are offered as historical sources.
+TRACE_MODE_ADAPTERS = {
+    "inbank": ("inbank_chatabc", "inbank_yunxia"),
+    "external": ("demo_loan", "local_bank", "agent_platform_mock", "trace_sdk_replay"),
+}
+
+
+def code_trace_choices(db, *, user_team_id, mode, offset=0, limit=50,
+                       source_id=None, target_id=None, version=None):
+    """Bounded metadata projection; never load Trace bodies or whole Run manifests."""
+    if mode not in TRACE_MODE_ADAPTERS or offset < 0 or not 1 <= limit <= 100:
+        raise ValueError("invalid Trace query")
+    trace_list = source_id is not None
+    if trace_list and (not target_id or not version):
+        raise ValueError("请选择智能体及版本")
+    def field(path):
+        expr = "json_extract(r.payload, '$.manifest.target." + path + "')"
+        return "json_unquote(" + expr + ")" if mysql(db) else expr
+    fields = {
+        "source_id": field("ref.source_id"), "target_id": field("ref.external_target_id"),
+        "version": field("ref.external_version_id"), "name": field("display_name"),
+        "adapter_type": field("adapter_type"),
+        "branch": "COALESCE(NULLIF(" + field("invocation_config.branch_id") + ", 'null'), '')",
+    }
+    ik, rk, _, _, _, tk = keys(db)
+    params = {"team": key(db, user_team_id), "team_text": user_team_id,
+              "limit": limit + 1, "offset": offset}
+    adapters = TRACE_MODE_ADAPTERS[mode]
+    for i, adapter in enumerate(adapters):
+        params["adapter" + str(i)] = adapter
+    where = ["r." + tk + " = :team", "r.user_team_id = :team_text",
+             fields["adapter_type"] + " IN (" + ",".join(":adapter" + str(i) for i in range(len(adapters))) + ")",
+             field("ref.target_type") + " = 'agent'"]
+    if trace_list:
+        for key_name, value in (("source_id", source_id), ("target_id", target_id), ("version", version)):
+            params[key_name] = value
+            where.append(fields[key_name] + " = :" + key_name)
+        columns = "t.id AS trace_id,t.run_id,t.case_id,r.created_at"
+        distinct = ""
+        order = "r.created_at DESC, r.id, t.case_id, t.id"
+    else:
+        columns = ",".join(expr + " AS " + name for name, expr in fields.items())
+        distinct = "DISTINCT "
+        order = "adapter_type,target_id,source_id,version,name,branch"
+    query = ("SELECT " + distinct + columns + " FROM agentgate_runs r "
+             "JOIN agentgate_traces t ON t." + rk + " = r." + ik +
+             " WHERE " + " AND ".join(where) + " ORDER BY " + order +
+             " LIMIT :limit OFFSET :offset")
+    items = rows(db, query, params)
+    return {"items": items[:limit], "has_more": len(items) > limit, "offset": offset}

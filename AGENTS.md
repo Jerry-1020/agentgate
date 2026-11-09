@@ -132,3 +132,12 @@ and outputs, and can be composed with other components.
   narrate straightforward code.
 - Tests should verify public behavior, domain invariants, serialization boundaries, and
   failure cases. Do not couple tests to private implementation details.
+
+## Database Table Naming
+
+- Before creating a table, inspect the existing storage schema and table-prefix
+  constants. Every new AgentGate table must use the prefix required by the codebase
+  (currently `agentgate_`); do not introduce unprefixed tables.
+- Reuse existing table-name constants or naming helpers where available. Keep table
+  names consistent across MySQL and SQLite implementations, initialization SQL,
+  migration scripts, queries, and tests, including temporary tables used in migrations.

@@ -19,8 +19,17 @@ import {
   comparisonErrorMessage,
 } from '../utils/comparison-compatibility';
 import { comparisonScoreGroups } from '../utils/task-report';
+import {
+  readHistoricalComparison,
+  type HistoricalComparison,
+} from '../../../api/historical-comparisons';
+import { historicalScoreGroups, comparisonReasons } from '../utils/historical-comparison';
 
-const props = defineProps<{ initialPair?: { a: string; b: string }; embedded?: boolean }>();
+const props = defineProps<{
+  initialPair?: { a: string; b: string };
+  embedded?: boolean;
+  historyTaskId?: string;
+}>();
 const emit = defineEmits<{ status: [statuses: Record<string, string>] }>();
 const mode = ref('history'),
   submitted = ref<{ a: string; b: string } | null>(null);
@@ -35,7 +44,7 @@ const pairReady = computed(
 );
 async function checkPair(ticket: number) {
   clearTimeout(pairTimer);
-  if (!submitted.value || document.hidden) return;
+  if (!submitted.value || document.hidden || props.historyTaskId) return;
   try {
     const results = await Promise.all(
       [submitted.value.a, submitted.value.b].map((id) => api.status(id)),
@@ -65,6 +74,12 @@ function created(a: string, b: string) {
   submitted.value = { a, b };
   pairStatus.value = {};
   pairError.value = '';
+  if (props.historyTaskId) {
+    pairStatus.value = { [a]: 'completed', [b]: 'completed' };
+    emit('status', pairStatus.value);
+    showCreatedPair();
+    return;
+  }
   void checkPair(++pairTicket);
 }
 function showCreatedPair() {
@@ -125,13 +140,45 @@ const snapshotLoading = ref(false),
   error = ref('');
 const result = ref<Comparison | null>(null),
   showDiff = ref(false);
+const historicalResult = shallowRef<HistoricalComparison | null>(null);
+const hasResult = computed(() => !!(result.value || historicalResult.value));
+const overallDelta = computed(() =>
+  historicalResult.value
+    ? (historicalResult.value.score_rows.find((row) => row.level === 'overall')?.score_delta ??
+      null)
+    : (result.value?.overall_score_delta ?? null),
+);
+const overallTone = computed(() =>
+  overallDelta.value != null && overallDelta.value < 0 ? 'down' : 'up',
+);
+const caseRows = computed(() =>
+  historicalResult.value
+    ? historicalResult.value.case_rows.map((row) => ({
+        ...row,
+        evaluator_id: row.key,
+        change: row.change ?? '—',
+        reason: comparisonReasons(row.reasons),
+      }))
+    : (result.value?.case_deltas ?? []).map((row) => ({
+        ...row,
+        reason: '',
+        baseline_score: null,
+        candidate_score: null,
+      })),
+);
 const expandedScores = ref({ llm: false, rule: false });
 let snapshotTicket = 0,
   comparisonTicket = 0;
 const a = computed(() => snapshots.value[baseline.value]),
   b = computed(() => snapshots.value[candidate.value]);
 const scoreGroups = computed(() =>
-  result.value && a.value && b.value ? comparisonScoreGroups(result.value, a.value, b.value) : [],
+  a.value && b.value
+    ? historicalResult.value
+      ? historicalScoreGroups(historicalResult.value, a.value, b.value)
+      : result.value
+        ? comparisonScoreGroups(result.value, a.value, b.value)
+        : []
+    : [],
 );
 const issues = computed(() => (a.value && b.value ? reportComparisonIssues(a.value, b.value) : []));
 const canCompare = computed(
@@ -141,7 +188,7 @@ const canCompare = computed(
     baseline.value !== candidate.value &&
     !snapshotLoading.value &&
     !snapshotError.value &&
-    !issues.value.length,
+    (!!props.historyTaskId || !issues.value.length),
 );
 function selectBaseline(id: string) {
   baseline.value = id;
@@ -152,6 +199,7 @@ async function loadSnapshots() {
   comparisonTicket++;
   busy.value = false;
   result.value = null;
+  historicalResult.value = null;
   error.value = '';
   snapshotError.value = '';
   showDiff.value = false;
@@ -184,7 +232,14 @@ async function compare() {
   busy.value = true;
   error.value = '';
   result.value = null;
+  historicalResult.value = null;
   try {
+    if (props.historyTaskId) {
+      const data = await readHistoricalComparison(props.historyTaskId);
+      if (ticket === comparisonTicket && aid === baseline.value && bid === candidate.value)
+        historicalResult.value = data;
+      return;
+    }
     const data = await request<Comparison>(
       '/run-comparisons?' + new URLSearchParams({ baseline_run_id: aid, candidate_run_id: bid }),
     );
@@ -197,17 +252,19 @@ async function compare() {
   }
 }
 const changes = computed(() => ({
-  improvement: result.value?.case_deltas.filter((d) => d.change === 'improvement').length ?? 0,
-  regression: result.value?.case_deltas.filter((d) => d.change === 'regression').length ?? 0,
-  unchanged: result.value?.case_deltas.filter((d) => d.change === 'unchanged').length ?? 0,
-  changed: result.value?.case_deltas.filter((d) => d.change === 'changed').length ?? 0,
+  improvement: caseRows.value.filter((d) => d.change === 'improvement').length,
+  regression: caseRows.value.filter((d) => d.change === 'regression').length,
+  unchanged: caseRows.value.filter((d) => d.change === 'unchanged').length,
+  changed: caseRows.value.filter((d) => d.change === 'changed').length,
 }));
 const caseName = (id: string) =>
   a.value?.run.manifest.dataset.cases.find((c) => c.id === id)?.name ??
   b.value?.run.manifest.dataset.cases.find((c) => c.id === id)?.name ??
   id;
 const evaluatorName = (id: string) =>
-  (a.value && frozenEvaluators(a.value.run).find((e) => e.id === id)?.label) || id;
+  (a.value && frozenEvaluators(a.value.run).find((e) => e.id === id)?.label) ||
+  (b.value && frozenEvaluators(b.value.run).find((e) => e.id === id)?.label) ||
+  id;
 const delta = (value: number | null) =>
   value == null ? '—' : (value > 0 ? '+' : '') + score(value);
 onUnmounted(() => {
@@ -315,7 +372,7 @@ const templateLabels2: Record<string, string> = {
       {{ snapshotError }} <button class="link" @click="loadSnapshots">重试读取报告</button>
     </div>
     <section
-      v-else-if="a && b && issues.length"
+      v-else-if="a && b && issues.length && !historyTaskId"
       class="notice warn section-gap comparison-preflight"
       data-testid="comparison-preflight"
       role="status"
@@ -339,7 +396,7 @@ const templateLabels2: Record<string, string> = {
         <pre>{{ error }}</pre>
       </details>
     </div>
-    <template v-if="result">
+    <template v-if="hasResult">
       <section class="card section-gap" data-testid="comparison-results">
         <h2 class="section-title">结果对比</h2>
         <p class="section-note">
@@ -348,12 +405,8 @@ const templateLabels2: Record<string, string> = {
         <div class="comparison-overview">
           <div>
             <span>综合得分变化</span
-            ><strong
-              :class="
-                result.overall_score_delta != null && result.overall_score_delta < 0 ? 'down' : 'up'
-              "
-              >{{ delta(result.overall_score_delta)
-              }}<small v-if="result.overall_score_delta != null"> 分</small></strong
+            ><strong :class="overallTone"
+              >{{ delta(overallDelta) }}<small v-if="overallDelta != null"> 分</small></strong
             >
           </div>
           <div>
@@ -361,13 +414,20 @@ const templateLabels2: Record<string, string> = {
           </div>
           <div>
             <span>退化</span
-            ><strong class="down">{{ changes.regression }}<small> 项</small></strong>
+            ><strong :class="changes.regression > 0 ? 'down' : overallTone"
+              >{{ changes.regression }}<small> 项</small></strong
+            >
           </div>
           <div>
             <span>不变 / 其他变化</span
-            ><strong>{{ changes.unchanged }} / {{ changes.changed }}<small> 项</small></strong>
+            ><strong :class="overallTone"
+              >{{ changes.unchanged }} / {{ changes.changed }}<small> 项</small></strong
+            >
           </div>
         </div>
+        <p v-if="historicalResult?.gate_reasons.length" class="section-note">
+          条件差异：{{ comparisonReasons(historicalResult.gate_reasons) }}。
+        </p>
         <h3 class="section-title">指标对比</h3>
         <div class="table-wrap">
           <table class="data-table" aria-label="指标对比">
@@ -404,6 +464,9 @@ const templateLabels2: Record<string, string> = {
                 <td>{{ score(group.candidate) }}</td>
                 <td :class="group.delta != null && group.delta < 0 ? 'down' : 'up'">
                   {{ delta(group.delta) }}
+                  <small v-if="group.reasons" class="comparison-reason"
+                    >{{ group.reasons }}</small
+                  >
                 </td>
               </tr>
               <template v-if="group.key !== 'overall' && expandedScores[group.key]">
@@ -413,6 +476,9 @@ const templateLabels2: Record<string, string> = {
                   <td>{{ score(child.candidate) }}</td>
                   <td :class="child.delta != null && child.delta < 0 ? 'down' : 'up'">
                     {{ delta(child.delta) }}
+                    <small v-if="child.reasons" class="comparison-reason"
+                      >{{ child.reasons }}</small
+                    >
                   </td>
                 </tr>
               </template>
@@ -434,14 +500,27 @@ const templateLabels2: Record<string, string> = {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="d in result.case_deltas" :key="d.case_id + d.evaluator_id">
+              <tr v-for="d in caseRows" :key="String(d.case_id) + d.evaluator_id">
                 <td>
-                  {{ caseName(d.case_id) }}<small class="case-id">{{ d.case_id }}</small>
+                  {{ caseName(d.case_id ?? '') }}<small class="case-id">{{ d.case_id }}</small>
                 </td>
                 <td>{{ evaluatorName(d.evaluator_id) }}</td>
-                <td>{{ statusLabel(d.baseline_outcome) }}</td>
-                <td>{{ statusLabel(d.candidate_outcome) }}</td>
-                <td>{{ templateLabels2[d.change] ?? d.change }}</td>
+                <td>
+                  {{ d.baseline_outcome ? statusLabel(d.baseline_outcome) : '未记录'
+                  }}<small v-if="historicalResult" class="case-id"
+                    >得分：{{ score(d.baseline_score) }}</small
+                  >
+                </td>
+                <td>
+                  {{ d.candidate_outcome ? statusLabel(d.candidate_outcome) : '未记录'
+                  }}<small v-if="historicalResult" class="case-id"
+                    >得分：{{ score(d.candidate_score) }}</small
+                  >
+                </td>
+                <td>
+                  {{ templateLabels2[d.change] ?? d.change
+                  }}<small v-if="d.reason" class="comparison-reason">{{ d.reason }}</small>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -463,6 +542,16 @@ const templateLabels2: Record<string, string> = {
   </template>
 </template>
 <style scoped>
+.comparison-reason {
+  display: block;
+  max-width: 320px;
+  color: #8a642f;
+  font-size: 12px;
+  font-weight: normal;
+  white-space: normal;
+  line-height: 1.6;
+  margin-top: 4px;
+}
 .experiment-label {
   font-size: 14px;
   font-weight: 650;

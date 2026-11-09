@@ -5,6 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from agentgate.application.sample_resource_usage import SampleResourceUsageResponse
 from agentgate.application.result_case_writeback import (
     HistoricalCaseNotFound,
     HistoricalResultCase,
@@ -81,6 +82,14 @@ def available_samples(run_id: str, dependencies: Dependencies):
         raise HTTPException(404, "unknown EvaluationRun: " + run_id)
     return {"run": run, "results": dependencies.repository.list_results(run_id),
             "complete": run.status == "completed"}
+
+
+@router.get("/runs/{run_id}/sample-resource-usage")
+def sample_resource_usage(run_id: str, dependencies: Dependencies) -> SampleResourceUsageResponse:
+    try:
+        return dependencies.results.get_sample_resource_usage(run_id)
+    except LookupError as error:
+        raise_not_found(error)
 
 
 @router.get("/runs/{run_id}/traces/{case_id}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from . import evaluation_projection as projection
 from .evaluation_migration import upgrade_sqlite
+from agentgate.domain.run_event import RunEvent
 
 import sqlite3
 from collections.abc import Iterator, Sequence
@@ -318,6 +319,84 @@ class SQLiteRepository:
             """)
 
             upgrade_sqlite(db)
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS agentgate_run_events (
+                    id TEXT PRIMARY KEY, run_id TEXT, request_id TEXT,
+                    user_team_id TEXT NOT NULL, stage TEXT NOT NULL,
+                    status TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT,
+                    duration_ms REAL, error_code TEXT, message TEXT NOT NULL, payload TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_run_events_run_time ON agentgate_run_events(run_id, started_at, id);
+                CREATE INDEX IF NOT EXISTS ix_run_events_request ON agentgate_run_events(request_id, user_team_id);
+            """)
+
+    def start_run_event(self, event: RunEvent) -> None:
+        self.save_run_events([event])
+
+    def save_run_events(self, events: Sequence[RunEvent]) -> None:
+        with self._connect() as db:
+            db.executemany("INSERT OR IGNORE INTO agentgate_run_events VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", [(
+                event.id, event.run_id, event.request_id, event.user_team_id, event.stage,
+                event.status, event.started_at.isoformat(),
+                event.ended_at.isoformat() if event.ended_at else None, event.duration_ms,
+                event.error_code, event.message, event.model_dump_json(),
+            ) for event in events])
+
+    def finish_run_event(self, event: RunEvent) -> None:
+        with self._connect() as db:
+            db.execute("UPDATE agentgate_run_events SET status=?,ended_at=?,duration_ms=?,error_code=?,message=?,payload=? WHERE id=? AND status='running'",
+                       (event.status, event.ended_at.isoformat() if event.ended_at else None,
+                        event.duration_ms, event.error_code, event.message, event.model_dump_json(), event.id))
+
+    def finish_open_run_events(self, run_id: str, stage: str | None, *, status: str,
+                               ended_at: datetime, error_code=None, message="") -> None:
+        with self._connect() as db:
+            rows = db.execute("SELECT payload FROM agentgate_run_events WHERE run_id=? AND status='running'"
+                              + (" AND stage=?" if stage else ""), (run_id, stage) if stage else (run_id,)).fetchall()
+            for row in rows:
+                event = RunEvent.model_validate_json(row[0])
+                end = max(ended_at, event.started_at)
+                updated = event.model_copy(update={"status": status, "ended_at": end,
+                    "duration_ms": (end - event.started_at).total_seconds() * 1000,
+                    "error_code": error_code, "message": message})
+                db.execute("UPDATE agentgate_run_events SET status=?,ended_at=?,duration_ms=?,error_code=?,message=?,payload=? WHERE id=? AND status='running'",
+                           (status, end.isoformat(), updated.duration_ms, error_code, message, updated.model_dump_json(), event.id))
+
+    def list_run_events(self, run_id: str, *, user_team_id: str, offset=0, limit=100) -> list[RunEvent]:
+        if self.get_run(run_id, user_team_id=user_team_id) is None:
+            raise LookupError("unknown EvaluationRun")
+        with self._connect() as db:
+            rows = db.execute("""SELECT payload FROM agentgate_run_events
+                WHERE user_team_id=? AND (run_id=? OR (run_id IS NULL AND request_id IN (
+                    SELECT request_id FROM agentgate_run_events WHERE run_id=? AND user_team_id=?)))
+                ORDER BY started_at,id LIMIT ? OFFSET ?""", (user_team_id, run_id, run_id, user_team_id, limit, offset)).fetchall()
+        return [RunEvent.model_validate_json(row[0]) for row in rows]
+
+    def save_historical_comparison(
+        self,
+        task: EvaluationTask,
+        *,
+        baseline_task_id: str,
+        candidate_task_id: str,
+        user_team_id: str,
+    ) -> EvaluationTask:
+        from .historical_comparisons import save_reference
+
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return save_reference(
+                db,
+                task,
+                baseline_task_id=baseline_task_id,
+                candidate_task_id=candidate_task_id,
+                user_team_id=user_team_id,
+            )
+
+    def is_historical_comparison(self, task_id: str, *, user_team_id: str) -> bool:
+        from .historical_comparisons import accessible_reference
+
+        with self._connect() as db:
+            return accessible_reference(db, task_id, user_team_id)
 
     def delete_task_record(self, task_id: str, *, user_team_id: str) -> None:
         """Permanently delete one task with all its runs, traces and results."""
@@ -329,6 +408,16 @@ class SQLiteRepository:
             ).fetchone()
             if row is None:
                 raise ValueError("task does not exist")
+            task = EvaluationTask.model_validate_json(row["payload"])
+            from .historical_comparisons import accessible_reference, ensure_unreferenced
+            try:
+                reference_only = accessible_reference(db, task_id, user_team_id)
+            except LookupError as exc:
+                raise ValueError("task does not exist") from exc
+            if reference_only:
+                db.execute(f"DELETE FROM {_T_EVALUATION_TASKS} WHERE id=?", (task_id,))
+                return
+            ensure_unreferenced(db, task.run_ids + task.previous_run_ids)
             run_ids = [
                 r[0]
                 for r in db.execute(
@@ -342,6 +431,7 @@ class SQLiteRepository:
                 raise ValueError("task does not exist")
             db.execute(f"DELETE FROM {_T_EVALUATION_TASK_RUNS} WHERE task_id=?", (task_id,))
             for run_id in run_ids:
+                db.execute("DELETE FROM agentgate_run_events WHERE run_id=?", (run_id,))
                 db.execute(f"DELETE FROM {_T_OPTIMIZATION_REPORTS} WHERE run_id=?", (run_id,))
                 db.execute(f"DELETE FROM {_T_RESULTS} WHERE run_id=?", (run_id,))
                 db.execute(f"DELETE FROM {_T_TRACES} WHERE run_id=?", (run_id,))
@@ -1630,10 +1720,22 @@ class SQLiteRepository:
             db.execute("BEGIN")
             return projection.overview(db, query, user_team_id)
 
+    def list_code_trace_choices(self, **query):
+        with self._connect() as db:
+            return projection.code_trace_choices(db, **query)
+
     def list_evaluation_task_summaries(self, query, *, user_team_id):
         with self._connect() as db:
             db.execute("BEGIN")
             return projection.task_page(db, query, user_team_id)
+
+    def list_evaluator_related_tasks(self, evaluator_id, version, *, user_team_id, limit, cursor):
+        with self._connect() as db:
+            return projection.related_tasks(db, evaluator_id, version, user_team_id, limit, cursor)
+
+    def list_dataset_related_tasks(self, dataset_id, version, *, user_team_id, limit, cursor):
+        with self._connect() as db:
+            return projection.dataset_related_tasks(db, dataset_id, version, user_team_id, limit, cursor)
 
     def save_run(self, run: EvaluationRun) -> None:
         with self._connect() as db:

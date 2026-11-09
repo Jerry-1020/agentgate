@@ -10,7 +10,9 @@ import {
 } from '../../../api/evaluation-summaries';
 import { useAuthStore } from '../../../stores/modules/auth';
 import { useSummaryQuery } from '../composables/use-summary-query';
+import { useTaskTimings } from '../composables/use-task-timings';
 import { dayWindow, taskPath, hasActiveRuns, evaluatorStrategy } from '../utils/summary-query';
+import { formatTaskTime, taskTiming } from '../utils/task-timing';
 const props = defineProps<{ refreshToken?: number }>();
 const emit = defineEmits<{
   connection: [online: boolean | null];
@@ -71,6 +73,33 @@ const queryState = useSummaryQuery({
 const { data, error, loading: busy, reload: load } = queryState;
 watch([data, error], () => emit('connection', error.value ? false : data.value ? true : null));
 const rows = computed(() => data.value?.items ?? []);
+const { entries: timingEntries, retry: retryTimings } = useTaskTimings(rows, () => [
+  auth.loginMode,
+  auth.teamId,
+  auth.userId,
+  auth.token,
+  auth.platformReady,
+]);
+const timings = computed(
+  () => new Map(rows.value.map((row) => [row.id, taskTiming(row, timingEntries.value)])),
+);
+const timingError = computed(() =>
+  Object.values(timingEntries.value).some((entry) => entry.state === 'error'),
+);
+const timeColumns = ['start', 'end'] as const;
+function timeFor(row: TaskListSummary, column: (typeof timeColumns)[number]) {
+  return timings.value.get(row.id)![column];
+}
+function timeTooltip(row: TaskListSummary, column: (typeof timeColumns)[number]) {
+  return timings.value
+    .get(row.id)!
+    .sides.map((side) => {
+      const value = side[column],
+        formatted = formatTaskTime(value.value);
+      return `${side.label}：${formatted ? `${formatted.date} ${formatted.time}` : value.label}`;
+    })
+    .join('\n');
+}
 const total = computed(() => data.value?.total ?? 0);
 watch(data, (value) => {
   if (!value) return;
@@ -92,12 +121,17 @@ function comparisonSides(row: TaskListSummary, column: (typeof identityColumns)[
           : `v${run.dataset_version}`,
   }));
 }
-const done = (row: TaskListSummary) => row.total_cases === null || row.completed_cases === null
-  ? null : ({ done: row.completed_cases, total: row.total_cases });
+const done = (row: TaskListSummary) =>
+  row.total_cases === null || row.completed_cases === null
+    ? null
+    : { done: row.completed_cases, total: row.total_cases };
 async function deleteTask(id: string) {
+  const historical = rows.value.find((row) => row.id === id)?.historical_comparison;
   try {
     await ElMessageBox.confirm(
-      '删除后任务及其运行记录、Trace 和结果将不可恢复。确定删除？',
+      historical
+        ? '删除此历史对比任务？两侧原单任务及其结果会保留。'
+        : '删除后任务及其运行记录、Trace 和结果将不可恢复。已被历史对比引用的单任务需先删除关联对比。确定删除？',
       '删除任务',
       { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' },
     );
@@ -115,228 +149,306 @@ async function deleteTask(id: string) {
 onUnmounted(() => clearTimeout(debounce));
 </script>
 <template>
-  <div class="page-head">
-    <div style="display: flex; align-items: flex-end; gap: 16px">
-      <h1 class="page-title">测评任务</h1>
-      <div class="tabs" role="group" aria-label="任务时间范围">
-        <button
-          v-for="d in [1, 7, 30, 0]"
-          :key="d"
-          :class="['tab', { active: days === d }]"
-          :aria-pressed="days === d"
-          @click="days = d"
-        >
-          {{ d === 0 ? '全部' : d === 1 ? '今日' : '近' + d + '天' }}
-        </button>
+  <div class="task-list-view">
+    <div class="page-head">
+      <div class="task-page-heading">
+        <h1 class="page-title">测评任务</h1>
+        <div class="tabs" role="group" aria-label="任务时间范围">
+          <button
+            v-for="d in [1, 7, 30, 0]"
+            :key="d"
+            :class="['tab', { active: days === d }]"
+            :aria-pressed="days === d"
+            @click="days = d"
+          >
+            {{ d === 0 ? '全部' : d === 1 ? '今日' : '近' + d + '天' }}
+          </button>
+        </div>
       </div>
     </div>
-  </div>
-  <section class="card tasks-list">
-    <p v-if="error" role="alert">{{ error }} <button class="link" @click="load">重试</button></p>
-    <div class="list-toolbar">
-      <nav class="tabs">
-        <button class="tab" :class="{ active: !taskTab }" @click="taskTab = ''">全部</button>
-        <button
-          v-for="t in [
-            ['single', '单任务'],
-            ['ab', 'A/B试验'],
-          ]"
-          :key="'tt-' + t[0]"
-          class="tab"
-          :class="{ active: taskTab === t[0] }"
-          @click="taskTab = t[0] as TaskKind"
-        >
-          {{ t[1] }}
-        </button>
-      </nav>
-      <div class="filters-right">
-        <input
-          class="input search-input"
-          v-model="query"
-          aria-label="搜索任务名称"
-          placeholder="搜索任务名称或 ID"
-        />
-        <button class="primary" @click="emit('create')">新建测评任务</button>
+    <section class="card tasks-list">
+      <p v-if="error" role="alert">{{ error }} <button class="link" @click="load">重试</button></p>
+      <div class="list-toolbar">
+        <nav class="tabs">
+          <button class="tab" :class="{ active: !taskTab }" @click="taskTab = ''">全部</button>
+          <button
+            v-for="t in [
+              ['single', '单任务'],
+              ['ab', 'A/B试验'],
+            ]"
+            :key="'tt-' + t[0]"
+            class="tab"
+            :class="{ active: taskTab === t[0] }"
+            @click="taskTab = t[0] as TaskKind"
+          >
+            {{ t[1] }}
+          </button>
+        </nav>
+        <div class="filters-right">
+          <input
+            class="input search-input"
+            v-model="query"
+            aria-label="搜索任务名称"
+            placeholder="搜索任务名称或 ID"
+          />
+          <button class="primary" @click="emit('create')">新建测评任务</button>
+        </div>
       </div>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <colgroup>
-          <col style="width: 3%" />
-          <col style="width: 17%" />
-          <col style="width: 8%" />
-          <col style="width: 13%" />
-          <col style="width: 15%" />
-          <col style="width: 18%" />
-          <col style="width: 10%" />
-          <col style="width: 8%" />
-          <col style="width: 8%" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>
-              <input
-                type="checkbox"
-                aria-label="选择本页任务"
-                :checked="!!rows.length && rows.every((r) => checked.includes(r.id))"
-                @change="
-                  checked = ($event.target as HTMLInputElement).checked ? rows.map((r) => r.id) : []
-                "
-              />
-            </th>
-            <th>任务名称</th>
-            <th>任务类型</th>
-            <th>被测Agent</th>
-            <th>测评集</th>
-            <th>评估方式</th>
-            <th>进度与状态</th>
-            <th>得分</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in rows" :key="r.id">
-            <td>
-              <input
-                type="checkbox"
-                v-model="checked"
-                :value="r.id"
-                :aria-label="'选择任务 ' + r.id"
-              />
-            </td>
-            <td class="name-cell">
-              <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
-                {{ r.name }}</button
-              ><small>{{ new Date(r.created_at).toLocaleString() }}</small>
-              <small v-if="r.summary_pending" role="status">{{ r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新' }}</small>
-              <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
-            </td>
-            <td>
-              <span>{{
-                r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
-              }}</span>
-            </td>
-            <td v-for="column in identityColumns" :key="column">
-              <el-tooltip
-                v-if="r.kind === 'ab'"
-                placement="top"
-                effect="light"
-                :trigger="['hover', 'focus']"
-                :enterable="false"
-                :hide-after="0"
+      <div class="table-wrap">
+        <table class="data-table">
+          <colgroup>
+            <col style="width: 3%" />
+            <col style="width: 17%" />
+            <col style="width: 11%" />
+            <col style="width: 12%" />
+            <col style="width: 10%" />
+            <col style="width: 10%" />
+            <col style="width: 11%" />
+            <col style="width: 11%" />
+            <col style="width: 8%" />
+            <col style="width: 7%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  aria-label="选择本页任务"
+                  :checked="!!rows.length && rows.every((r) => checked.includes(r.id))"
+                  @change="
+                    checked = ($event.target as HTMLInputElement).checked
+                      ? rows.map((r) => r.id)
+                      : []
+                  "
+                />
+              </th>
+              <th>任务名称</th>
+              <th>被测Agent</th>
+              <th>测评集</th>
+              <th>评估方式</th>
+              <th>进度与状态</th>
+              <th title="平台实际开始执行的时间；A/B 取两侧最早启动时间。北京时间。">启动时间</th>
+              <th title="平台记录完成、失败或取消的时间；A/B 两侧都结束后取最晚时间。北京时间。">
+                结束时间
+              </th>
+              <th>得分</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in rows" :key="r.id">
+              <td class="selection-cell">
+                <input
+                  type="checkbox"
+                  v-model="checked"
+                  :value="r.id"
+                  :aria-label="'选择任务 ' + r.id"
+                />
+              </td>
+              <td class="name-cell">
+                <span class="task-kind"
+                  >{{
+                    r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
+                  }}</span
+                >
+                <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
+                  {{ r.name }}
+                </button>
+                <small v-if="r.summary_pending" role="status">{{
+                  r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新'
+                }}</small>
+                <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
+              </td>
+              <td
+                v-for="column in identityColumns"
+                :key="column"
+                :class="'identity-' + column"
+                :data-label="column === 'target' ? '被测Agent' : '测评集'"
               >
-                <template #content>
-                  <div class="ab-tooltip">
-                    <div
-                      v-for="side in comparisonSides(r, column)"
-                      :key="side.id"
-                      class="ab-tooltip-row"
-                    >
-                      <span class="ab-side">{{ side.label }}</span>
-                      <div>
-                        <div>{{ side.name }}</div>
-                        <div class="ab-tooltip-version">{{ side.version }}</div>
+                <el-tooltip
+                  v-if="r.kind === 'ab'"
+                  placement="top"
+                  effect="light"
+                  :trigger="['hover', 'focus']"
+                  :enterable="false"
+                  :hide-after="0"
+                >
+                  <template #content>
+                    <div class="ab-tooltip">
+                      <div
+                        v-for="side in comparisonSides(r, column)"
+                        :key="side.id"
+                        class="ab-tooltip-row"
+                      >
+                        <span class="ab-side">{{ side.label }}</span>
+                        <div>
+                          <div>{{ side.name }}</div>
+                          <div class="ab-tooltip-version">{{ side.version }}</div>
+                        </div>
                       </div>
                     </div>
+                  </template>
+                  <div class="ab-summary" tabindex="0">
+                    <span
+                      v-for="side in comparisonSides(r, column)"
+                      :key="side.id"
+                      class="primary-text"
+                    >
+                      {{ side.label }}：{{ side.name }}（{{ side.version }}）
+                    </span>
                   </div>
-                </template>
-                <div class="ab-summary" tabindex="0">
+                </el-tooltip>
+                <template v-else>
                   <span
-                    v-for="side in comparisonSides(r, column)"
-                    :key="side.id"
                     class="primary-text"
-                  >
-                    {{ side.label }}：{{ side.name }}（{{ side.version }}）
-                  </span>
-                </div>
-              </el-tooltip>
-              <template v-else>
-                <span
-                  class="primary-text"
-                  :title="(column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ?? undefined"
-                  >{{ (column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ?? '—' }}</span
-                ><small>{{
-                  column === 'target'
-                    ? (r.runs[0].target_version ?? '—')
-                    : r.runs[0].dataset_version === null
-                      ? '—'
-                      : `v${r.runs[0].dataset_version}`
-                }}</small>
-              </template>
-            </td>
-            <td>
-              <span>{{ evaluatorStrategy(r.runs[0].evaluator_kinds) || '—' }}</span>
-            </td>
-            <td class="progress-cell">
-              <template v-if="done(r)"
-                ><div>
-                  {{ done(r)!.done }}/{{ done(r)!.total }}
-                  <b
+                    :title="
+                      (column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ??
+                      undefined
+                    "
                     >{{
-                      done(r)!.total ? Math.round((done(r)!.done / done(r)!.total) * 100) : 0
-                    }}%</b
+                      (column === 'target' ? r.runs[0].target_name : r.runs[0].dataset_name) ?? '—'
+                    }}</span
+                  ><small>{{
+                    column === 'target'
+                      ? (r.runs[0].target_version ?? '—')
+                      : r.runs[0].dataset_version === null
+                        ? '—'
+                        : `v${r.runs[0].dataset_version}`
+                  }}</small>
+                </template>
+              </td>
+              <td class="method-cell" data-label="评估方式">
+                <span
+                  v-for="method in (evaluatorStrategy(r.runs[0].evaluator_kinds) || '—').split(
+                    ' + ',
+                  )"
+                  :key="method"
+                  >{{ method }}</span
+                >
+              </td>
+              <td class="progress-cell" data-label="进度与状态">
+                <template v-if="done(r)"
+                  ><div>
+                    {{ done(r)!.done }}/{{ done(r)!.total }}
+                    <b
+                      >{{
+                        done(r)!.total ? Math.round((done(r)!.done / done(r)!.total) * 100) : 0
+                      }}%</b
+                    >
+                  </div>
+                  <progress
+                    :value="done(r)!.done"
+                    :max="done(r)!.total || 1"
+                    :class="{ failed: r.status === 'failed' }" /></template
+                ><span v-else>—</span><small>{{ statusLabel(r.status) }}</small>
+              </td>
+              <td
+                v-for="column in timeColumns"
+                :key="column"
+                :class="['time-cell', 'time-' + column]"
+                :data-label="column === 'start' ? '启动时间' : '结束时间'"
+              >
+                <el-tooltip
+                  :disabled="r.kind !== 'ab'"
+                  placement="top"
+                  effect="light"
+                  :trigger="['hover', 'focus']"
+                  :enterable="false"
+                  :hide-after="0"
+                >
+                  <template #content
+                    ><div class="time-tooltip">{{ timeTooltip(r, column) }}</div></template
                   >
-                </div>
-                <progress
-                  :value="done(r)!.done"
-                  :max="done(r)!.total || 1"
-                  :class="{ failed: r.status === 'failed' }" /></template
-              ><span v-else>—</span><small>{{ statusLabel(r.status) }}</small>
-            </td>
-            <td class="task-score">
-              <template v-if="r.summary_pending">—</template><template v-else-if="r.kind === 'ab'"
-                ><p v-for="(id, i) in r.runs.map((run) => run.run_id)" :key="id">
-                  {{ i === 0 ? 'A' : 'B' }}
-                  {{ score(r.runs.find((run) => run.run_id === id)?.overall_score ?? null) }}
-                </p></template
-              ><template v-else>{{ score(r.runs[0].overall_score) }}</template
-              ><small v-if="r.runs[0].gate_reason === 'evaluator_error'" class="danger"
-                >评估器异常</small
-              >
-            </td>
-            <td class="row-actions">
-              <button
-                v-if="
-                  (r.kind ?? 'single') === 'single' &&
-                  ['pending', 'running', 'scheduled'].includes(r.status)
-                "
-                class="link"
-                @click="
-                  emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'cancel' })
-                "
-              >
-                取消
-              </button>
-              <button
-                v-if="
-                  ['single', 'ab'].includes(r.kind ?? 'single') &&
-                  ['completed', 'failed', 'cancelled'].includes(r.status)
-                "
-                class="link"
-                @click="
-                  emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'rerun' })
-                "
-              >
-                重跑
-              </button>
-              <button class="link danger" @click="deleteTask(r.task_id ?? r.runs[0].run_id)">
-                删除
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p v-if="!rows.length" class="empty">{{ busy ? '正在加载…' : '暂无符合条件的任务' }}</p>
-    <footer>
-      <span>共 {{ total }} 个任务</span
-      ><button class="secondary" :disabled="page === 1" @click="page--">上一页</button
-      ><span>{{ page }} / {{ Math.max(1, Math.ceil(total / 20)) }}</span
-      ><button class="secondary" :disabled="page * 20 >= total" @click="page++">下一页</button>
-    </footer>
-  </section>
+                  <div class="time-value" :tabindex="r.kind === 'ab' ? 0 : undefined">
+                    <time v-if="timeFor(r, column).value" :datetime="timeFor(r, column).value!">
+                      <span>{{ formatTaskTime(timeFor(r, column).value)!.date }}</span>
+                      <small>{{ formatTaskTime(timeFor(r, column).value)!.time }}</small>
+                    </time>
+                    <span v-else class="time-empty">{{ timeFor(r, column).label }}</span>
+                  </div>
+                </el-tooltip>
+              </td>
+              <td class="task-score" data-label="得分">
+                <template v-if="r.summary_pending">—</template
+                ><template v-else-if="r.kind === 'ab'"
+                  ><p v-for="(id, i) in r.runs.map((run) => run.run_id)" :key="id">
+                    {{ i === 0 ? 'A' : 'B' }}
+                    {{ score(r.runs.find((run) => run.run_id === id)?.overall_score ?? null) }}
+                  </p></template
+                ><template v-else>{{ score(r.runs[0].overall_score) }}</template
+                ><small v-if="r.runs[0].gate_reason === 'evaluator_error'" class="danger"
+                  >评估器异常</small
+                >
+              </td>
+              <td class="row-actions">
+                <button
+                  v-if="
+                    (r.kind ?? 'single') === 'single' &&
+                    ['pending', 'running', 'scheduled'].includes(r.status)
+                  "
+                  class="link"
+                  @click="
+                    emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'cancel' })
+                  "
+                >
+                  取消
+                </button>
+                <button
+                  v-if="
+                    ['single', 'ab'].includes(r.kind ?? 'single') &&
+                    !r.historical_comparison &&
+                    ['completed', 'failed', 'cancelled'].includes(r.status)
+                  "
+                  class="link"
+                  @click="
+                    emit('action', { runId: r.runs[0].run_id, taskId: r.task_id, action: 'rerun' })
+                  "
+                >
+                  重跑
+                </button>
+                <button class="link danger" @click="deleteTask(r.task_id ?? r.runs[0].run_id)">
+                  删除
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="!rows.length" class="empty">{{ busy ? '正在加载…' : '暂无符合条件的任务' }}</p>
+      <footer>
+        <span>共 {{ total }} 个任务</span><span class="time-zone">北京时间</span>
+        <button v-if="timingError" class="link" @click="retryTimings">重试时间</button>
+        <button class="secondary" :disabled="page === 1" @click="page--">上一页</button
+        ><span>{{ page }} / {{ Math.max(1, Math.ceil(total / 20)) }}</span
+        ><button class="secondary" :disabled="page * 20 >= total" @click="page++">下一页</button>
+      </footer>
+    </section>
+  </div>
 </template>
 <style scoped>
+.task-list-view {
+  min-width: 0;
+  container-type: inline-size;
+}
+.task-page-heading {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-width: 0;
+}
+.task-page-heading .tabs {
+  flex-wrap: wrap;
+}
+.task-kind {
+  display: inline-block;
+  margin-bottom: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: #687d71;
+  background: #f1f6f3;
+  font-size: 11px;
+}
 .search-input {
   width: 160px !important;
 }
@@ -354,6 +466,8 @@ onUnmounted(() => clearTimeout(debounce));
 .filters-right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 10px;
 }
 .filters-right .input {
@@ -366,6 +480,11 @@ onUnmounted(() => clearTimeout(debounce));
 }
 .tasks-list {
   padding: 16px;
+  min-width: 0;
+}
+.tasks-list .table-wrap {
+  overflow: visible;
+  min-width: 0;
 }
 .filters {
   gap: 12px;
@@ -400,13 +519,14 @@ onUnmounted(() => clearTimeout(debounce));
 }
 .data-table {
   width: 100%;
-  min-width: 1100px;
+  min-width: 0;
   table-layout: fixed;
   font-size: 13px;
 }
 .data-table th {
-  padding: 10px 6px;
-  white-space: nowrap;
+  padding: 10px 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .primary-text,
 .name-cell .link {
@@ -433,7 +553,36 @@ onUnmounted(() => clearTimeout(debounce));
   vertical-align: top;
   white-space: nowrap;
   line-height: 22px;
-  padding: 16px 6px;
+  padding: 14px 4px;
+  min-width: 0;
+}
+.method-cell span {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.time-cell {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.time-cell time > span {
+  display: block;
+}
+.time-cell small {
+  margin-top: 2px;
+  font-size: 12px;
+}
+.time-empty {
+  color: #687d71;
+  font-size: 12px;
+}
+.time-tooltip {
+  white-space: pre-line;
+  font-variant-numeric: tabular-nums;
+}
+.time-value:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 .ab-summary {
   cursor: default;
@@ -523,11 +672,88 @@ footer {
   justify-content: flex-end;
   gap: 18px;
   align-items: center;
+  flex-wrap: wrap;
   padding-top: 22px;
   font-size: 13px;
   color: #81928a;
 }
 footer > span:first-child {
   margin-right: auto;
+}
+@container (max-width: 700px) {
+  .data-table,
+  .data-table tbody {
+    display: block;
+  }
+  .data-table colgroup {
+    display: none;
+  }
+  .data-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .data-table tbody tr {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 42px;
+    gap: 8px;
+    padding: 14px 0;
+    border-bottom: 1px solid #e3ebe7;
+  }
+  .data-table td {
+    padding: 0;
+    border: 0;
+    white-space: normal;
+  }
+  .data-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    color: #687d71;
+    font-size: 11px;
+    font-weight: 400;
+  }
+  .selection-cell {
+    grid-area: 1 / 1;
+  }
+  .name-cell {
+    grid-area: 1 / 2 / 2 / 4;
+  }
+  .row-actions {
+    grid-area: 1 / 4;
+  }
+  .identity-target {
+    grid-area: 2 / 1 / 3 / 3;
+  }
+  .identity-dataset {
+    grid-area: 2 / 3 / 3 / 5;
+  }
+  .method-cell {
+    grid-area: 3 / 1 / 4 / 3;
+  }
+  .progress-cell {
+    grid-area: 3 / 3 / 4 / 5;
+  }
+  .time-start {
+    grid-area: 4 / 1 / 5 / 3;
+  }
+  .time-end {
+    grid-area: 4 / 3 / 5 / 5;
+  }
+  .task-score {
+    grid-area: 5 / 1 / 6 / 5;
+  }
+  .task-score p {
+    display: inline-block;
+    margin-right: 12px;
+  }
+  footer {
+    gap: 10px;
+  }
+  .time-zone {
+    margin-left: auto;
+  }
 }
 </style>

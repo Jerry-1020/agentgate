@@ -9,6 +9,7 @@ export interface TaskLink {
   mockSelection?: { branch: string; credentialScope: string; credentialLabel: string };
   runIds: string[];
   previousRunIds?: string[];
+  historicalComparison?: boolean;
   createdAt?: string;
   staticReports: { version: string; descriptorHash?: string; reportId?: string; error?: string }[];
 }
@@ -18,6 +19,7 @@ interface StoredTask {
   kind: 'single' | 'ab' | 'stability';
   run_ids: string[];
   previous_run_ids?: string[];
+  historical_comparison?: boolean;
   created_at?: string;
   static_report_ids: string[];
 }
@@ -69,6 +71,7 @@ export const useTaskLinksStore = defineStore('task-links', () => {
         kind: t.kind,
         runIds: t.run_ids,
         previousRunIds: t.previous_run_ids ?? [],
+        ...(t.historical_comparison ? { historicalComparison: true } : {}),
         createdAt: t.created_at,
         staticReports: t.static_report_ids.map((id) => ({ reportId: id, ...versions.get(id)! })),
       }));

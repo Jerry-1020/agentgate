@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from agentgate.run.events import RunEventRecorder
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -50,6 +51,7 @@ from agentgate.evaluator.rule import (
     ToolArgumentsEvaluator,
 )
 from agentgate.evaluator.rule.execution import ExecutionPathEvaluator
+from agentgate.evaluator.rule.code import CodeRuleEvaluator
 from agentgate.evaluator.rule.json_schema import validate_json_schema
 from agentgate.evaluator.rule.operators import resolve_condition_operator
 from agentgate.evaluator.rule.policy import validate_policy_id
@@ -535,11 +537,13 @@ class EvaluatorManagement:
             "Evaluate case: run_id=%s case_id=%s evaluator_count=%d specs=[%s]",
             trace.run_id, case.id, len(evaluator_specs), spec_ids,
         )
+        run = self.repository.get_run(trace.run_id)
         results = execute_evaluators(
             case,
             trace,
             evaluator_specs,
             self._implementations,
+            recorder=RunEventRecorder(self.repository, trace.run_id, run.user_team_id if run else ""),
         )
         outcomes = ",".join(result.outcome.value for result in results)
         LOGGER.info(
@@ -590,7 +594,9 @@ class EvaluatorManagement:
                 f"{spec.implementation_id} implements "
                 f"{implementation.kind}, not {spec.kind}"
             )
-        if spec.kind == EvaluatorKind.RULE and spec.config:
+        if spec.kind == EvaluatorKind.RULE and spec.implementation_id == "code_rule":
+            implementation.validate_spec(spec)
+        elif spec.kind == EvaluatorKind.RULE and spec.config:
             raise ValueError("Rule Evaluator config must be empty")
         if spec.kind in (EvaluatorKind.LLM_JUDGE, EvaluatorKind.LLM_GROUP) or (spec.kind == EvaluatorKind.HYBRID and callable(getattr(implementation, "validate_spec", None))):
             validate_spec = getattr(implementation, "validate_spec", None)
@@ -744,6 +750,7 @@ _BUILTIN_EVALUATOR_SPECS = (
 )
 
 _BUILTIN_IMPLEMENTATIONS = {
+    ("code_rule", "1"): CodeRuleEvaluator(),
     ("execution_path", "1"): ExecutionPathEvaluator(),
     ("skill_routing", "1"): SkillRoutingEvaluator(),
     ("required_tool", "1"): RequiredToolEvaluator(),

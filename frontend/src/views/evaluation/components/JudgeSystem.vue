@@ -9,9 +9,11 @@ import {
   type EvaluatorSummary,
 } from '../../../api/evaluations';
 import RuleEvaluatorCreate from './RuleEvaluatorCreate.vue';
+import CodeRuleDialog from './CodeRuleDialog.vue';
 import { dimensionNames, isLlmEvaluator, ruleExamples } from '../utils/evaluator-display';
 import { evaluatorScenarios, evaluatorTechnicalChecks } from '../utils/evaluator-guidance';
 import EvaluatorModelSelect from './EvaluatorModelSelect.vue';
+import EvaluatorTaskHistory from './EvaluatorTaskHistory.vue';
 import PromptEvaluatorEditor from './PromptEvaluatorEditor.vue';
 import LLMGroupEditor from './LLMGroupEditor.vue';
 import LLMGroupTemplateCard from './LLMGroupTemplateCard.vue';
@@ -45,6 +47,9 @@ const category = ref<'rule' | 'llm_judge'>('rule'),
   query = ref(''),
   creatingRule = ref(false),
   rule = ref<EvaluatorSummary | null>(null);
+const codeOpen = ref(false),
+  codeDirty = ref(false),
+  codeId = ref<string>();
 const design = ref<EvaluatorDesign | null>(null),
   detail = ref<EvaluatorDetail | null>(null),
   definition = ref<Definition | null>(null);
@@ -98,6 +103,13 @@ function hiddenEvaluator(evaluator: EvaluatorSummary) {
     (evaluator.source === 'builtin' && evaluator.implementation_id === 'policy_compliance')
   );
 }
+const rulePresets = computed(() =>
+  evaluatorCatalog.value
+    .filter(
+      (e) => e.source === 'builtin' && e.kind === 'rule' && e.latest_version && !hiddenEvaluator(e),
+    )
+    .map((e) => ({ ...e, name: displayName(e) })),
+);
 const entries = computed(() =>
   evaluatorCatalog.value.filter(
     (e) =>
@@ -105,7 +117,8 @@ const entries = computed(() =>
       !(e.source === 'builtin' && isLlmEvaluator(e.kind)) &&
       !e.owner_evaluator_id &&
       !hiddenEvaluator(e) &&
-      (e.latest_version || (isLlmEvaluator(e.kind) && e.has_draft)) &&
+      (e.latest_version ||
+        ((isLlmEvaluator(e.kind) || e.implementation_id === 'code_rule') && e.has_draft)) &&
       `${displayName(e)} ${e.name}`.toLowerCase().includes(query.value.trim().toLowerCase()),
   ),
 );
@@ -138,7 +151,7 @@ const canLaunch = computed(
     !viewingDraft.value &&
     design.value?.version === detail.value.latest.version,
 );
-watch([dirty, busy, promptDirty, groupDirty], (values) =>
+watch([dirty, busy, promptDirty, groupDirty, codeDirty], (values) =>
   emit('dirtyChange', values.some(Boolean)),
 );
 let openSequence = 0;
@@ -233,6 +246,11 @@ async function refreshDetail(id: string) {
 }
 async function open(e: EvaluatorSummary) {
   if (busy.value) return;
+  if (e.implementation_id === 'code_rule') {
+    codeId.value = e.id;
+    codeOpen.value = true;
+    return;
+  }
   if (e.kind === 'llm_group') {
     openSequence++;
     groupInitialId.value = e.id;
@@ -500,6 +518,17 @@ const templateLabels1: Record<string, string> = {
         </button>
       </div>
       <button
+        v-if="category === 'rule'"
+        class="asset-primary"
+        :disabled="busy"
+        @click="
+          codeId = undefined;
+          codeOpen = true;
+        "
+      >
+        ＋ 新建规则评估器
+      </button>
+      <button
         v-if="category === 'llm_judge'"
         class="asset-primary"
         :disabled="busy"
@@ -620,113 +649,120 @@ const templateLabels1: Record<string, string> = {
             </button>
           </div>
         </header>
-        <p class="asset-small">
-          {{
-            !definition || hasDimensionScoring(definition)
-              ? '各维度由模型评分，总分由系统按权重计算。'
-              : '此版本按整体评分；复制后可配置维度评分与权重。'
-          }}
-        </p>
-        <EvaluatorModelSelect
-          :key="design.id"
-          v-model="design.modelKey"
-          :editable="editing"
-          :models="models"
-        />
-        <section class="execution-config">
-          <div v-if="editing" class="asset-form-grid">
-            <label
-              >评审输入范围<select v-model="design.scope" aria-label="评审输入范围">
-                <option value="final_output">最终回答</option>
-                <option value="output_and_tools">回答与工具</option>
-                <option value="full_trajectory">完整轨迹</option>
-              </select></label
-            ><label
-              >通过分数（0—100）<input
-                type="number"
-                v-model.number="design.threshold"
-                min="0"
-                max="100"
-                aria-label="评估器通过分数"
-            /></label>
-          </div>
-          <p v-else class="asset-small">
-            评审范围：{{ templateLabels1[design.scope] ?? design.scope }} · 通过分数
-            {{ design.threshold }}
+        <EvaluatorTaskHistory
+          :evaluator-id="detail?.evaluator.id ?? ''"
+          :latest-version="detail?.latest?.version"
+          :current-version="viewingDraft ? null : definition?.version"
+          :enabled="!!detail && !editing"
+        >
+          <p class="asset-small">
+            {{
+              !definition || hasDimensionScoring(definition)
+                ? '各维度由模型评分，总分由系统按权重计算。'
+                : '此版本按整体评分；复制后可配置维度评分与权重。'
+            }}
           </p>
-        </section>
-        <div class="dimension-design">
-          <aside>
-            <h3>评估维度（{{ design.dimensions.length }}）</h3>
-            <button
-              v-for="(d, i) in design.dimensions"
-              :key="i"
-              class="dimension-item"
-              :class="{ active: selected === i }"
-              @click="selected = i"
-            >
-              <strong>{{ dimensionNames[d.name] ?? d.name ?? '未命名维度' }}</strong
-              ><span>{{ d.weight == null ? '未定义' : d.weight + '%' }}</span></button
-            ><button
-              v-if="editing"
-              class="asset-link"
-              @click="
-                design.dimensions.push({
-                  id: 'dimension_' + (design.dimensions.length + 1),
-                  name: '新维度',
-                  description: '',
-                  prompt: '',
-                  weight: 0,
-                });
-                selected = design.dimensions.length - 1;
-              "
-            >
-              ＋ 添加维度
-            </button>
-            <p v-if="editing" :class="{ 'asset-error': !!weightError(design.dimensions) }">
-              权重合计 {{ total }}% / 100%
-            </p>
-          </aside>
-          <section v-if="active" class="dimension-content">
-            <header>
-              <h3>{{ dimensionNames[active.name] ?? active.name ?? '评估维度' }}</h3>
-              <div class="actions">
-                <button
-                  v-if="editing"
-                  class="asset-link"
-                  @click="
-                    design.dimensions.splice(selected, 1);
-                    selected = Math.max(0, selected - 1);
-                  "
-                >
-                  移除维度
-                </button>
-              </div>
-            </header>
+          <EvaluatorModelSelect
+            :key="design.id"
+            v-model="design.modelKey"
+            :editable="editing"
+            :models="models"
+          />
+          <section class="execution-config">
             <div v-if="editing" class="asset-form-grid">
-              <label>维度名称<input v-model="active.name" aria-label="维度名称" /></label
-              ><label>标识<input v-model="active.id" aria-label="维度标识" /></label
+              <label
+                >评审输入范围<select v-model="design.scope" aria-label="评审输入范围">
+                  <option value="final_output">最终回答</option>
+                  <option value="output_and_tools">回答与工具</option>
+                  <option value="full_trajectory">完整轨迹</option>
+                </select></label
               ><label
-                >权重（%）<input
-                  v-model.number="active.weight"
+                >通过分数（0—100）<input
                   type="number"
-                  min="0.01"
+                  v-model.number="design.threshold"
+                  min="0"
                   max="100"
-                  step=".01"
-                  aria-label="维度权重" /></label
-              ><label>说明<input v-model="active.description" aria-label="维度说明" /></label>
+                  aria-label="评估器通过分数"
+              /></label>
             </div>
-            <p v-else>{{ active.description }}</p>
-            <textarea
-              v-if="editing"
-              v-model="active.prompt"
-              aria-label="维度评分提示词"
-              rows="10"
-              placeholder="填写评分标准、指导说明和扣分条件；这是本维度的提示词。"
-            />
-            <pre v-else>{{ active.prompt }}</pre>
+            <p v-else class="asset-small">
+              评审范围：{{ templateLabels1[design.scope] ?? design.scope }} · 通过分数
+              {{ design.threshold }}
+            </p>
           </section>
-        </div>
+          <div class="dimension-design">
+            <aside>
+              <h3>评估维度（{{ design.dimensions.length }}）</h3>
+              <button
+                v-for="(d, i) in design.dimensions"
+                :key="i"
+                class="dimension-item"
+                :class="{ active: selected === i }"
+                @click="selected = i"
+              >
+                <strong>{{ dimensionNames[d.name] ?? d.name ?? '未命名维度' }}</strong
+                ><span>{{ d.weight == null ? '未定义' : d.weight + '%' }}</span></button
+              ><button
+                v-if="editing"
+                class="asset-link"
+                @click="
+                  design.dimensions.push({
+                    id: 'dimension_' + (design.dimensions.length + 1),
+                    name: '新维度',
+                    description: '',
+                    prompt: '',
+                    weight: 0,
+                  });
+                  selected = design.dimensions.length - 1;
+                "
+              >
+                ＋ 添加维度
+              </button>
+              <p v-if="editing" :class="{ 'asset-error': !!weightError(design.dimensions) }">
+                权重合计 {{ total }}% / 100%
+              </p>
+            </aside>
+            <section v-if="active" class="dimension-content">
+              <header>
+                <h3>{{ dimensionNames[active.name] ?? active.name ?? '评估维度' }}</h3>
+                <div class="actions">
+                  <button
+                    v-if="editing"
+                    class="asset-link"
+                    @click="
+                      design.dimensions.splice(selected, 1);
+                      selected = Math.max(0, selected - 1);
+                    "
+                  >
+                    移除维度
+                  </button>
+                </div>
+              </header>
+              <div v-if="editing" class="asset-form-grid">
+                <label>维度名称<input v-model="active.name" aria-label="维度名称" /></label
+                ><label>标识<input v-model="active.id" aria-label="维度标识" /></label
+                ><label
+                  >权重（%）<input
+                    v-model.number="active.weight"
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step=".01"
+                    aria-label="维度权重" /></label
+                ><label>说明<input v-model="active.description" aria-label="维度说明" /></label>
+              </div>
+              <p v-else>{{ active.description }}</p>
+              <textarea
+                v-if="editing"
+                v-model="active.prompt"
+                aria-label="维度评分提示词"
+                rows="10"
+                placeholder="填写评分标准、指导说明和扣分条件；这是本维度的提示词。"
+              />
+              <pre v-else>{{ active.prompt }}</pre>
+            </section>
+          </div>
+        </EvaluatorTaskHistory>
       </fieldset>
       <p v-if="notice" role="status">{{ notice }}</p>
       <p v-if="error" role="alert" class="asset-error">{{ error }}</p></template
@@ -779,38 +815,60 @@ const templateLabels1: Record<string, string> = {
     </p>
     <p v-if="!historyLoading && !historyError && !versions.length">暂无发布版本。</p></el-dialog
   >
-  <el-dialog :model-value="!!rule" @close="rule = null" title="规则评估器详情" class="asset-dialog"
-    ><template v-if="rule"
-      ><h2>{{ displayName(rule) }}</h2>
-      <div class="asset-chips">
-        <span class="asset-chip">{{ rule.source === 'builtin' ? '预置' : '自建' }}</span
-        ><span class="asset-chip">代码</span><span class="asset-chip">仅看结果</span>
-      </div>
-      <p>{{ evaluatorScenarios[rule.implementation_id] || rule.description || rule.metric }}</p>
-      <section class="rule-explanation">
-        <h3>检查方式</h3>
-        <p v-for="text in evaluatorTechnicalChecks(rule, [])" :key="text">{{ text }}</p>
-      </section>
-      <section v-if="ruleExamples[rule.implementation_id]" class="rule-example">
-        <h3>使用案例</h3>
-        <p>{{ ruleExamples[rule.implementation_id].expectation }}</p>
-        <p class="example-pass">{{ ruleExamples[rule.implementation_id].passed }}</p>
-        <p class="example-fail">{{ ruleExamples[rule.implementation_id].failed }}</p>
-      </section>
-      <details v-if="Object.keys(evaluatorDetails[rule.id]?.latest?.config ?? {}).length">
-        <summary>规则配置</summary>
-        <pre>{{ JSON.stringify(evaluatorDetails[rule.id]?.latest?.config, null, 2) }}</pre>
-      </details> </template
-    ><template #footer
-      ><button class="asset-secondary" @click="rule = null">关闭</button></template
-    ></el-dialog
+  <el-dialog
+    :model-value="!!rule"
+    @close="rule = null"
+    title="规则评估器详情"
+    width="min(860px, 96vw)"
+    class="asset-dialog rule-detail-dialog"
   >
+    <template v-if="rule">
+      <h2 class="rule-detail-name">{{ displayName(rule) }}</h2>
+      <EvaluatorTaskHistory :evaluator-id="rule.id" :latest-version="rule.latest_version" divider>
+        <div class="asset-chips">
+          <span class="asset-chip">{{ rule.source === 'builtin' ? '预置' : '自建' }}</span>
+          <span class="asset-chip">代码</span>
+          <span class="asset-chip">仅看结果</span>
+        </div>
+        <p>{{ evaluatorScenarios[rule.implementation_id] || rule.description || rule.metric }}</p>
+        <section class="rule-explanation">
+          <h3>检查方式</h3>
+          <p v-for="text in evaluatorTechnicalChecks(rule, [])" :key="text">{{ text }}</p>
+        </section>
+        <section v-if="ruleExamples[rule.implementation_id]" class="rule-example">
+          <h3>使用案例</h3>
+          <p>{{ ruleExamples[rule.implementation_id].expectation }}</p>
+          <p class="example-pass">{{ ruleExamples[rule.implementation_id].passed }}</p>
+          <p class="example-fail">{{ ruleExamples[rule.implementation_id].failed }}</p>
+        </section>
+        <details v-if="Object.keys(evaluatorDetails[rule.id]?.latest?.config ?? {}).length">
+          <summary>规则配置</summary>
+          <pre>{{ JSON.stringify(evaluatorDetails[rule.id]?.latest?.config, null, 2) }}</pre>
+        </details>
+      </EvaluatorTaskHistory>
+    </template>
+    <template #footer>
+      <button class="asset-secondary" @click="rule = null">关闭</button>
+    </template>
+  </el-dialog>
   <RuleEvaluatorCreate
     v-if="creatingRule"
     @close="creatingRule = false"
     @created="
       creatingRule = false;
       loadReviewAssets();
+    "
+  />
+  <CodeRuleDialog
+    v-if="codeOpen"
+    :initial-id="codeId"
+    :presets="rulePresets"
+    @close="codeOpen = false"
+    @dirty-change="codeDirty = $event"
+    @changed="loadReviewAssets()"
+    @launch="
+      codeOpen = false;
+      emit('launch', $event);
     "
   />
 </template>
@@ -951,6 +1009,65 @@ const templateLabels1: Record<string, string> = {
 }
 </style>
 <style>
+.el-overlay .el-dialog.rule-detail-dialog:not(.is-fullscreen) {
+  max-height: 88vh;
+}
+.el-overlay .el-dialog.rule-detail-dialog > .el-dialog__header {
+  padding-bottom: 4px;
+}
+.el-overlay .el-dialog.rule-detail-dialog > .el-dialog__body {
+  max-height: none;
+  padding-block: 0 10px;
+}
+.rule-detail-dialog .rule-detail-name {
+  flex-shrink: 0;
+  margin: 0 0 6px;
+  font-size: 18px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.rule-detail-dialog .history-content {
+  padding-block: 0;
+}
+.rule-detail-dialog .history-toolbar {
+  margin-bottom: 8px;
+}
+.rule-detail-dialog .history-toolbar label {
+  margin-bottom: 0;
+}
+.rule-detail-dialog .history-toolbar select {
+  margin-top: 0;
+  padding-block: 6px;
+}
+.rule-detail-dialog .history-scroll {
+  max-height: none;
+}
+.rule-detail-dialog .history-table :is(th, td) {
+  padding-block: 5px;
+}
+.rule-detail-dialog .history-pagination {
+  margin-top: 10px;
+}
+@media (min-height: 440px) {
+  .el-overlay .el-dialog.rule-detail-dialog > .el-dialog__body:has(> .showing-history),
+  .rule-detail-dialog .showing-history,
+  .rule-detail-dialog .showing-history > .el-tabs__content,
+  .rule-detail-dialog .history-pane,
+  .rule-detail-dialog .history-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .rule-detail-dialog .el-tabs__header,
+  .rule-detail-dialog .history-toolbar,
+  .rule-detail-dialog .history-pagination {
+    flex-shrink: 0;
+  }
+  .rule-detail-dialog .history-scroll {
+    min-height: 0;
+  }
+}
 .el-overlay .el-dialog.judge-design-dialog .el-dialog__body {
   padding: 16px 24px;
   max-height: 68vh;

@@ -146,6 +146,23 @@ run_asset_refs = _table(
     Index("ix_run_refs_lookup", "asset_lookup_key", "content_sha256", "run_key"),
 )
 
+run_events = _table(
+    "agentgate_run_events",
+    *_identity(),
+    Column("run_key", BINARY(32), nullable=True),
+    _text("run_id", nullable=True),
+    Column("request_key", BINARY(32), nullable=True),
+    _text("request_id", nullable=True),
+    _key("user_team_key"), _text("user_team_id"),
+    Column("stage", VARCHAR(32), nullable=False),
+    Column("status", VARCHAR(16), nullable=False),
+    _time("started_at"), _time("ended_at", nullable=True),
+    Column("duration_ms", Double, nullable=True),
+    _text("error_code", nullable=True), _text("message"), _text("payload"),
+    Index("ix_run_events_run_time", "run_key", "started_at", "id_key"),
+    Index("ix_run_events_request", "request_key", "user_team_key"),
+)
+
 traces = _table(
     "agentgate_traces",
     *_identity(),

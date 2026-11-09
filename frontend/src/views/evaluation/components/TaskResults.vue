@@ -12,6 +12,7 @@ import {
   type RunProgress,
   type Report,
   type Trace,
+  type SampleResourceUsage,
 } from '../../../api/evaluations';
 import { ElMessageBox } from 'element-plus';
 import {
@@ -20,16 +21,19 @@ import {
   sampleSummary,
   downloadCsv,
   displayValue,
-  traceSeconds,
   groupEvaluatorResults,
 } from '../utils/task-report';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import RerunDialog from './RerunDialog.vue';
+import BaselineComparisonDialog from './BaselineComparisonDialog.vue';
+import { ElMessage } from 'element-plus';
 import TraceExplorer from './TraceExplorer.vue';
+import TaskExecutionFlow from './TaskExecutionFlow.vue';
 import { sameJson } from '../utils/report-presentation';
 import { taskTitle } from '../utils/dashboard-data';
 const detailTabs = [
   ['results', '执行结果'],
+  ['flow', '执行流程'],
   ['low-samples', '低分样本'],
   ['iteration', '优化迭代'],
   ['config', '任务快照'],
@@ -79,12 +83,99 @@ const traces = ref<Record<string, Trace>>({}),
   traceErrors = ref<Record<string, string>>({}),
   exporting = ref(false),
   exportError = ref('');
+const resourceItems = shallowRef<Record<string, SampleResourceUsage>>({});
+const resourceError = ref('');
+const resourceLoading = ref(false);
+let resourcePending: Promise<boolean> | undefined;
+let resourceRunId = '';
+let resourceStatus = '';
+let resourceLoaded = false;
+let resourceFetchedAt = 0;
+const terminalStatus = (value: string) => ['completed', 'failed', 'cancelled'].includes(value);
+function resourceText(id: string, field: 'tokens' | 'duration') {
+  const item = resourceItems.value[id];
+  if (resourceError.value) return '加载失败';
+  if (!item) return resourceLoading.value ? '加载中…' : '未采集';
+  if (field === 'duration')
+    return item.duration_ms === null ? '未记录' : `${(item.duration_ms / 1000).toFixed(3)} 秒`;
+  return item.total_tokens === null
+    ? '未采集'
+    : `${item.total_tokens.toLocaleString()}${item.token_status === 'partial' ? '（部分）' : ''}`;
+}
+function loadResources(force = false): Promise<boolean> {
+  if (
+    disposed ||
+    document.hidden ||
+    sampleId.value ||
+    !['results', 'low-samples'].includes(tab.value)
+  )
+    return Promise.resolve(false);
+  if (resourceRunId !== props.id) {
+    resourceRunId = props.id;
+    resourceItems.value = {};
+    resourceLoaded = false;
+    resourceFetchedAt = 0;
+    resourceError.value = '';
+  }
+  if (resourcePending) return resourcePending;
+  const status = progress.value?.status ?? '';
+  if (!status) return Promise.resolve(false);
+  if (
+    !force &&
+    resourceLoaded &&
+    resourceStatus === status &&
+    (terminalStatus(status) || Date.now() - resourceFetchedAt < 30000)
+  )
+    return Promise.resolve(true);
+  if (!force && resourceError.value && Date.now() - resourceFetchedAt < 30000)
+    return Promise.resolve(false);
+  const runId = props.id;
+  resourceLoading.value = true;
+  resourceError.value = '';
+  resourceFetchedAt = Date.now();
+  resourcePending = api
+    .sampleResourceUsage(runId)
+    .then(({ items }) => {
+      if (disposed || runId !== props.id) return false;
+      resourceItems.value = Object.fromEntries(items.map((item) => [item.case_id, item]));
+      resourceLoaded = true;
+      resourceStatus = status;
+      return true;
+    })
+    .catch(() => {
+      if (!disposed && runId === props.id)
+        resourceError.value = '资源统计加载失败，不影响评估结果。';
+      return false;
+    })
+    .finally(() => {
+      resourcePending = undefined;
+      resourceLoading.value = false;
+      if (
+        !disposed &&
+        runId === props.id &&
+        terminalStatus(progress.value?.status ?? '') &&
+        status !== progress.value?.status
+      )
+        void loadResources(true);
+    });
+  return resourcePending;
+}
 const traceRequests = new Map<string, Promise<boolean>>();
 let timer: ReturnType<typeof setTimeout> | undefined,
   disposed = false,
   loadTicket = 0;
 const manifest = computed<any>(() => data.value?.run.manifest);
-const associatedTask = computed(() => readTaskLinks().find((t) => t.runIds.includes(props.id)));
+const baselineComparison = ref(false);
+const associatedTask = computed(() =>
+  readTaskLinks().find((t) =>
+    props.taskId ? t.id === props.taskId : t.kind === 'single' && t.runIds.includes(props.id),
+  ),
+);
+function comparisonCreated() {
+  baselineComparison.value = false;
+  ElMessage.success('已创建 A/B 历史结果对比任务，可在任务列表中查看。');
+  emit('navigate', 'tasks');
+}
 const canRerun = computed(
   () =>
     associatedTask.value?.kind === 'single' &&
@@ -240,6 +331,7 @@ async function load() {
     report.value = r;
     data.value = s;
     error.value = '';
+    void loadResources();
     loadSelectedTrace();
   } catch (e) {
     if (!disposed && ticket === loadTicket) error.value = String(e);
@@ -263,27 +355,40 @@ async function exportRows() {
   exporting.value = true;
   exportError.value = '';
   const rows = [...filtered.value];
-  const ids = rows.filter((c: any) => caseResults(c.id).length).map((c: any) => c.id);
   try {
-    for (let start = 0; start < ids.length; start += 4) {
-      if (disposed) return;
-      const loaded = await Promise.all(ids.slice(start, start + 4).map(loadTrace));
-      if (loaded.some((success) => !success)) {
-        exportError.value = '部分样本执行轨迹读取失败，未导出；请重试，以免遗漏耗时数据。';
-        return;
-      }
+    const loaded = await loadResources();
+    if (!loaded) {
+      exportError.value = '资源统计读取失败，未导出；请重试。';
+      return;
     }
     if (disposed) return;
     downloadCsv(
       [
-        ['用户输入', '场景', '状态', '综合分', ...columns.value.map((c) => c.name), '耗时（秒）'],
+        [
+          '用户输入',
+          '场景',
+          '状态',
+          '综合分',
+          ...columns.value.map((c) => c.name),
+          '总 Token',
+          'Token 完整性',
+          '总耗时（秒）',
+        ],
         ...rows.map((c: any) => [
           displayValue(c.turns[0]?.input),
           c.tags.join('、'),
           statusLabel(summary(c.id).outcome),
           score(summary(c.id).score),
           ...columns.value.map((col) => score(columnScore(caseResults(c.id), col))),
-          traceSeconds(traces.value[c.id]),
+          resourceItems.value[c.id]?.total_tokens ?? null,
+          resourceItems.value[c.id]?.token_status === 'partial'
+            ? '部分'
+            : resourceItems.value[c.id]?.token_status === 'available'
+              ? '已采集'
+              : '未采集',
+          resourceItems.value[c.id]?.duration_ms == null
+            ? null
+            : resourceItems.value[c.id].duration_ms! / 1000,
         ]),
       ],
       `测评结果-${props.id}.csv`,
@@ -306,6 +411,9 @@ watch(
   () => router.currentRoute.value.query.tab,
   (value) => (tab.value = detailTabs.find(([key]) => key === value)?.[0] ?? 'results'),
 );
+watch([sampleId, tab, () => props.id], () => {
+  void loadResources();
+});
 watch(sampleId, () => {
   turnIndex.value = 0;
   continuous.value = false;
@@ -367,6 +475,21 @@ watch(sampleId, () => {
         </nav>
         <p v-if="progress.error" class="notice error">{{ progress.error }}</p>
         <template v-if="tab === 'results' || tab === 'low-samples'">
+          <div
+            v-if="tab === 'results' && associatedTask?.kind === 'single'"
+            class="baseline-action"
+          >
+            <button
+              class="secondary"
+              :disabled="report?.run.status !== 'completed'"
+              @click="baselineComparison = true"
+            >
+              与基线对比
+            </button>
+            <small v-if="report?.run.status !== 'completed'" class="muted"
+              >任务完成后可选择历史基线。</small
+            >
+          </div>
           <section v-if="tab === 'results'" class="task-kpis">
             <article>
               <span>完成进度</span><b>{{ Math.round(progress.progress * 100) }}%</b>
@@ -424,6 +547,12 @@ watch(sampleId, () => {
               {{ exporting ? '正在准备导出…' : '导出 CSV' }}
             </button>
           </div>
+          <p v-if="resourceError" class="notice warn" role="status">
+            {{ resourceError }}
+            <button class="link" :disabled="resourceLoading" @click="loadResources(true)">
+              重试资源统计
+            </button>
+          </p>
           <p v-if="exportError" class="notice error" role="alert">{{ exportError }}</p>
           <div
             class="table-wrap sample-results-scroll"
@@ -441,6 +570,8 @@ watch(sampleId, () => {
                 <col class="sample-status-column" />
                 <col class="sample-score-column" />
                 <col v-for="c in columns" :key="c.key" />
+                <col style="width: 120px" />
+                <col style="width: 120px" />
                 <col class="sample-action-column" />
               </colgroup>
               <thead>
@@ -451,6 +582,18 @@ watch(sampleId, () => {
                   <th scope="col">综合分</th>
                   <th v-for="c in columns" :key="c.key" scope="col" :title="c.name">
                     {{ c.name }}
+                  </th>
+                  <th
+                    scope="col"
+                    title="被测智能体输入与输出 Token，不含评估器消耗；部分表示采集不完整"
+                  >
+                    总 Token
+                  </th>
+                  <th
+                    scope="col"
+                    title="被测智能体执行时间，不含排队与评估器判分；缺少样本级时间时使用轮次时间范围"
+                  >
+                    总耗时
                   </th>
                   <th scope="col">操作</th>
                 </tr>
@@ -473,6 +616,16 @@ watch(sampleId, () => {
                   <td v-for="col in columns" :key="col.key" class="violet">
                     {{ score(columnScore(caseResults(c.id), col)) }}
                   </td>
+                  <td>{{ resourceText(c.id, 'tokens') }}</td>
+                  <td
+                    :title="
+                      resourceItems[c.id]?.duration_source === 'turn_bounds'
+                        ? '按轮次起止时间范围计算'
+                        : '样本执行时间'
+                    "
+                  >
+                    {{ resourceText(c.id, 'duration') }}
+                  </td>
                   <td><button class="link" @click="openSample(c.id)">样本详情</button></td>
                 </tr>
               </tbody>
@@ -482,6 +635,11 @@ watch(sampleId, () => {
             {{ tab === 'low-samples' ? '暂无匹配的低分样本' : '暂无匹配样本' }}
           </p>
         </template>
+        <TaskExecutionFlow
+          v-else-if="tab === 'flow'"
+          :run-ids="[id]"
+          :statuses="{ [id]: progress.status }"
+        />
         <section v-else-if="tab === 'iteration'" aria-label="优化迭代">
           <p class="empty">能力构建中</p>
         </section>
@@ -710,6 +868,13 @@ watch(sampleId, () => {
       </p>
     </template>
     <p v-else-if="!error" class="empty">正在加载任务…</p>
+    <BaselineComparisonDialog
+      v-if="baselineComparison && report && associatedTask?.kind === 'single'"
+      :task-id="associatedTask.id"
+      :candidate="report"
+      @close="baselineComparison = false"
+      @created="comparisonCreated"
+    />
     <RerunDialog
       v-if="rerun"
       :id="id"
@@ -725,6 +890,12 @@ watch(sampleId, () => {
   </div>
 </template>
 <style scoped>
+.baseline-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
 .tabs {
   overflow-x: auto;
 }
@@ -842,7 +1013,7 @@ watch(sampleId, () => {
   outline-offset: 2px;
 }
 .sample-table {
-  min-width: calc(470px + var(--score-column-count) * 80px);
+  min-width: calc(710px + var(--score-column-count) * 80px);
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;

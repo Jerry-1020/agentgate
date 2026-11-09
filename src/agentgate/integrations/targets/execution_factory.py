@@ -18,6 +18,7 @@ from agentgate.integrations.targets.inbank.yunxia import (
 )
 from agentgate.integrations.targets.local_bank import LocalBankAdapter, resolve_local_bank_trace
 from agentgate.run.engine import TraceResolver
+from agentgate.run.events import RunEventRecorder
 from agentgate.run.target_protocol import TargetAdapterProtocol
 
 
@@ -30,6 +31,7 @@ class TargetExecutionFactory:
         resources: ExitStack,
         *,
         trace_token: str | None = None,
+        event_recorder: RunEventRecorder | None = None,
     ) -> tuple[TargetAdapterProtocol, TraceResolver]:
         adapter: TargetAdapterProtocol
         resolver: TraceResolver
@@ -56,12 +58,14 @@ class TargetExecutionFactory:
             resources.callback(adapter.close)
             resolver = resolve_local_bank_trace
         elif target.adapter_type == InbankChatABCTargetAdapter.adapter_type:
-            chatabc = InbankChatABCTargetAdapter(load_chatabc_settings(), trace_client=trace_client)
+            chatabc = InbankChatABCTargetAdapter(load_chatabc_settings(), trace_client=trace_client,
+                                               event_recorder=event_recorder)
             resources.callback(chatabc.close)
             adapter = chatabc
             resolver = resolve_chatabc_trace
         elif target.adapter_type == InbankYunxiaTargetAdapter.adapter_type:
-            yunxia = InbankYunxiaTargetAdapter(load_yunxia_settings(), trace_client=trace_client)
+            yunxia = InbankYunxiaTargetAdapter(load_yunxia_settings(), trace_client=trace_client,
+                                             event_recorder=event_recorder)
             resources.callback(yunxia.close)
             adapter = yunxia
             resolver = resolve_yunxia_trace

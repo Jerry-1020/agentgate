@@ -1,49 +1,31 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { request } from '../../../api/evaluations';
+import { computed } from 'vue';
 const props = defineProps<{ baseline: Record<string, any>; candidate: Record<string, any> }>();
 type Scope = { label: string; names: string[]; ids: string[] | null; error: string };
-const scopes = ref<Scope[]>([]);
-let ticket = 0;
-watch(
-  () => [props.baseline, props.candidate],
-  async (manifests) => {
-    const current = ++ticket;
-    scopes.value = [];
-    const values = await Promise.all(
-      manifests.map(async (m) => {
-        const selected: string[] | null = m.selected_case_ids ?? null;
-        try {
-          const d = m.dataset;
-          const version = await request<{
-            cases: { id: string; name: string }[];
-            content_sha256: string;
-          }>(`/datasets/${encodeURIComponent(d.dataset_id)}/versions/${d.version}`);
-          if (d.content_sha256 && version.content_sha256 !== d.content_sha256)
-            throw Error('版本内容与任务快照不一致');
-          const ids = selected ?? version.cases.map((c) => c.id);
-          return {
-            label: `${selected === null ? '全部用例' : '指定用例'} · ${ids.length} 条`,
-            ids,
-            names: ids.map(
-              (id) => version.cases.find((c) => c.id === id)?.name ?? `未找到名称（${id}）`,
-            ),
-            error: '',
-          };
-        } catch {
-          return {
-            label:
-              selected === null ? '全部用例 · 数量未能读取' : `指定用例 · ${selected.length} 条`,
-            ids: selected,
-            names: selected?.map((id) => `用例 ID：${id}`) ?? [],
-            error: '未能读取任务对应版本的用例名称，请稍后重试。',
-          };
-        }
-      }),
-    );
-    if (current === ticket) scopes.value = values;
-  },
-  { immediate: true },
+const scopes = computed<Scope[]>(() =>
+  [props.baseline, props.candidate].map((m) => {
+    const selected: string[] | null = m.selected_case_ids ?? null;
+    try {
+      const version = m.dataset as { cases: { id: string; name: string }[] };
+      if (!Array.isArray(version?.cases)) throw Error('任务快照缺少样本');
+      const ids = selected ?? version.cases.map((c) => c.id);
+      return {
+        label: `${selected === null ? '全部用例' : '指定用例'} · ${ids.length} 条`,
+        ids,
+        names: ids.map(
+          (id) => version.cases.find((c) => c.id === id)?.name ?? `未找到名称（${id}）`,
+        ),
+        error: '',
+      };
+    } catch {
+      return {
+        label: selected === null ? '全部用例 · 数量未能读取' : `指定用例 · ${selected.length} 条`,
+        ids: selected,
+        names: selected?.map((id) => `用例 ID：${id}`) ?? [],
+        error: '任务快照中未记录完整用例信息。',
+      };
+    }
+  }),
 );
 const comparison = computed(() => {
   if (scopes.value.length !== 2) return '读取中';
@@ -61,7 +43,7 @@ const comparison = computed(() => {
     <summary>执行用例 · {{ comparison }}</summary>
     <div class="grid two-columns">
       <div v-for="(scope, index) in scopes" :key="index" class="mini-card">
-        <b>{{ index === 0 ? '基线' : '候选' }}：{{ scope.label }}</b>
+        <b>{{ index === 0 ? 'A任务' : 'B任务' }}：{{ scope.label }}</b>
         <ul>
           <li v-for="(name, i) in scope.names" :key="i">{{ name }}</li>
         </ul>

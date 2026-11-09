@@ -54,13 +54,13 @@ becomes `str`. For workflows, read `config.variables` from nodes whose `type` is
 automatically fetched definitions. Manually entered,
 imported, or existing saved variables are displayed and saved unchanged. Each
 turn's user input continues to be sent through `chat.txt`, as in the customer
-script. The backend client keeps its existing initialization behavior, including
-the base `tool_variables` payload. No tool-variable editor or file upload is added.
+script. Initialization keeps the customer's request structure: workflows use
+`config_variables`, while base agents use `prompt_variables` and `tool_variables`
+(empty when not configured). No tool-variable editor or file upload is added.
 Display type and required metadata without adding required-value checks or
-additional handling of `default`, `scope`, or `readonly`. Newly fetched base
-variables save only `name`, `value`, and `type`; required status is a fetch-time
-display hint because the base client forwards variable entries unchanged.
-Workflow required metadata continues to be saved as before.
+additional handling of `default`, `scope`, or `readonly`. Both base and workflow
+variables save `required` as editor metadata so the hint survives saving and
+reopening.
 Returned definitions replace the current variable list; matching values are
 retained, including file variable values. File variables (`image`, `doc`, `audio`)
 can be filled in as initialization values, but there is no file picker, local file
@@ -68,10 +68,11 @@ access, or upload. A successful fetch switches the saved variable field to match
 the selected agent and removes the previous base/workflow variable field when
 converting formats. Selecting another query agent does not replace nonempty
 edits before fetching successfully; an empty table follows the selected type for
-manual entry. Before the in-bank workflow `init_session`
-request, the existing ChatABC client forwards only each variable's `name`, `value`,
-and `type`, matching the customer script's variable entries. `required` remains
-editor metadata in the saved Case; it is not sent to the customer. Missing optional
+manual entry. Before in-bank base and workflow `init_session` requests, the
+ChatABC client uses shared preparation for prompt and tool variables, forwarding
+only each variable's `name`, `value`, and `type`, matching the customer script's
+variable entries. `required` and other editor metadata remain in the saved Case
+and are not sent to the customer. Missing optional
 `type` is not filled in and nonempty values are not coerced. As in the customer
 script's variable collection, nulls and blank/whitespace-only strings are omitted
 from the outgoing initialization list. Their definitions and required markers

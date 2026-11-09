@@ -336,9 +336,12 @@ def test_mock_ab_pins_requested_parallelism_on_both_manifests(
         arguments = comparison_arguments(deps, seed(deps), "base")
         if requested_parallelism is not None:
             arguments["max_parallel_cases"] = requested_parallelism
-        runs = submit_platform_comparison(**arguments)
+        runs = submit_platform_comparison(**arguments, agent_name="客户端名称")
         assert dispatcher.ids == [run.id for run in runs]
-        assert all(deps.repository.get_run(run.id).manifest.max_parallel_cases == (requested_parallelism or 1) for run in runs)
+        for run in runs:
+            manifest = deps.repository.get_run(run.id).manifest
+            assert manifest.max_parallel_cases == (requested_parallelism or 1)
+            assert manifest.target.display_name == "基础编排 · 本地模拟"
     finally:
         deps.close()
 

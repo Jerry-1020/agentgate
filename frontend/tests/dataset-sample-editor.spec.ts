@@ -641,7 +641,7 @@ async function selectVariableBase(page: Page | Locator) {
 }
 
 for (const mode of ['external', 'bank', 'integrated'] as const) {
-  test(`${mode} fetches base variables with matching credentials and saves prompt values without forwarding required metadata`, async ({ page }) => {
+  test(`${mode} fetches base variables and preserves required hints after saving and reloading`, async ({ page }) => {
     const calls = await mockVariableDirectory(page, route => route.fulfill({ json: baseConfig() }));
     const datasetId = await open(page, 'state');
     if (mode !== 'external') await page.getByRole('button', { name: `Switch to ${mode}`, exact: true }).click();
@@ -661,8 +661,8 @@ for (const mode of ['external', 'bank', 'integrated'] as const) {
     await page.getByLabel('初始化变量值 2', { exact: true }).fill('customer-workspace');
     const saved = await save(page, datasetId);
     const expected = { ...sample('state').initial_state, prompt_variables: [
-      { name: 'userId', value: 'kept-user', type: 'str' },
-      { name: 'workspace', value: 'customer-workspace', type: 'str' },
+      { name: 'userId', value: 'kept-user', type: 'str', required: true },
+      { name: 'workspace', value: 'customer-workspace', type: 'str', required: false },
     ] };
     expect(saved.initial_state).toEqual(expected);
     expect(saved.turns.map((turn: any) => turn.input)).toEqual(sample('state').turns.map(turn => turn.input));
@@ -678,7 +678,8 @@ for (const mode of ['external', 'bank', 'integrated'] as const) {
     await expandInitialization(page);
     await expect(page.getByLabel('初始化变量值 1', { exact: true })).toHaveValue('kept-user');
     await expect(page.getByLabel('初始化变量值 2', { exact: true })).toHaveValue('customer-workspace');
-    await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('-');
+    await expect(page.getByLabel('初始化变量是否必填 1', { exact: true })).toHaveText('是');
+    await expect(page.getByLabel('初始化变量是否必填 2', { exact: true })).toHaveText('否');
     await page.getByLabel('样本名称', { exact: true }).fill('Saved base variables');
     expect((await save(page, datasetId)).initial_state).toEqual(expected);
   });
@@ -724,8 +725,8 @@ test('successful base and workflow fetches replace the initialization format whi
   await page.getByLabel('初始化变量值 2', { exact: true }).fill('base-workspace');
   const baseSaved = await save(page, datasetId);
   expect(baseSaved.initial_state).toEqual({ ...original.initial_state, tool_variables: initial.tool_variables,
-    prompt_variables: [{ name: 'userId', value: 'shared-user', type: 'str' },
-      { name: 'workspace', value: 'base-workspace', type: 'str' }] });
+    prompt_variables: [{ name: 'userId', value: 'shared-user', type: 'str', required: true },
+      { name: 'workspace', value: 'base-workspace', type: 'str', required: false }] });
   expect(baseSaved.turns.map((turn: any) => turn.input)).toEqual(turns.map(turn => turn.input));
   await selectVariableWorkflow(page);
   await expect(page.getByLabel('初始化变量名 2', { exact: true })).toHaveValue('workspace');

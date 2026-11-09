@@ -37,6 +37,7 @@ export interface TaskListSummary {
   total_cases: number | null;
   completed_cases: number | null;
   previous_run_count: number;
+  historical_comparison?: boolean;
   runs: RunListSummary[];
 }
 export interface TaskSummaryPage {

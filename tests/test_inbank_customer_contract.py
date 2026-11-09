@@ -151,8 +151,9 @@ def test_init_uses_customer_variables_and_timeout(mode):
     sleep.assert_not_called()
 
 
+@pytest.mark.parametrize("mode", ["base", "workflow"])
 @pytest.mark.parametrize("file_values", [False, True], ids=["empty-files", "file-names-only"])
-def test_workflow_init_sends_customer_variable_fields_without_editor_metadata(tmp_path, file_values):
+def test_init_sends_customer_variable_fields_without_editor_metadata(tmp_path, mode, file_values):
     image = str(tmp_path / "missing-image.png") if file_values else ""
     doc = str(tmp_path / "missing-report.pdf") if file_values else ""
     audio = str(tmp_path / "missing-audio.wav") if file_values else ""
@@ -165,7 +166,7 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata(tm
     ]
     before = deepcopy(variables)
     observed_init, observed_chat = [], []
-    peer = _Transport("workflow")
+    peer = _Transport(mode)
     request_json, request_bytes = peer.request_json, peer.request_bytes
 
     def capture_json(method, url, **kwargs):
@@ -180,21 +181,22 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata(tm
 
     peer.request_json = capture_json
     peer.request_bytes = capture_chat
+    variable_field = "config_variables" if mode == "workflow" else "prompt_variables"
     case = Case(
-        name="Fetched workflow variables",
-        initial_state={"config_variables": variables},
+        name="Fetched initialization variables",
+        initial_state={variable_field: variables},
         turns=[CaseTurn(input={"txt": text}) for text in ("本轮问题", "后续问题")],
     )
-    adapter = _adapter("workflow", peer, _TraceServer())
+    adapter = _adapter(mode, peer, _TraceServer())
     try:
-        result = adapter.wait(adapter.start(replace(_request("workflow"), case=case)), 10)
+        result = adapter.wait(adapter.start(replace(_request(mode), case=case)), 10)
     finally:
         adapter.close()
 
     assert result.error is None
     assert len(observed_init) == 1
-    assert observed_init[0]["data"] == {
-        "config_variables": [
+    expected_data = {
+        variable_field: [
             {"name": "b", "value": "810000", "type": "str"},
             *([
                 {"name": "image", "value": image, "type": "image"},
@@ -204,35 +206,45 @@ def test_workflow_init_sends_customer_variable_fields_without_editor_metadata(tm
             {"name": "user_input", "value": "你好", "type": "str"},
         ]
     }
+    if mode == "base":
+        expected_data["tool_variables"] = []
+    assert observed_init[0]["data"] == expected_data
     assert set(observed_init[0]) == {
         "appId", "trCode", "trVersion", "timestamp", "requestId", "data",
     }
     assert [payload["data"]["txt"] for payload in observed_chat] == ["本轮问题", "后续问题"]
     assert all(payload["data"]["files"] == [] for payload in observed_chat)
     assert not list(tmp_path.iterdir())  # File values are metadata; no files need to exist locally.
-    assert case.initial_state.to_dict() == {"config_variables": before}
+    assert case.initial_state.to_dict() == {variable_field: before}
     assert variables == before
 
 
-@pytest.mark.parametrize("value", [0, False, {"items": [0, False, None]}])
-def test_workflow_init_preserves_values_without_requiring_type_or_forwarding_metadata(value):
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+@pytest.mark.parametrize("field", ["prompt_variables", "tool_variables"])
+@pytest.mark.parametrize("value", [0, False, {"items": [0, False, None]}, "  kept  ", [], {}])
+def test_init_preserves_values_without_requiring_type_or_forwarding_metadata(mode, field, value):
     peer = Mock()
     peer.request.return_value = _Response(
         data={"resCode": "FAIAG0000", "data": {"session_id": "sid"}}
     )
     variable = {"name": "a", "value": value, "required": True, "label": "页面说明"}
     before = deepcopy(variable)
-    client = chatabc.AgentChatClient("pod", CFG, "workflow", http=peer)
+    client = chatabc.AgentChatClient("pod", CFG, mode, http=peer)
 
-    assert client.init_session([variable]) == "sid"
-    assert peer.request.call_args.kwargs["json"]["data"] == {
-        "config_variables": [{"name": "a", "value": value}]
-    }
+    assert client.init_session(**{"prompt_variables": [], field: [variable]}) == "sid"
+    expected = [{"name": "a", "value": value}]
+    assert peer.request.call_args.kwargs["json"]["data"] == (
+        {"config_variables": expected}
+        if mode == "workflow"
+        else {"prompt_variables": [], "tool_variables": [], field: expected}
+    )
     assert variable == before
 
 
+@pytest.mark.parametrize("mode", ["base", "workflow"])
+@pytest.mark.parametrize("field", ["prompt_variables", "tool_variables"])
 @pytest.mark.parametrize("value", ["", " \t\r\n", None])
-def test_workflow_init_skips_empty_variables_without_changing_saved_metadata(value):
+def test_init_skips_empty_variables_without_changing_saved_metadata(mode, field, value):
     peer = Mock()
     peer.request.return_value = _Response(
         data={"resCode": "FAIAG0000", "data": {"session_id": "sid"}}
@@ -242,10 +254,14 @@ def test_workflow_init_skips_empty_variables_without_changing_saved_metadata(val
         {"name": "image", "value": "", "type": "image", "required": True},
     ]
     before = deepcopy(variables)
-    client = chatabc.AgentChatClient("pod", CFG, "workflow", http=peer)
+    client = chatabc.AgentChatClient("pod", CFG, mode, http=peer)
 
-    assert client.init_session(variables) == "sid"
-    assert peer.request.call_args.kwargs["json"]["data"] == {"config_variables": []}
+    assert client.init_session(**{"prompt_variables": [], field: variables}) == "sid"
+    assert peer.request.call_args.kwargs["json"]["data"] == (
+        {"config_variables": []}
+        if mode == "workflow"
+        else {"prompt_variables": [], "tool_variables": []}
+    )
     assert variables == before
 
 

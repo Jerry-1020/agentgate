@@ -5,7 +5,8 @@ import {
 } from '../views/evaluation/utils/evaluator-preferences';
 import type { Report, Trace } from './client';
 import type { DatasetSummary } from '../views/datasets/types/index';
-import type { EvaluationRun, RunProgress } from '../views/evaluation/types/run';
+import type { EvaluationRun, RunProgress, RunStatus } from '../views/evaluation/types/run';
+import type { TaskKind } from './evaluation-summaries';
 export type { Report, Trace, DatasetSummary, EvaluationRun, RunProgress };
 export type Kind = 'rule' | 'llm_judge' | 'hybrid' | 'llm_group';
 export interface EvaluatorIdentity {
@@ -45,6 +46,19 @@ export interface EvaluatorDetail {
   evaluator: EvaluatorIdentity;
   latest: Definition | null;
   draft: Definition | null;
+}
+export interface EvaluatorRelatedTask {
+  task_id: string | null;
+  run_id: string;
+  name: string;
+  kind: TaskKind;
+  status: RunStatus;
+  created_at: string;
+  evaluator_version: string;
+}
+export interface EvaluatorRelatedTaskPage {
+  items: EvaluatorRelatedTask[];
+  next_cursor: string | null;
 }
 export interface TargetDescriptor {
   tools?: { name: string; description?: string }[];
@@ -155,19 +169,38 @@ export const api = {
       ...detail,
       evaluator: applyEvaluatorPreference(detail.evaluator),
     })),
+  evaluatorVersions: (id: string, signal?: AbortSignal) =>
+    httpRequest<Definition[]>(`/evaluators/${encodeURIComponent(id)}/versions`, { signal }),
+  evaluatorRelatedTasks: (id: string, version: string, cursor: string | null, signal: AbortSignal) =>
+    httpRequest<EvaluatorRelatedTaskPage>(
+      `/evaluators/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/related-tasks`,
+      { params: { limit: 20, ...(cursor === null ? {} : { cursor }) }, signal },
+    ),
   versions: () => request<{ id: string; label: string }[]>('/versions'),
   report: (id: string) => request<Report>(`/runs/${encodeURIComponent(id)}`),
+  sampleResourceUsage: (id: string) =>
+    request<{ items: SampleResourceUsage[] }>(
+      `/runs/${encodeURIComponent(id)}/sample-resource-usage`,
+    ),
   samples: (id: string) => request<RunSamples>(`/runs/${encodeURIComponent(id)}/samples`),
   status: (id: string) => request<RunProgress>(`/runs/${encodeURIComponent(id)}/status`),
   trace: (id: string, caseId: string) =>
     request<Trace>(`/runs/${encodeURIComponent(id)}/traces/${encodeURIComponent(caseId)}`),
 };
+export interface SampleResourceUsage {
+  case_id: string;
+  total_tokens: number | null;
+  duration_ms: number | null;
+  token_status: 'available' | 'partial' | 'unavailable';
+  duration_source: 'case_span' | 'turn_bounds' | 'unavailable';
+}
 export const kindLabel = (kind: string) =>
   ({ rule: '规则评估器', llm_judge: 'LLM 评估器', llm_group: 'LLM 评估器', hybrid: '复合评估器' })[
     kind
   ] ?? kind;
 export const statusLabel = (value: string) =>
   ({
+    waiting: '等待下发',
     pending: '排队中',
     running: '运行中',
     completed: '运行完成',

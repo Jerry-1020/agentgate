@@ -36,6 +36,7 @@ class PlatformTargetInput(BaseModel):
 
     team_id: Identifier | None = None
     agent_id: Identifier
+    agent_name: Identifier | None = None
     type_group: TypeGroup
     agent_version: Identifier
     arrange_type: ArrangeType | None = None
@@ -121,6 +122,7 @@ class PlatformComparisonTargetInput(BaseModel):
 
     team_id: Identifier | None = None
     agent_id: Identifier
+    agent_name: Identifier | None = None
     type_group: TypeGroup
     baseline_version: Identifier
     candidate_version: Identifier
@@ -207,6 +209,7 @@ class SubmitPlatformEvaluation(Protocol):
         user_id: str,
         user_name: str,
         name: str | None = None,
+        agent_name: str | None = None,
     ) -> EvaluationTask: ...
 
 
@@ -289,6 +292,7 @@ async def launch_platform_evaluation(request: Request) -> JSONResponse:
             user_id=caller.user_id if caller else "anonymous",
             user_name=caller.user_name if caller else "匿名用户",
             name=inputs.name,
+            **({"agent_name": inputs.target.agent_name} if inputs.target.agent_name else {}),
         )
     except PermissionError:
         raise HTTPException(403, "Platform target access was rejected") from None
@@ -348,6 +352,7 @@ async def launch_platform_comparison(request: Request) -> JSONResponse:
             user_id=caller.user_id if caller else "anonymous",
             user_name=caller.user_name if caller else "匿名用户",
             name=inputs.name,
+            **({"agent_name": inputs.target.agent_name} if inputs.target.agent_name else {}),
         )
     except PermissionError:
         raise HTTPException(403, "Platform target access was rejected") from None

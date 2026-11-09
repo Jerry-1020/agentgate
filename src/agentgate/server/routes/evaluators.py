@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, NoReturn
+from threading import BoundedSemaphore
+from time import perf_counter
+from typing import Annotated, Any, NoReturn, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentgate.application import (
@@ -34,8 +36,10 @@ from agentgate.domain import (
     EvaluatorSpec,
 )
 from agentgate.evaluator.models import EvaluatorError
+from agentgate.evaluator.rule.code import run_code_with_evidence, validate_code_config
 from agentgate.server.dependencies import ServerDependencies, get_dependencies
 from agentgate.server.errors import raise_conflict, raise_not_found, raise_unprocessable
+from agentgate.storage.evaluation_query_models import RelatedEvaluationTaskPage, RelatedTaskCursor
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
@@ -61,6 +65,137 @@ class CreateEvaluatorRequest(_RequestModel):
     name: str
     description: str = ""
     draft: DraftDefinitionRequest
+
+
+class CodeValidationRequest(_RequestModel):
+    config: dict[str, Any]
+
+
+@router.post("/code/validate")
+def validate_code(request: CodeValidationRequest) -> dict[str, bool]:
+    """Static validation only: no sample data and no rule execution."""
+    try:
+        validate_code_config(request.config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"valid": True}
+
+
+@router.get("/code/trace-targets")
+def code_trace_targets(dependencies: Dependencies, mode: Literal["external", "inbank"],
+                       offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    from agentgate.server.user_context import get_user_info
+    info = get_user_info()
+    return dependencies.repository.list_code_trace_choices(
+        user_team_id=info.user_team_id if info else "", mode=mode, offset=offset, limit=limit)
+
+
+@router.get("/code/traces")
+def code_traces(dependencies: Dependencies, mode: Literal["external", "inbank"],
+                source_id: str, target_id: str, version: str,
+                offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    from agentgate.server.user_context import get_user_info
+    info = get_user_info()
+    return dependencies.repository.list_code_trace_choices(
+        user_team_id=info.user_team_id if info else "", mode=mode, offset=offset, limit=limit,
+        source_id=source_id, target_id=target_id, version=version)
+
+
+@router.get("/code/trace-data")
+def code_trace_data(dependencies: Dependencies, mode: Literal["external", "inbank"],
+                    run_id: str, case_id: str):
+    try:
+        return dependencies.results.code_trace_data(run_id, case_id, mode)
+    except LookupError as exc:
+        raise_not_found(exc)
+    except ValueError as exc:
+        raise_unprocessable(exc)
+
+
+class CodeTrialRequest(_RequestModel):
+    config: dict[str, Any]
+    turn_data: dict[str, Any] | None = None
+    trace: dict[str, Any] | None = None
+
+
+_code_trial_slots = BoundedSemaphore(2)
+
+
+@router.post("/code/try-run")
+def try_code(request: CodeTrialRequest) -> dict[str, Any]:
+    """Run supplied data only; never execute an Agent or persist evaluation records."""
+    try:
+        validate_code_config(request.config)
+        if request.config.get("input_format") == "trace-v1":
+            if request.trace is None or request.turn_data is not None:
+                raise ValueError("Trace 规则需要 trace 对象")
+            data = target = request.trace
+            if not isinstance(data.get("turn_outcomes"), dict) or any(
+                not isinstance(t, dict) or (t.get("input") is not None and not isinstance(t["input"], dict))
+                for t in data["turn_outcomes"].values()
+            ):
+                raise ValueError("turn_outcomes 必须为轮次对象；input 为对象或 null")
+            if any(not isinstance(data.get(k), str) or not data[k]
+                   for k in ("trace_id", "run_id", "case_id")):
+                raise ValueError("Trace 需要 trace_id、run_id、case_id")
+            if any(not isinstance(data.get(k), dict) for k in ("final_output", "final_state")):
+                raise ValueError("Trace 需要 final_output 和 final_state 对象")
+        else:
+            if request.turn_data is None or request.trace is not None:
+                raise ValueError("旧规则需要 turn_data 对象")
+            data = request.turn_data
+            for field in ("evaluate_dataset_fields", "evaluate_target_output_fields", "ext"):
+                if not isinstance(data.get(field), dict):
+                    raise ValueError(f"测试数据的 {field} 必须为 JSON 对象")
+            dataset, target = data["evaluate_dataset_fields"], data["evaluate_target_output_fields"]
+            if not isinstance(dataset.get("input"), dict) or not isinstance(dataset.get("expectations"), list):
+                raise ValueError("样本字段需要 input 对象和 expectations 数组")
+            if any(not isinstance(target.get(key), dict) for key in ("actual_output", "final_state")):
+                raise ValueError("实际输出字段需要 actual_output 和 final_state 对象")
+        spans = target.get("spans")
+        if not isinstance(spans, list) or any(
+            not isinstance(span, dict) or not isinstance(span.get("span_id"), str)
+            or not span["span_id"] or not isinstance(span.get("attributes", {}), dict)
+            for span in spans
+        ):
+            raise ValueError("spans 必须为对象数组，每项需要非空字符串 span_id；attributes 必须为对象")
+        if len({span["span_id"] for span in spans}) != len(spans):
+            raise ValueError("测试数据的 span_id 不可重复")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not _code_trial_slots.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="试运行繁忙，请稍后重试")
+    started = perf_counter()
+    try:
+        if any(span.get("operation_type") == "turn" and
+               "agentgate.execution.error" in span.get("attributes", {}) for span in spans):
+            return {"outcome": "error", "score": None, "span_ids": [],
+                    "reason": "Trace 中存在 Agent 执行异常，无法产生有效评分",
+                    "duration_ms": (perf_counter() - started) * 1000}
+        if any(span.get("operation_type") == "turn"
+               and span.get("attributes", {}).get("inbank.evidence_mode") == "output_only"
+               for span in spans):
+            return {
+                "outcome": "not_applicable", "score": None, "span_ids": [],
+                "reason": "Trace 证据不足（output_only），与正式任务一致跳过 Code 检查",
+                "duration_ms": (perf_counter() - started) * 1000,
+            }
+        try:
+            output = run_code_with_evidence(request.config["source"], data)
+            return {
+                "outcome": "pass" if output["score"] >= request.config["pass_threshold"] else "fail",
+                "score": output["score"], "reason": output["reason"],
+                "span_ids": output.get("span_ids", []),
+                "duration_ms": (perf_counter() - started) * 1000,
+            }
+        except (ValueError, TypeError, KeyError, RuntimeError, TimeoutError, OSError, RecursionError) as exc:
+            return {
+                "outcome": "error", "score": None, "span_ids": [],
+                "reason": str(exc)[:2000] or type(exc).__name__,
+                "duration_ms": (perf_counter() - started) * 1000,
+            }
+    finally:
+        _code_trial_slots.release()
 
 
 class UpdateEvaluatorRequest(_RequestModel):
@@ -396,6 +531,24 @@ def evaluator_version(
         return dependencies.evaluators.get_version(evaluator_id, version)
     except (EvaluatorError, ValueError) as error:
         _raise_catalog_error(error)
+
+
+@router.get("/{evaluator_id}/versions/{version}/related-tasks")
+def evaluator_related_tasks(
+    evaluator_id: str,
+    version: str,
+    dependencies: Dependencies,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: str | None = None,
+) -> RelatedEvaluationTaskPage:
+    try:
+        dependencies.evaluators.get_version(evaluator_id, version)
+        position = RelatedTaskCursor.decode(cursor) if cursor is not None else None
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+    return dependencies.evaluation_queries.related_tasks(
+        evaluator_id, version, limit=limit, cursor=position,
+    )
 
 
 @router.get("/{evaluator_id}/drafts/current")

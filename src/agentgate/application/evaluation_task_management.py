@@ -2,9 +2,16 @@
 
 from datetime import timedelta, timezone
 
+from agentgate.application.result_reader import ResultReader
 from agentgate.application.run_management import RunManagement
+from agentgate.domain import EvaluationReport
+from agentgate.domain.base import require_non_blank
 from agentgate.domain.evaluation_task import EvaluationTask, EvaluationTaskKind
 from agentgate.integrations.job_dispatchers import JobDispatcher
+from agentgate.result.historical_comparison import (
+    HistoricalComparison,
+    compare_historical_reports,
+)
 from agentgate.server.user_context import get_user_info
 from agentgate.storage.repository import AgentGateRepository
 
@@ -17,6 +24,98 @@ def _team_id() -> str:
 class EvaluationTaskManagement:
     def __init__(self, repository: AgentGateRepository) -> None:
         self.repository = repository
+
+    def create_history_comparison(
+        self,
+        comparison_id: str,
+        *,
+        baseline_task_id: str,
+        baseline_run_id: str,
+        candidate_task_id: str,
+        candidate_run_id: str,
+        name: str | None = None,
+    ) -> EvaluationTask:
+        """Compare two selected single-task executions and persist only their references."""
+        for field, value in (
+            ("comparison_id", comparison_id),
+            ("baseline_task_id", baseline_task_id),
+            ("baseline_run_id", baseline_run_id),
+            ("candidate_task_id", candidate_task_id),
+            ("candidate_run_id", candidate_run_id),
+        ):
+            require_non_blank(value, field)
+        if baseline_task_id == candidate_task_id or baseline_run_id == candidate_run_id:
+            raise ValueError("historical comparison requires two distinct single tasks and runs")
+        if comparison_id in {baseline_task_id, candidate_task_id}:
+            raise ValueError("comparison identity must differ from its source tasks")
+
+        team_id = _team_id()
+        reader = ResultReader(self.repository)
+        baseline, baseline_report = self._single_comparison_source(
+            baseline_task_id,
+            baseline_run_id,
+            team_id,
+            reader,
+        )
+        candidate, candidate_report = self._single_comparison_source(
+            candidate_task_id,
+            candidate_run_id,
+            team_id,
+            reader,
+        )
+        compare_historical_reports(baseline_report, candidate_report)
+
+        if name is None:
+            a = baseline.name or baseline_report.run.manifest.target.display_name
+            b = candidate.name or candidate_report.run.manifest.target.display_name
+            name = f"A/B历史结果对比：{a[:48]} / {b[:48]}"
+        task = EvaluationTask(
+            id=comparison_id,
+            kind=EvaluationTaskKind.AB,
+            name=name,
+            run_ids=(baseline_run_id, candidate_run_id),
+        )
+        # Storage rechecks ownership and access atomically, and returns an identical prior save.
+        return self.repository.save_historical_comparison(
+            task,
+            baseline_task_id=baseline_task_id,
+            candidate_task_id=candidate_task_id,
+            user_team_id=team_id,
+        )
+
+    def compare_task_results(self, task_id: str) -> HistoricalComparison:
+        """Read the exact A/B run pair without following source-task reruns or writing names."""
+        require_non_blank(task_id, "task_id")
+        task = self._read_accessible_task(task_id, _team_id())
+        if task.kind != EvaluationTaskKind.AB:
+            raise ValueError("result comparison requires an A/B task")
+        reader = ResultReader(self.repository)
+        return compare_historical_reports(
+            reader.get_report(task.run_ids[0]),
+            reader.get_report(task.run_ids[1]),
+        )
+
+    def _read_accessible_task(self, task_id: str, team_id: str) -> EvaluationTask:
+        task = self.repository.get_evaluation_task(task_id)
+        if task is None or any(
+            self.repository.get_run(run_id, user_team_id=team_id) is None for run_id in task.run_ids
+        ):
+            raise LookupError("unknown evaluation task")
+        return task
+
+    def _single_comparison_source(
+        self,
+        task_id: str,
+        run_id: str,
+        team_id: str,
+        reader: ResultReader,
+    ) -> tuple[EvaluationTask, EvaluationReport]:
+        task = self._read_accessible_task(task_id, team_id)
+        if task.kind != EvaluationTaskKind.SINGLE:
+            raise ValueError("historical comparison sources must be single tasks")
+        if run_id not in task.run_ids + task.previous_run_ids:
+            raise ValueError("selected execution does not belong to its source task")
+        return task, reader.get_report(run_id)
 
     def save(self, task: EvaluationTask) -> EvaluationTask:
         runs = [self.repository.get_run(run_id, user_team_id=_team_id()) for run_id in task.run_ids]

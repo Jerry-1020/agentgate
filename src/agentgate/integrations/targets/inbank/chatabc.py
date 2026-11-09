@@ -9,6 +9,7 @@ import os
 import time
 from collections.abc import Mapping
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
 from threading import Event
@@ -35,6 +36,7 @@ from agentgate.integrations.targets.inbank.evidence import (
     normalize_turn_evidence,
     output_only_turn_span,
 )
+from agentgate.run.events import RunEventRecorder
 from agentgate.run.target_protocol import (
     CaseExecutionPending,
     CaseExecutionRequest,
@@ -215,6 +217,18 @@ def make_request(method: str, url: str, *, http=None, **kwargs) -> dict:
         return {"status": "fail", "error_code": failure["error_code"], "message": failure["error"]}
 
 
+def _prepare_initialization_variables(
+    variables: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    # Match customer variable entries; saved editor metadata stays in the Case.
+    return [
+        {key: variable[key] for key in ("name", "value", "type") if key in variable}
+        for variable in (variables or [])
+        if variable.get("value") is not None
+        and (not isinstance(variable["value"], str) or variable["value"].strip())
+    ]
+
+
 class AgentChatClient:
     """Customer ChatABC client; Case/Turn mapping stays in the adapter."""
 
@@ -255,22 +269,12 @@ class AgentChatClient:
         url = _url(
             self.base_url, f"/agent-api/{quote(self.agent_name, safe='')}/chatabc/init_session"
         )
+        prompt_variables = _prepare_initialization_variables(prompt_variables)
+        tool_variables = _prepare_initialization_variables(tool_variables)
         data = (
-            {
-                "config_variables": [
-                    {key: variable[key] for key in ("name", "value", "type") if key in variable}
-                    for variable in (prompt_variables or []) + (tool_variables or [])
-                    if variable.get("value") is not None
-                    and (
-                        not isinstance(variable["value"], str) or variable["value"].strip()
-                    )
-                ]
-            }
+            {"config_variables": prompt_variables + tool_variables}
             if self.arrange_type == "workflow"
-            else {
-                "prompt_variables": prompt_variables or [],
-                "tool_variables": tool_variables or [],
-            }
+            else {"prompt_variables": prompt_variables, "tool_variables": tool_variables}
         )
         payload = self._build_app_payload(data)
         for attempt in range(1, 11):
@@ -502,6 +506,7 @@ class InbankChatABCTargetAdapter:
         trace_client: TraceServerClient,
         sleep: Any = time.sleep,
         monotonic: Any = time.monotonic,
+        event_recorder: RunEventRecorder | None = None,
     ) -> None:
         self.settings = settings
         self._http = http or requests
@@ -517,6 +522,7 @@ class InbankChatABCTargetAdapter:
         self._trace_server = trace_client
         self._sleep = sleep
         self._monotonic = monotonic
+        self._event_recorder = event_recorder
         self._run_id: str | None = None
         self._agent_name: str | None = None
         self._pod_name: str | None = None
@@ -695,26 +701,43 @@ class InbankChatABCTargetAdapter:
         if not isinstance(version, str) or not version.strip():
             raise TargetExecutionError("invalid_request", "target agent_version must be nonblank")
         self._pod_lifecycle["create"] = "started"
-        result = create_agent_pod(
-            customer_task_id,
-            request.target.ref.external_target_id,
-            version,
-            self._cfg,
-            http=self._http,
-            sleep=self._sleep,
-            timeout=self.settings.create_timeout_seconds,
-        )
-        if not result["success"]:
-            self._pod_lifecycle["create"] = "failed"
-            self._log_pod_lifecycle("create", "failed")
-            raise TargetExecutionError(result["error_code"], result["error"])
-        self._agent_name = result["agent_name"]
-        self._pod_name = self._agent_name
+        create_event = self._event_recorder.start(
+            "pod_create", "创建被测智能体 Pod",
+            agent_id=request.target.ref.external_target_id, pod_task_id=customer_task_id,
+        ) if self._event_recorder else None
+        create_started = self._monotonic()
+        try:
+            result = create_agent_pod(
+                customer_task_id,
+                request.target.ref.external_target_id,
+                version,
+                self._cfg,
+                http=self._http,
+                sleep=self._sleep,
+                timeout=self.settings.create_timeout_seconds,
+            )
+            if not result["success"]:
+                self._pod_lifecycle["create"] = "failed"
+                self._log_pod_lifecycle("create", "failed")
+                raise TargetExecutionError(result["error_code"], result["error"])
+            self._agent_name = result["agent_name"]
+            self._pod_name = self._agent_name
+        except Exception as exc:
+            if self._event_recorder and create_event:
+                self._event_recorder.finish(create_event, status="failed", error=exc,
+                                           duration_ms=(self._monotonic() - create_started) * 1000)
+            raise
+        else:
+            if self._event_recorder and create_event:
+                self._event_recorder.finish(create_event, pod_name=self._pod_name,
+                                           duration_ms=(self._monotonic() - create_started) * 1000)
         self._pod_lifecycle["create"] = "succeeded"
         self._log_pod_lifecycle("create", "succeeded")
         self._pod_lifecycle["health"] = "started"
         try:
-            self._wait_until_healthy()
+            with (self._event_recorder.operation("pod_health", "等待被测智能体 Pod 健康检查通过")
+                  if self._event_recorder else nullcontext()):
+                self._wait_until_healthy()
         except Exception:
             self._pod_lifecycle["health"] = "failed"
             self._log_pod_lifecycle("health", "failed")

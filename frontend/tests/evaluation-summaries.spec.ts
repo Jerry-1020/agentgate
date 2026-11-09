@@ -13,9 +13,16 @@ function row(id = 'task-1', kind = 'single', status = 'completed', taskId: strin
 const metrics = { task_count: 104, average_score: 0, scored_run_count: 104, completed_sample_count: 208, dataset_count: 2, dataset_sample_count: 8 };
 async function setup(page: Page, rows = [row()], total = rows.length) {
   const calls: {path: string; method: string; headers: Record<string,string>}[] = [];
+  const timingReads: typeof calls = [];
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
     if (!url.pathname.startsWith('/api/')) return route.continue();
+    if (/^\/api\/runs\/[^/]+\/samples$/.test(url.pathname)) {
+      timingReads.push({path:url.pathname,method:route.request().method(),headers:route.request().headers()});
+      const id=decodeURIComponent(url.pathname.split('/')[3]);
+      const status=rows.flatMap(item=>item.runs).find(run=>run.run_id===id)?.status ?? 'completed';
+      return route.fulfill({json:envelope({run:{id,status,started_at:'2000-01-01T01:00:00Z',completed_at:['completed','failed','cancelled'].includes(status)?'2000-01-01T01:05:00Z':null},results:[]})});
+    }
     calls.push({path:url.pathname + url.search, method:route.request().method(),headers:route.request().headers()});
     if (url.pathname === '/api/evaluation-overview/summary') return route.fulfill({json:envelope(metrics)});
     if (url.pathname === '/api/evaluation-task-summaries') return route.fulfill({json:envelope({items:rows,total,page:Number(url.searchParams.get('page')||1),page_size:Number(url.searchParams.get('page_size')||20)})});
@@ -34,7 +41,7 @@ async function setup(page: Page, rows = [row()], total = rows.length) {
   });
   await page.goto('/tests/summary-harness.html');
   await page.waitForFunction(() => !!(window as any).summaryHarness);
-  return calls;
+  return Object.assign(calls, { timingReads });
 }
 async function mount(page: Page, path='/tasks', component='parent', props={}) {
   await page.evaluate(args => (window as any).summaryHarness.mount(...args), [path,component,props]);
@@ -86,7 +93,7 @@ test('overview polls every 10 seconds and resumes immediately after visibility c
   expect(calls).toHaveLength(6);
 });
 
-test('task pagination, debounce, selection, kind and local dates have no detail reads',async({page})=>{
+test('task pagination, debounce, selection, kind and local dates retain the summary query',async({page})=>{
   const calls=await setup(page,[row()],104); await mount(page);
   await expect(page.getByText('共 104 个任务')).toBeVisible();
   expect(calls).toHaveLength(1);
@@ -107,6 +114,21 @@ test('task pagination, debounce, selection, kind and local dates have no detail 
   await page.getByRole('button',{name:'今日',exact:true}).click();
   await expect.poll(()=>calls.length).toBe(8);
   expect(calls.every(c=>c.path.startsWith('/api/evaluation-task-summaries?'))).toBe(true);
+  expect(calls.timingReads.every(c=>c.method==='GET' && c.path==='/api/runs/task-1-a/samples')).toBe(true);
+});
+
+test('historical tasks keep their rows when time reads fail and recover through the time retry', async ({page})=>{
+  await setup(page,[{...row(),created_at:'2000-01-01T00:00:00Z'}]);
+  await page.route('**/api/runs/task-1-a/samples', route=>route.fulfill({status:500,json:{detail:'Unavailable'}}));
+  await mount(page);
+  await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
+  await expect(page.locator('.time-end')).toHaveText('读取失败');
+  await expect(page.getByText('共 1 个任务')).toBeVisible();
+  await page.unroute('**/api/runs/task-1-a/samples');
+  await page.getByRole('button',{name:'重试时间',exact:true}).click();
+  await expect(page.locator('.time-end')).toContainText('2000-01-01');
+  await expect(page.locator('.time-end')).toContainText('09:05:00');
+  await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
 });
 
 test('overview all-time option removes date bounds and updates historical totals', async ({ page }) => {
@@ -324,6 +346,8 @@ test('real integrated iframe sends all five identity headers and hides the entir
   expect(summary).toHaveLength(1);
   expect(summary[0].headers).toMatchObject({token:'fake','x-team-id':'bank-team','x-team-name':'Bank','x-user-id':'bank-user','x-user-name':'User'});
   expect(calls.some(c=>/^\/api\/(runs|evaluation-tasks|overview)([/?]|$)/.test(c.path))).toBe(false);
+  await expect.poll(()=>calls.timingReads.length).toBe(1);
+  expect(calls.timingReads[0].headers).toMatchObject({token:'fake','x-team-id':'bank-team','x-user-id':'bank-user'});
   const footer=frame.locator('.tasks-list footer');await expect(footer).toBeVisible();
   await expect(footer.getByRole('button',{name:'下一页'})).toBeDisabled();
   await frame.locator('.sidebar').getByText('测评总览', {exact:true}).click();
@@ -344,7 +368,7 @@ test('integrated iframe accepts empty identity fields without falling back to ol
   for(const call of calls) expect(call.headers).toMatchObject({token:'','x-team-id':'','x-team-name':'','x-user-id':'','x-user-name':''});
 });
 
-test('real external page preserves layout and starts only summary requests',async({page})=>{
+test('real external page preserves layout and supplements only visible task times',async({page})=>{
   const calls=await setup(page);
   await page.goto('/#/welcome');
   await page.getByRole('button',{name:'行外Login',exact:true}).click();
@@ -358,6 +382,8 @@ test('real external page preserves layout and starts only summary requests',asyn
   await expect(page.getByText('共 1 个任务')).toBeVisible();
   expect(calls.slice(before)).toHaveLength(1);
   expect(calls.slice(before)[0].path).toContain('/api/evaluation-task-summaries');
+  await expect.poll(()=>calls.timingReads.length).toBe(1);
+  expect(calls.timingReads[0].path).toBe('/api/runs/task-1-a/samples');
   await page.getByRole('button',{name:'新建测评任务',exact:true}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 });

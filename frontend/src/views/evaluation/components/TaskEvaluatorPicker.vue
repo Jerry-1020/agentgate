@@ -133,7 +133,8 @@ function toggle(id: string, on: boolean) {
               </button>
             </div>
             <small class="tile-version"
-              >v{{ e.latest_version
+              >{{ e.implementation_id === 'code_rule' ? '自定义 Code · ' : '' }}v{{
+                e.latest_version
               }}{{ e.kind === 'llm_group' ? ` · ${e.child_count ?? 0} 个子评估器` : ''
               }}{{ recommended.includes(e.id) ? ' · 推荐' : '' }}</small
             >
@@ -153,38 +154,6 @@ function toggle(id: string, on: boolean) {
         >
         <template v-if="current">
           <h4>{{ current.name }}</h4>
-          <section class="reason-card">
-            <h5>Skill 静态分析结论</h5>
-            <template v-if="staticReport"
-              ><span class="report-status">{{
-                staticReport.status === 'completed'
-                  ? '分析完成'
-                  : staticReport.status === 'partial'
-                    ? '部分完成'
-                    : '分析失败'
-              }}</span>
-              <p class="scope-label">所选智能体的 Skill 结构风险</p>
-              <article v-for="finding in staticReport.findings" :key="finding.id" class="finding">
-                <p>{{ finding.reason }}</p>
-                <div class="skill-tags">
-                  <span v-for="id in finding.skill_ids" :key="id">{{ id }}</span>
-                </div>
-                <ul v-if="finding.suggestions.length">
-                  <li v-for="tip in finding.suggestions" :key="tip">{{ tip }}</li>
-                </ul>
-                <details v-if="finding.evidence.length">
-                  <summary>分析证据</summary>
-                  <pre>{{ JSON.stringify(finding.evidence, null, 2) }}</pre>
-                </details>
-              </article>
-              <p v-if="!staticReport.findings.length">
-                {{
-                  staticReport.status === 'completed' ? '未发现 Skill 结构风险' : '未返回有效结论'
-                }}
-              </p>
-            </template>
-            <p v-else>{{ staticEnabled ? '等待分析结果' : '尚未执行静态分析' }}</p>
-          </section>
           <section class="reason-card">
             <h5>评估器检查依据</h5>
             <p class="coverage">{{ recommendationReason(current, cases) }}</p>
