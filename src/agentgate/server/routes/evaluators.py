@@ -42,6 +42,7 @@ from agentgate.server.errors import raise_conflict, raise_not_found, raise_unpro
 from agentgate.storage.evaluation_query_models import RelatedEvaluationTaskPage, RelatedTaskCursor
 
 router = APIRouter(prefix="/api/evaluators", tags=["evaluators"])
+catalog_router = APIRouter(tags=["evaluators"])
 Dependencies = Annotated[ServerDependencies, Depends(get_dependencies)]
 
 
@@ -380,7 +381,18 @@ def _summary(detail: EvaluatorDetail) -> EvaluatorSummary:
     )
 
 
-@router.get("")
+@catalog_router.get("/api/evaluator-catalog")
+def evaluator_catalog(dependencies: Dependencies, include_disabled: bool = False) -> list[EvaluatorSummary]:
+    """List evaluators without per-evaluator database queries or historical payloads."""
+    try:
+        return [_summary(EvaluatorDetail(evaluator=item, latest=latest, draft=draft))
+                for item, latest, draft in dependencies.evaluators.list_catalog(include_disabled)]
+    except (EvaluatorError, ValueError) as error:
+        _raise_catalog_error(error)
+
+
+# Performance replacement: GET /api/evaluator-catalog. Retained for older frontends.
+@router.get("", description="Retained for older clients. For optimized directory loading use GET /api/evaluator-catalog.")
 def list_evaluators(
     dependencies: Dependencies,
     include_disabled: bool = False,

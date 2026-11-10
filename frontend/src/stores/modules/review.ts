@@ -1,4 +1,4 @@
-import type { LoginMode } from './auth';
+import { useAuthStore, type LoginMode } from './auth';
 import { computed, ref, watch } from 'vue';
 import { acceptHMRUpdate, defineStore } from 'pinia';
 import {
@@ -234,20 +234,54 @@ export const useReviewStore = defineStore('review', () => {
   const extractedTemplates = ref<ScoringTemplate[]>([]);
   const assetsError = ref(''),
     assetsLoading = ref(false);
+  const detailsLoading = ref(false), detailsError = ref('');
+  const auth = useAuthStore();
+  let generation = 0, detailsSequence = 0;
   let pending: Promise<void> | null = null;
+  let detailsPending: Promise<void> | null = null;
+  let requested = false;
   function loadReviewAssets() {
+    requested = true;
     if (pending) return pending;
+    const ticket = generation;
     assetsLoading.value = true;
     assetsError.value = '';
-    pending = (async () => {
+    const task = (async () => {
       try {
-        const catalog = await api.evaluators();
-        const results = await Promise.all(
-          catalog
-            .filter((e) => e.latest_version || e.has_draft)
-            .map(async (e) => ({ id: e.id, detail: await api.evaluator(e.id) })),
-        );
+        const catalog = await api.evaluatorCatalog();
+        if (ticket !== generation) return;
+        detailsSequence++;
+        detailsPending = null;
+        detailsLoading.value = false;
         evaluatorCatalog.value = catalog;
+      } catch {
+        if (ticket === generation)
+          assetsError.value = '目录刷新失败，请重试；已成功保存的操作不受影响。';
+      } finally {
+        if (ticket === generation) {
+          assetsLoading.value = false;
+          pending = null;
+        }
+      }
+    })();
+    pending = task;
+    return task;
+  }
+  async function loadReviewDetails(refreshCatalog = true) {
+    const context = generation;
+    if (refreshCatalog) await loadReviewAssets();
+    if (context !== generation || assetsError.value) return;
+    if (detailsPending) return detailsPending;
+    const ticket = ++detailsSequence;
+    detailsLoading.value = true;
+    detailsError.value = '';
+    const task = (async () => {
+      try {
+        // Model options and scoring templates only consume single LLM definitions.
+        const results = await Promise.all(evaluatorCatalog.value
+          .filter((e) => e.kind === 'llm_judge' && (e.latest_version || e.has_draft))
+          .map(async (e) => ({ id: e.id, detail: await api.evaluator(e.id) })));
+        if (context !== generation || ticket !== detailsSequence) return;
         evaluatorDetails.value = Object.fromEntries(results.map((r) => [r.id, r.detail]));
         extractedTemplates.value = results.flatMap(({ id, detail }) => {
           const d = detail.latest;
@@ -281,14 +315,30 @@ export const useReviewStore = defineStore('review', () => {
           ];
         });
       } catch {
-        assetsError.value = '读取后端评估器配置失败。请重试；未用示例模型或提示词替代。';
+        if (context === generation && ticket === detailsSequence)
+          detailsError.value = '模型选项或评分模板读取失败，请重试；评估器目录仍可使用。';
       } finally {
-        assetsLoading.value = false;
-        pending = null;
+        if (context === generation && ticket === detailsSequence) {
+          detailsLoading.value = false;
+          detailsPending = null;
+        }
       }
     })();
-    return pending;
+    detailsPending = task;
+    return task;
   }
+  watch(() => [auth.loginMode, auth.token, auth.teamId, auth.userId, auth.platformReady], () => {
+    generation++;
+    detailsSequence++;
+    pending = null;
+    detailsPending = null;
+    evaluatorCatalog.value = [];
+    evaluatorDetails.value = {};
+    extractedTemplates.value = [];
+    assetsError.value = detailsError.value = '';
+    assetsLoading.value = detailsLoading.value = false;
+    if (requested && auth.authenticated) void loadReviewAssets();
+  }, { flush: 'sync' });
   function validateCriteria(rows: Criterion[], required: boolean) {
     if (required && !rows.length) return '至少保留一个评分维度。';
     if (rows.some((r) => !r.key.trim() || !r.text.trim())) return '请填写每个维度的标识与说明。';
@@ -330,6 +380,9 @@ export const useReviewStore = defineStore('review', () => {
     assetsLoading,
     ensureAnnotationExample,
     loadReviewAssets,
+    loadReviewDetails,
+    detailsLoading,
+    detailsError,
     validateCriteria,
     exportUx,
   };

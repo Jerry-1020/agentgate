@@ -3,8 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue';
 import {
   scoringDrafts,
   extractedTemplates,
-  loadReviewAssets,
+  loadReviewDetails,
+  detailsLoading,
   assetsLoading,
+  detailsError,
   assetsError,
   copy,
   validateCriteria,
@@ -69,7 +71,7 @@ function closeEdit() {
   edit.value = null;
 }
 onMounted(async () => {
-  await loadReviewAssets();
+  await loadReviewDetails();
   if (props.initialId) {
     try {
       detail.value =
@@ -88,7 +90,7 @@ onMounted(async () => {
         <p>独立维护提示词与评估维度，裁判引用模板决定如何评分。</p>
       </div>
       <div class="actions">
-        <button class="asset-secondary" :disabled="assetsLoading" @click="loadReviewAssets">
+        <button class="asset-secondary" :disabled="assetsLoading || detailsLoading" @click="loadReviewDetails()">
           刷新</button
         ><button class="asset-primary" @click="openEdit()">＋ 新建评分模板</button>
       </div>
@@ -97,7 +99,7 @@ onMounted(async () => {
       已发布内容从 LLM 评估器配置提取，只读展示。新建与复制为 UX
       草稿，刷新后清除；不会修改后端裁判。模型连接不属于评分模板。
     </p>
-    <p v-if="assetsError" class="asset-error" role="alert">{{ assetsError }}</p>
+    <p v-if="assetsError || detailsError" class="asset-error" role="alert">{{ assetsError || detailsError }}</p>
     <div class="asset-filters">
       <input
         v-model="query"

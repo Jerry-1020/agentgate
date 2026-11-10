@@ -6,6 +6,7 @@ import logging
 from agentgate.run.events import RunEventRecorder
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from time import perf_counter
 from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
@@ -161,6 +162,27 @@ class EvaluatorManagement:
             *self._builtin_evaluators.values(),
             *(item for item in users if item.owner_evaluator_id is None and not item.archived),
         )
+
+    def list_catalog(
+        self, include_disabled: bool = False
+    ) -> list[tuple[Evaluator, EvaluatorSpec | None, EvaluatorDraft | None]]:
+        started = perf_counter()
+        LOGGER.debug("Evaluator catalog query started: include_disabled=%s", include_disabled)
+        try:
+            evaluators = self.list_evaluators(include_disabled)
+            info = get_user_info()
+            team = info.user_team_id if info else ""
+            ids = [item.id for item in evaluators if item.source != EvaluatorSource.BUILTIN]
+            versions, drafts = self.repository.get_evaluator_catalog_definitions(ids, user_team_id=team)
+            rows = [(item, self._builtin_specs_by_id.get(item.id) or versions.get(item.id),
+                     None if item.source == EvaluatorSource.BUILTIN else drafts.get(item.id))
+                    for item in evaluators]
+        except Exception:
+            LOGGER.exception("Evaluator catalog query failed")
+            raise
+        LOGGER.info("Evaluator catalog query completed: count=%d latency_ms=%.1f",
+                    len(rows), (perf_counter() - started) * 1000)
+        return rows
 
     def get_evaluator(self, evaluator_id: str) -> Evaluator:
         builtin = self._builtin_evaluators.get(evaluator_id)

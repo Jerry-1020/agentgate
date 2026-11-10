@@ -7,6 +7,9 @@ import ElementPlus from 'element-plus';
 import { pinia } from '../src/stores';
 import { useAuthStore } from '../src/stores/modules/auth';
 import Parent from '../src/views/evaluation/index.vue';
+import JudgeSystem from '../src/views/evaluation/components/JudgeSystem.vue';
+import ScoringTemplates from '../src/views/evaluation/components/ScoringTemplates.vue';
+import { useReviewStore } from '../src/stores/modules/review';
 import TaskResults from '../src/views/evaluation/components/TaskResults.vue';
 import TaskList from '../src/views/evaluation/components/TaskList.vue';
 import OverviewMetrics from '../src/views/evaluation/components/OverviewMetrics.vue';
@@ -23,9 +26,16 @@ const rerun = { props: ['id','taskId'], template: `<section>Rerun {{id}} {{taskI
 const layout = { props: ['hideHeader'], template: `<main><button v-if="!hideHeader" @click="$emit('logout')">logout</button><slot/><slot name="dialogs"/></main>` };
 (window as any).summaryHarness = {
   helpers,
+  review: () => { const s=useReviewStore(pinia); return {catalog:s.evaluatorCatalog,details:s.evaluatorDetails,error:s.assetsError,detailsError:s.detailsError,templates:s.extractedTemplates}; },
+  refreshCatalog: () => useReviewStore(pinia).loadReviewAssets(),
+  loadDetails: () => useReviewStore(pinia).loadReviewDetails(false),
   auth: (values: object) => auth.$patch(values),
   async mount(path='/tasks', component='parent', props={}) {
     wrapper?.unmount();
+    if (component === 'judges' || component === 'templates') {
+      wrapper=mount(component === 'judges' ? JudgeSystem : ScoringTemplates,{attachTo:'#app',props,global:{plugins:[pinia,ElementPlus]}});
+      return;
+    }
     if (component === 'results') {
       router=createRouter({history:createMemoryHistory(), routes:[{path:'/:pathMatch(.*)*',component:TaskResults}]});
       await router.push(path); await router.isReady();

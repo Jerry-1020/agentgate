@@ -26,5 +26,7 @@ export const {
   extractedTemplates,
   assetsError,
   assetsLoading,
+  detailsLoading,
+  detailsError,
 } = storeToRefs(review);
-export const { ensureAnnotationExample, loadReviewAssets, validateCriteria, exportUx } = review;
+export const { ensureAnnotationExample, loadReviewAssets, loadReviewDetails, validateCriteria, exportUx } = review;
