@@ -256,3 +256,101 @@ test('CSV preserves Chinese text, commas, quotes, multiline notes and every expe
   });
   expect(normalized(toApiCase(parsed[0]))).toEqual(normalized(toApiCase(sample)));
 });
+
+test('expectation snapshots remain independent without native structuredClone', async () => {
+  const { toEditorCase, toApiCase } = await import('../src/api/datasets');
+  const raw = toApiCase(blankSample('旧浏览器样本'));
+  raw.turns[0].expectations = [
+    {
+      id: 'nested-output',
+      name: '嵌套期望',
+      kind: 'output',
+      path: null,
+      condition: {
+        kind: 'equals',
+        expected: { values: [0, false, null, '中文'], nested: { status: 'ready' } },
+      },
+    },
+    {
+      id: 'execution-path',
+      name: null,
+      kind: 'execution_path',
+      scope: 'workflow',
+      expected: ['start', 'end'],
+      allowed_tools: null,
+    },
+  ];
+  const original = JSON.parse(JSON.stringify(raw.turns[0].expectations));
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'structuredClone');
+  try {
+    Reflect.deleteProperty(globalThis, 'structuredClone');
+    const edited = toEditorCase(raw);
+    expect(toApiCase(edited).turns[0].expectations).toEqual(original);
+    const editable = edited.turns[0].expectations[0];
+    if (editable.condition.kind !== 'equals') throw Error('Expected an equality condition');
+    const expected = editable.condition.expected as {
+      values: unknown[];
+      nested: { status: string };
+    };
+    expected.values[0] = 'changed';
+    expected.nested.status = 'changed';
+    raw.turns[0].expectations.reverse();
+    const path = raw.turns[0].expectations[0];
+    if (path.kind !== 'execution_path') throw Error('Expected an execution path');
+    path.expected.push('changed');
+    expect(edited.turns[0].original_expectations).toEqual(original);
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis, 'structuredClone', descriptor);
+  }
+});
+
+test('dataset reads and sample write responses work without native structuredClone', async () => {
+  const { datasetApi, toApiCase } = await import('../src/api/datasets');
+  const raw = toApiCase(blankSample('兼容性样本'));
+  const dataset = {
+    id: 'compatibility',
+    name: '兼容性测评集',
+    description: '',
+    archived: false,
+    created_at: '2026-11-10T00:00:00Z',
+    updated_at: '2026-11-10T00:00:00Z',
+  };
+  const draft = {
+    id: 'compatibility-draft',
+    dataset_id: dataset.id,
+    dataset_name: dataset.name,
+    dataset_description: '',
+    version: null,
+    status: 'draft',
+    based_on_version: null,
+    cases: [raw],
+    notes: '',
+    created_at: dataset.created_at,
+    updated_at: dataset.updated_at,
+    published_at: null,
+    content_sha256: 'original',
+  };
+  const previousAdapter = http.defaults.adapter;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'structuredClone');
+  try {
+    Reflect.deleteProperty(globalThis, 'structuredClone');
+    http.defaults.adapter = async (config) => ({
+      data: config.url === '/datasets/compatibility' ? { dataset, versions: [draft] } : draft,
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    });
+    const detail = await datasetApi.detail('compatibility');
+    const current = await datasetApi.currentDraft('compatibility');
+    const added = await datasetApi.addCase('compatibility', a, 'original');
+    const updated = await datasetApi.updateCase('compatibility', a, 'original');
+    for (const result of [detail.versions[0], current, added, updated]) {
+      expect(result.cases).toHaveLength(1);
+      expect(toApiCase(result.cases[0])).toEqual(raw);
+    }
+  } finally {
+    http.defaults.adapter = previousAdapter;
+    if (descriptor) Object.defineProperty(globalThis, 'structuredClone', descriptor);
+  }
+});
