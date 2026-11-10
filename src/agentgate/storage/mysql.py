@@ -143,8 +143,12 @@ def _rows(db: Connection, table: Table, *, lock: bool = False, **filters) -> lis
 
 
 def _models(db: Connection, table: Table, model_type: type[M], *, lock=False, **filters) -> list[M]:
+    return _validated_models(_rows(db, table, lock=lock, **filters), table, model_type)
+
+
+def _validated_models(rows, table: Table, model_type: type[M]) -> list[M]:
     models = []
-    for row in _rows(db, table, lock=lock, **filters):
+    for row in rows:
         model = model_type.model_validate_json(row["payload"])
         indexed = {
             name: value
@@ -702,6 +706,34 @@ class MySQLRepository:
         with self._transaction() as db:
             items = _models(db, s.evaluators, Evaluator, user_team_id=user_team_id)
         return _ordered([item for item in items if include_disabled or item.enabled], "updated_at")
+
+    def get_evaluator_catalog_definitions(
+        self, evaluator_ids: Sequence[str], *, user_team_id: str
+    ) -> tuple[dict[str, EvaluatorSpec], dict[str, EvaluatorDraft]]:
+        versions: dict[str, EvaluatorSpec] = {}
+        drafts: dict[str, EvaluatorDraft] = {}
+        with self._transaction() as db:
+            for start in range(0, len(evaluator_ids), 400):
+                ids = evaluator_ids[start:start + 400]
+                keys = [_digest(item) for item in ids]
+                v, d = s.evaluator_versions, s.evaluator_drafts
+                latest = select(v.c.evaluator_key, func.max(v.c.version).label("version")).where(
+                    v.c.evaluator_key.in_(keys), _where(v, {"user_team_id": user_team_id})
+                ).group_by(v.c.evaluator_key).subquery()
+                query = select(v).join(latest, and_(
+                    v.c.evaluator_key == latest.c.evaluator_key, v.c.version == latest.c.version
+                )).where(_where(v, {"user_team_id": user_team_id}))
+                for spec in _validated_models(db.execute(query).mappings().all(), v, EvaluatorSpec):
+                    if spec.id not in ids or spec.user_team_id != user_team_id:
+                        raise ValueError("database identity digest collision")
+                    versions[spec.id] = spec
+                query = select(d).where(d.c.evaluator_key.in_(keys),
+                                        _where(d, {"user_team_id": user_team_id}))
+                for draft in _validated_models(db.execute(query).mappings().all(), d, EvaluatorDraft):
+                    if draft.evaluator_id not in ids or draft.user_team_id != user_team_id:
+                        raise ValueError("database identity digest collision")
+                    drafts[draft.evaluator_id] = draft
+        return versions, drafts
 
     def delete_unpublished_evaluator(self, evaluator_id: str, *, user_team_id: str) -> None:
         with self._transaction() as db:

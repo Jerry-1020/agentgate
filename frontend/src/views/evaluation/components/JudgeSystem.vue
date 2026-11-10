@@ -28,6 +28,9 @@ import {
   evaluatorCatalog,
   evaluatorDetails,
   loadReviewAssets,
+  loadReviewDetails,
+  detailsError,
+  detailsLoading,
   assetsLoading,
   assetsError,
   copy,
@@ -447,6 +450,9 @@ function viewVersion(value: Definition) {
   error.value = '';
   notice.value = '已发布版本只读；编辑会创建草稿，原版本保持不变。';
 }
+watch([promptOpen, groupOpen, design, evaluatorCatalog], () => {
+  if (promptOpen.value || groupOpen.value || design.value) void loadReviewDetails(false);
+});
 function beforeUnload(event: BeforeUnloadEvent) {
   if (dirty.value || busy.value) {
     event.preventDefault();
@@ -476,6 +482,9 @@ const templateLabels1: Record<string, string> = {
 };
 </script>
 <template>
+  <p v-if="detailsError" class="asset-error" role="alert">
+    {{ detailsError }} <button :disabled="detailsLoading" @click="loadReviewDetails(false)">重试</button>
+  </p>
   <LLMGroupEditor
     v-if="groupOpen"
     :initial-id="groupInitialId"
@@ -537,7 +546,9 @@ const templateLabels1: Record<string, string> = {
         ＋ 新建 LLM 评估器
       </button>
     </div>
-    <p v-if="assetsError" role="alert" class="asset-error">{{ assetsError }}</p>
+    <p v-if="assetsError" role="alert" class="asset-error">
+      {{ assetsError }} <button :disabled="assetsLoading" @click="loadReviewAssets()">重试</button>
+    </p>
     <p v-if="error && !design" role="alert" class="asset-error">{{ error }}</p>
     <div class="asset-filters">
       <input v-model="query" aria-label="搜索评估器" placeholder="搜索评估器名称" />

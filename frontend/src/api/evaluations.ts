@@ -164,6 +164,10 @@ export const api = {
     request<EvaluatorSummary[]>('/evaluators?include_disabled=true').then((items) =>
       items.map(applyEvaluatorPreference),
     ),
+  evaluatorCatalog: () =>
+    request<EvaluatorSummary[]>('/evaluator-catalog?include_disabled=true').then((items) =>
+      items.map(applyEvaluatorPreference),
+    ),
   evaluator: (id: string) =>
     request<EvaluatorDetail>(`/evaluators/${encodeURIComponent(id)}`).then((detail) => ({
       ...detail,

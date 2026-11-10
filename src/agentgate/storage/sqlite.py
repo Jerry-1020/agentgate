@@ -1050,6 +1050,43 @@ class SQLiteRepository:
             rows = db.execute(query, parameters).fetchall()
         return [Evaluator.model_validate_json(row[0]) for row in rows]
 
+    def get_evaluator_catalog_definitions(
+        self, evaluator_ids: Sequence[str], *, user_team_id: str
+    ) -> tuple[dict[str, EvaluatorSpec], dict[str, EvaluatorDraft]]:
+        versions: dict[str, EvaluatorSpec] = {}
+        drafts: dict[str, EvaluatorDraft] = {}
+        with self._connect() as db:
+            db.execute("BEGIN")
+            for start in range(0, len(evaluator_ids), 400):
+                ids = evaluator_ids[start:start + 400]
+                placeholders = ",".join("?" for _ in ids)
+                rows = db.execute(f"""
+                    SELECT v.version,v.content_sha256,v.payload
+                    FROM {_T_EVALUATOR_VERSIONS} v
+                    JOIN (
+                        SELECT evaluator_id,MAX(version) AS version
+                        FROM {_T_EVALUATOR_VERSIONS}
+                        WHERE user_team_id=? AND evaluator_id IN ({placeholders})
+                        GROUP BY evaluator_id
+                    ) latest ON v.evaluator_id=latest.evaluator_id AND v.version=latest.version
+                    WHERE v.user_team_id=?
+                    """, (user_team_id, *ids, user_team_id)).fetchall()
+                for row in rows:
+                    spec = _load_evaluator_spec(row)
+                    if spec.id not in ids or spec.user_team_id != user_team_id:
+                        raise ValueError("stored Evaluator identity does not match payload")
+                    versions[spec.id] = spec
+                rows = db.execute(f"""
+                    SELECT payload FROM {_T_EVALUATOR_DRAFTS}
+                    WHERE user_team_id=? AND evaluator_id IN ({placeholders})
+                    """, (user_team_id, *ids)).fetchall()
+                for row in rows:
+                    draft = EvaluatorDraft.model_validate_json(row["payload"])
+                    if draft.evaluator_id not in ids or draft.user_team_id != user_team_id:
+                        raise ValueError("stored Evaluator identity does not match payload")
+                    drafts[draft.evaluator_id] = draft
+        return versions, drafts
+
     def discard_evaluator_group_draft(
         self,
         evaluator_id: str,
