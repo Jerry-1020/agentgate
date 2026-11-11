@@ -116,7 +116,6 @@ const runs = shallowRef<EvaluationRun[]>([]);
 const pairStatuses = ref<Record<string, string>>({});
 const overviewDays = ref(7);
 const auth = useAuthStore();
-const authLabel = computed(() => auth.modeLabel);
 async function confirmLogout() {
   if (auth.isIntegrated) return;
   try {
@@ -307,7 +306,6 @@ async function taskRerunCreated(taskId: string) {
   <EvaluationLayout
     :page="page"
     :online="online"
-    :auth-label="authLabel"
     :hide-header="auth.isIntegrated"
     @logout="confirmLogout"
   >

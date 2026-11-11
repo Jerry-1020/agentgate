@@ -63,12 +63,27 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
         <button class="tile-open" @click="emit('select', item.id)">
           <div class="tile-top">
             <span class="tile-icon">▤</span>
-            <h2>{{ item.name }}</h2>
+            <el-tooltip
+              :content="item.name"
+              placement="top"
+              :show-after="200"
+              popper-class="full-text-popper"
+            >
+              <h2>{{ item.name }}</h2>
+            </el-tooltip>
             <span class="version-badge">{{
               item.version === null ? '草稿' : 'v' + item.version
             }}</span>
           </div>
-          <p>{{ item.description || '暂无备注' }}</p>
+          <el-tooltip
+            :content="item.description"
+            :disabled="!item.description"
+            placement="top"
+            :show-after="200"
+            popper-class="full-text-popper"
+          >
+            <p class="tile-description">{{ item.description || '暂无备注' }}</p>
+          </el-tooltip>
           <el-tag :type="item.archived ? 'info' : item.has_draft ? 'warning' : 'success'">{{
             item.archived
               ? '已归档'
@@ -160,6 +175,7 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
   flex: 1;
   font-size: 16px;
   margin: 0;
+  min-width: 0;
 }
 .version-badge {
   font-size: 11px;
@@ -190,12 +206,22 @@ const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.val
 .tile-open h2 {
   font-size: 18px;
   margin: 14px 0 10px;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tile-open p {
   font-size: 14px;
   color: #64748b;
   overflow-wrap: anywhere;
+}
+.tile-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.5;
+  min-height: 3em;
 }
 .tile-open small {
   color: #64748b;

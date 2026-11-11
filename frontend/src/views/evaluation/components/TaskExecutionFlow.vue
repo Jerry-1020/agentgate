@@ -8,6 +8,7 @@ import {
   type FlowNode,
   type RunEvent,
 } from '../utils/task-execution-flow';
+import { formatTaskDuration } from '../utils/task-timing';
 
 const props = defineProps<{ runIds: string[]; statuses: Record<string, string> }>();
 const selected = ref(props.runIds[0] ?? '');
@@ -32,7 +33,7 @@ const totalDuration = computed(() =>
     ? '结束时间未知'
     : total.value.running && total.value.startedAt
       ? elapsed(total.value.startedAt)
-      : milliseconds(total.value.durationMs),
+      : durationLabel(total.value.durationMs),
 );
 const taskError = computed(() =>
   nodes.value.some((node) => node.issues.length) ? null : references.value.taskErrors[0],
@@ -57,23 +58,22 @@ function time(value: string | null) {
       })
     : '—';
 }
-function milliseconds(value: number | null) {
+function durationLabel(value: number | null) {
   if (value === null) return '未采集';
-  if (value < 1000) return value > 0 && value < 0.01 ? '<0.01 毫秒' : `${value.toFixed(2)} 毫秒`;
-  return `${(value / 1000).toFixed(2)} 秒`;
+  return formatTaskDuration(value);
 }
 function elapsed(start: string) {
-  return `已运行 ${Math.max(0, (now.value - Date.parse(start)) / 1000).toFixed(0)} 秒`;
+  return `已运行 ${formatTaskDuration(Math.max(0, now.value - Date.parse(start)))}`;
 }
 function nodeDuration(node: FlowNode) {
   if (node.status === 'pending' || node.status === 'uncollected') return '—';
   if (node.status === 'unknown' || node.status === 'interrupted') return '结束时间未知';
   if (node.status === 'running' && node.startedAt) return elapsed(node.startedAt);
-  return milliseconds(node.durationMs);
+  return durationLabel(node.durationMs);
 }
 function duration(event: RunEvent) {
   if (event.status === 'interrupted' || (!event.ended_at && terminal.value)) return '结束时间未知';
-  return event.ended_at ? milliseconds(event.duration_ms) : elapsed(event.started_at);
+  return event.ended_at ? durationLabel(event.duration_ms) : elapsed(event.started_at);
 }
 const labels: Record<string, string> = {
   running: '执行中',

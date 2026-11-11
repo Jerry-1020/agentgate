@@ -69,10 +69,18 @@ class EvaluationTaskManagement:
             a = baseline.name or baseline_report.run.manifest.target.display_name
             b = candidate.name or candidate_report.run.manifest.target.display_name
             name = f"A/B历史结果对比：{a[:48]} / {b[:48]}"
+        cleaned_name = name.strip()
+        if cleaned_name:
+            for task in self._accessible_tasks(team_id):
+                if (
+                    task.id != comparison_id
+                    and (task.name or "").strip() == cleaned_name
+                ):
+                    raise ValueError(f"任务名称已存在：{cleaned_name}，请修改名称后重试。")
         task = EvaluationTask(
             id=comparison_id,
             kind=EvaluationTaskKind.AB,
-            name=name,
+            name=cleaned_name,
             run_ids=(baseline_run_id, candidate_run_id),
         )
         # Storage rechecks ownership and access atomically, and returns an identical prior save.
@@ -179,6 +187,15 @@ class EvaluationTaskManagement:
         })
         return self.repository.save_evaluation_task(named)
 
+    def _accessible_tasks(self, team_id: str) -> list[EvaluationTask]:
+        return [
+            task
+            for task in self.repository.list_evaluation_tasks()
+            if all(
+                self.repository.get_run(run_id, user_team_id=team_id) is not None
+                for run_id in task.run_ids
+            )
+        ]
+
     def list(self) -> list[EvaluationTask]:
-        return [self._with_name(task) for task in self.repository.list_evaluation_tasks()
-                if all(self.repository.get_run(run_id, user_team_id=_team_id()) is not None for run_id in task.run_ids)]
+        return [self._with_name(task) for task in self._accessible_tasks(_team_id())]

@@ -206,3 +206,17 @@ def test_invalid_requests_and_publication_return_unprocessable(tmp_path) -> None
             ).status_code
             == 200
         )
+
+
+def test_create_rejects_duplicate_user_evaluator_names(tmp_path) -> None:
+    with _client(tmp_path / "evaluator-duplicate-name.db") as client:
+        assert client.post("/api/evaluators", json=_create_payload()).status_code == 201
+
+        duplicate = client.post("/api/evaluators", json=_create_payload())
+        assert duplicate.status_code == 409
+        assert "评估器名称已存在" in duplicate.json()["detail"]
+
+        renamed = client.post(
+            "/api/evaluators", json=_create_payload(name="Custom output 2")
+        )
+        assert renamed.status_code == 201

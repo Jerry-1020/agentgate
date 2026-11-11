@@ -79,8 +79,23 @@ function activate() {
       }}</span>
       <slot name="menu" />
     </div>
-    <h2 class="group-template-title">{{ card.name }}</h2>
-    <p>{{ card.description || '暂无备注描述' }}</p>
+    <el-tooltip
+      :content="card.name"
+      placement="top"
+      :show-after="200"
+      popper-class="full-text-popper"
+    >
+      <h2 class="group-template-title">{{ card.name }}</h2>
+    </el-tooltip>
+    <el-tooltip
+      :content="card.description"
+      :disabled="!card.description"
+      placement="top"
+      :show-after="200"
+      popper-class="full-text-popper"
+    >
+      <p class="group-template-description">{{ card.description || '暂无备注描述' }}</p>
+    </el-tooltip>
     <div class="evaluator-metadata">
       <div class="group-template-tags"><span>LLM</span><span>文本</span><span>内容质量</span></div>
       <div v-if="evaluator && action === 'view'" class="asset-chips evaluator-version-status">
@@ -98,7 +113,14 @@ function activate() {
       <h4>包含 {{ card.children.length }} 个{{ card.itemLabel }}</h4>
       <ul class="group-template-children">
         <li v-for="child in card.children" :key="child.id">
-          <span>{{ child.name }}</span>
+          <el-tooltip
+            :content="child.name"
+            placement="top"
+            :show-after="200"
+            popper-class="full-text-popper"
+          >
+            <span>{{ child.name }}</span>
+          </el-tooltip>
           <strong>{{ child.weight === null ? '—' : child.weight + '%' }}</strong>
         </li>
       </ul>
@@ -121,6 +143,20 @@ function activate() {
   align-self: stretch;
   font-size: 14px;
   line-height: 1.6;
+}
+.group-template-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.group-template-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: 3.4em;
+  overflow-wrap: anywhere;
 }
 .template-card-header {
   display: flex;
@@ -177,7 +213,9 @@ function activate() {
   font-size: 12px;
 }
 .group-template-children li span {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 .group-template-children strong {

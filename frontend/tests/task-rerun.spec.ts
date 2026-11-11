@@ -384,7 +384,7 @@ async function open(page: Page, options: Options = {}) {
     });
   });
   await page.goto(`${url}?mode=${mode}#/tasks`);
-  await expect(page.getByRole('button', { name: original.name, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看任务 ' + original.name, exact: true })).toBeVisible();
   return {
     writes,
     reads,
@@ -480,9 +480,9 @@ for (const mode of ['external', 'bank', 'integrated'] as const) {
         expect(JSON.stringify(state.original)).toBe(state.originalSnapshot);
         expect(state.tasks).toHaveLength(2);
         await page.evaluate(() => (window as any).testRouter.push('/tasks'));
-        await expect(page.getByRole('button', { name: '原任务名称', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: '查看任务 原任务名称', exact: true })).toBeVisible();
         await expect(
-          page.getByRole('button', { name: '原任务名称_重跑', exact: true }),
+          page.getByRole('button', { name: '查看任务 原任务名称_重跑', exact: true }),
         ).toBeVisible();
         expect(state.errors).toEqual([]);
       });
@@ -798,7 +798,7 @@ test.describe('task-list rerun action', () => {
       const actions: TaskAction[][] = [];
       for (const row of rows) {
         const tableRow = page.locator('.tasks-list tbody tr').filter({
-          has: page.getByRole('button', { name: row.name, exact: true }),
+          has: page.getByRole('button', { name: '查看任务 ' + row.name, exact: true }),
         });
         const rerun = tableRow.getByRole('button', { name: '重跑', exact: true });
         if (row.kind === 'stability' || !terminal.includes(row.status)) {
@@ -811,7 +811,7 @@ test.describe('task-list rerun action', () => {
         expect(await page.evaluate(() => (window as any).summaryHarness.events().action)).toEqual(
           actions,
         );
-        await expect(tableRow.getByRole('button', { name: row.name, exact: true })).toBeVisible();
+        await expect(tableRow.getByRole('button', { name: '查看任务 ' + row.name, exact: true })).toBeVisible();
       }
       expect(actions).toHaveLength(6);
       expect(calls.length).toBeGreaterThan(0);

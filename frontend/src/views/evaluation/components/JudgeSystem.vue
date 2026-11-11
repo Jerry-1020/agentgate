@@ -593,14 +593,30 @@ const templateLabels1: Record<string, string> = {
             </el-dropdown>
           </template>
         </LLMGroupTemplateCard>
-        <article v-else class="asset-card">
+        <article v-else class="asset-card rule-evaluator-card">
           <span class="asset-chip"
             >{{ e.source === 'builtin' ? '预置' : '自建' }} ·
             {{ e.latest_version ? 'v' + e.latest_version : '未发布' }}</span
           >
           <span v-if="e.has_draft" class="asset-chip preview">草稿</span>
-          <h2>{{ displayName(e) }}</h2>
-          <p v-if="e.source !== 'builtin'">{{ e.description || e.metric }}</p>
+          <el-tooltip
+            :content="displayName(e)"
+            placement="top"
+            :show-after="200"
+            popper-class="full-text-popper"
+          >
+            <h2>{{ displayName(e) }}</h2>
+          </el-tooltip>
+          <el-tooltip
+            v-if="e.source !== 'builtin'"
+            :content="e.description || e.metric"
+            :disabled="!(e.description || e.metric)"
+            placement="top"
+            :show-after="200"
+            popper-class="full-text-popper"
+          >
+            <p class="rule-evaluator-description">{{ e.description || e.metric }}</p>
+          </el-tooltip>
           <div class="asset-card-actions">
             <button class="asset-link" :disabled="busy" @click="open(e)">查看详情</button
             ><span class="asset-small">{{
@@ -911,6 +927,20 @@ const templateLabels1: Record<string, string> = {
 }
 .llm-catalogue-grid > .catalogue-template-card {
   align-self: stretch;
+}
+.rule-evaluator-card h2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.rule-evaluator-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: 3.4em;
+  overflow-wrap: anywhere;
 }
 
 .design-fields {

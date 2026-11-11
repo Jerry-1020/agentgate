@@ -42,6 +42,17 @@ export function formatTaskTime(value: string | null | undefined) {
   };
 }
 
+export function formatTaskDuration(durationMs: number): string {
+  const seconds = Math.round(durationMs / 1000);
+  if (seconds < 1) return '不足 1 秒';
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes} 分 ${restSeconds} 秒`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时 ${minutes % 60} 分 ${restSeconds} 秒`;
+}
+
 function reusable(entry: TimingEntry | undefined, run: RunSummary) {
   return (
     entry?.state === 'ready' &&

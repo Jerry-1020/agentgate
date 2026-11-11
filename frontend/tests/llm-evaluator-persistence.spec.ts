@@ -1,3 +1,9 @@
+import ExcelJS from 'exceljs';
+async function workbookText(path: string) {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.readFile(path);
+  return JSON.stringify(book.worksheets[0].getSheetValues());
+}
 import {
   expect,
   test,
@@ -1570,13 +1576,15 @@ test('low-score tab excludes the 80-point boundary and missing scores, and prese
   await expect(rows).toHaveCount(2);
   await tabs.getByRole('button', { name: '低分样本', exact: true }).click();
   const downloadEvent = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出 CSV', exact: true }).click();
+  await page.getByRole('button', { name: '导出 Excel', exact: true }).click();
+
+  await page.getByRole('button', { name: '开始导出', exact: true }).click();
   const download = await downloadEvent;
-  const csvPath = testInfo.outputPath('low-score-samples.csv');
-  await download.saveAs(csvPath);
-  const csv = readFileSync(csvPath, 'utf8');
-  expect(csv).toContain('低分样本输入');
-  for (const variant of variants.slice(1)) expect(csv).not.toContain(variant.input);
+  const excelPath = testInfo.outputPath('all-executed-samples.xlsx');
+  await download.saveAs(excelPath);
+  const excel = await workbookText(excelPath);
+  for (const variant of variants) expect(excel).toContain(variant.name);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
   await page.getByLabel('样本场景', { exact: true }).selectOption('其他场景');
   await expect(rows).toHaveCount(0);
   await expect(page.getByText('暂无匹配的低分样本', { exact: true })).toBeVisible();

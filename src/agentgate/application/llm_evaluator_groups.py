@@ -157,6 +157,7 @@ def save_llm_group(
             or expected_draft_updated_at is not None
         ):
             raise ValueError("new LLM groups cannot reference a previous draft or version")
+        management._reject_duplicate_evaluator_name(name)
         parent = Evaluator(
             name=name.strip(),
             description=description.strip(),

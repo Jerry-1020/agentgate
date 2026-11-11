@@ -9,6 +9,7 @@ import TaskStaticAnalysis from './TaskStaticAnalysis.vue';
 import ReportEvidenceAnalysis from './ReportEvidenceAnalysis.vue';
 import CaseReport from './CaseReport.vue';
 import { needsAttention } from '../utils/report-presentation';
+import { formatTaskDuration } from '../utils/task-timing';
 const rerunPreview = ref(false);
 const detailTab = ref(
   new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab') === 'analysis' ||
@@ -255,7 +256,9 @@ onUnmounted(() => {
       <div>
         <span>运行耗时</span
         ><b>{{
-          progress.duration_seconds == null ? '—' : progress.duration_seconds.toFixed(1) + ' 秒'
+          progress.duration_seconds == null
+            ? '—'
+            : formatTaskDuration(progress.duration_seconds * 1000)
         }}</b
         ><small v-if="progress.queue_position != null"
           >队列位置：{{ progress.queue_position }}</small

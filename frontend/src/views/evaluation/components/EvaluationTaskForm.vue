@@ -593,6 +593,16 @@ async function submit() {
     throw Error(message);
   };
   try {
+    try {
+      const tasks = await request<{ name?: string | null }[]>('/evaluation-tasks');
+      if (tasks.some((t) => (t.name ?? '').trim() === taskName.value.trim())) {
+        formError.value = `任务名称已存在：${taskName.value.trim()}，请修改名称后重试。`;
+        return;
+      }
+    } catch {
+      formError.value = '暂时无法核验任务名称是否重复，请稍后重试。';
+      return;
+    }
     const exact = await request<{ cases: any[] }>(
       `/datasets/${encodeURIComponent(snapshot.datasetId)}/versions/${snapshot.datasetVersion}`,
     );
@@ -1124,9 +1134,6 @@ onMounted(async () => {
         <span>03</span>
         <div><h3>测评对象</h3></div>
       </div>
-      <p v-if="taskKind === 'ab'" class="full platform-source-badge">
-        数据源：{{ auth.modeLabel }}
-      </p>
       <AgentTargetPicker
         ref="platformPicker"
         class="full"
@@ -1472,17 +1479,6 @@ onMounted(async () => {
   </el-dialog>
 </template>
 <style scoped>
-.platform-source-badge {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--el-color-primary);
-  padding: 6px 12px;
-  background: var(--el-color-primary-light-9);
-  border-radius: 4px;
-  display: inline-block;
-  width: fit-content;
-}
 .platform-candidate-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
