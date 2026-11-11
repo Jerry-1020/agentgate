@@ -71,7 +71,8 @@ export function toEditorCase(item: ApiEvaluationCase): EvaluationCase {
       const skill = turn.expectations.find((item) => item.kind === 'skill_route');
       return {
         ...turn,
-        original_expectations: structuredClone(turn.expectations),
+        // API expectations are JSON data; support browsers without structuredClone.
+        original_expectations: JSON.parse(JSON.stringify(turn.expectations)),
         preserved_skill_routes: turn.expectations.filter(
           (item): item is ApiExpectationBase & { kind: 'skill_route'; condition: Condition } =>
             item.kind === 'skill_route' &&
