@@ -92,6 +92,22 @@ test('Excel uses actual selected worksheet name and formula cell location', asyn
   expect(error.issues[0].message).toContain('公式');
 });
 
+test('Excel groups Chinese headers and reports invalid JSON and formula cells at their physical positions', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Cases');
+  sheet.addRow(['样本编号', '输入内容', '样本名称', '轮次顺序']);
+  sheet.getRow(3).values = ['shared', 'not JSON', '中文样本', 2];
+  sheet.getRow(7).values = ['shared', { formula: '1+1', result: 2 }, '中文样本', 1];
+
+  const error = await validationError(file('samples.xlsx', new Uint8Array(await workbook.xlsx.writeBuffer())));
+  expect(error.totalIssues).toBe(2);
+  expect(error.sampleCount).toBe(1);
+  expect(error.issues).toEqual(expect.arrayContaining([
+    expect.objectContaining({ location: 'Cases!B3', field: '输入内容', turn: 2, message: expect.stringContaining('JSON') }),
+    expect.objectContaining({ location: 'Cases!B7', field: '输入内容', turn: 1, message: expect.stringContaining('公式') }),
+  ]));
+});
+
 test('CSV locates records by starting physical line through blanks and quoted multiline cells', async () => {
   const text = 'case_name,query,input_json\r\n\r\n正常,"第一行\r\n第二行",\r\n错误,,not-json\r\n';
   const error = await validationError(file('samples.csv', strToU8(text)));

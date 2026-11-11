@@ -153,14 +153,19 @@ It checks envelope syntax and format version. It does not persist or publish.
 
 Implement `.xlsx` exchange with `openpyxl` using one `Cases` sheet. One row represents
 one conversation Turn; repeated `case_id` values form a multi-turn Case and `turn_order`
-controls conversation order. The columns are:
+controls conversation order. Excel and CSV templates and exports display Chinese
+column headers. Imports also accept the existing English field names.
 
 ```text
-case_id, case_name, category, difficulty, tags_json, case_notes,
-initial_state_json, turn_id, turn_order, input_json, expectations_json, turn_notes
+样本编号, 样本名称, 样本分类, 难度, 标签, 样本备注,
+初始状态, 轮次编号, 轮次顺序, 输入内容, 期望结果, 轮次备注
 ```
 
-Only `case_id`, `case_name`, and `input_json` are required. JSON-valued cells use
+`样本名称` and `输入内容` are required. `样本编号` groups multi-turn rows. When it
+is omitted, each row becomes a separate sample. If several name columns are
+present, the importer reads `case_name` first, then `name`, then `样本名称`.
+For other fields, a file with both Chinese and English columns for the same field
+produces a duplicate header error. JSON-valued cells use
 canonical JSON. Import errors identify sheet, row, and column. The adapter rejects
 formulas, unsafe active workbook content, malformed archives, excessive expansion, and
 lossy JSON values. Dataset catalog identity is supplied by the application workflow and

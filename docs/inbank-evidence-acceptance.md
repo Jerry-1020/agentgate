@@ -124,7 +124,8 @@ Business fields never overwrite those transport fields. The existing **背景知
 and **自定义变量** annotations are not sent to the Agent.
 
 JSON and Excel exports preserve the Case configuration and each turn's complete input.
-The Excel columns remain `initial_state_json`, `input_json`, `case_id`, and `turn_order`;
+The Excel headers are `初始状态`, `输入内容`, `样本编号`, and `轮次顺序`
+(imports also accept `initial_state_json`, `input_json`, `case_id`, and `turn_order`);
 no separate column is required for each Agent's business fields.
 
 Local acceptance uses a temporary SQLite database and simulated customer responses.

@@ -8,6 +8,21 @@ export const sampleFileFormats = [
 ] as const;
 export type SampleFileFormat = (typeof sampleFileFormats)[number]['value'];
 
+export const sampleColumnLabels: Record<string, string> = {
+  case_id: '样本编号',
+  case_name: '样本名称',
+  category: '样本分类',
+  difficulty: '难度',
+  tags_json: '标签',
+  case_notes: '样本备注',
+  initial_state_json: '初始状态',
+  turn_id: '轮次编号',
+  turn_order: '轮次顺序',
+  input_json: '输入内容',
+  expectations_json: '期望结果',
+  turn_notes: '轮次备注',
+};
+
 export interface ImportIssue {
   location: string;
   sheet?: string;
@@ -224,7 +239,17 @@ function columnName(index: number): string {
     name = String.fromCharCode(65 + ((n - 1) % 26)) + name;
   return name;
 }
-const sampleNameHeaders = ['case_name', 'name', '样本名称'];
+// Keep the three name columns distinct for the existing per-row priority.
+const sampleNameHeaders = ['case_name', 'name', sampleColumnLabels.case_name];
+const tableColumnKeys = new Map(
+  Object.entries(sampleColumnLabels)
+    .filter(([key]) => key !== 'case_name')
+    .map(([key, label]) => [label, key]),
+);
+function tableHeaderKey(header: string) {
+  const trimmed = header.trim();
+  return tableColumnKeys.get(trimmed) ?? trimmed;
+}
 function sampleNameHeader(values: Record<string, unknown>) {
   return sampleNameHeaders.find((header) => values[header] != null) ?? 'case_name';
 }
@@ -232,7 +257,8 @@ function columnsFor(headers: string[]) {
   const columns: Record<string, string> = Object.create(null);
   headers.forEach((header, i) => {
     const key = header.trim();
-    if (Object.prototype.hasOwnProperty.call(columns, key)) fileError('表头重复：' + header);
+    if (Object.prototype.hasOwnProperty.call(columns, key))
+      fileError('表头重复：' + (sampleColumnLabels[key] ?? header));
     columns[key] = columnName(i);
   });
   if (!columns.input_json && columns.query) columns.input_json = columns.query;
@@ -243,7 +269,11 @@ interface TableRow {
   source: Source;
   formulas?: { field: string; column: string }[];
 }
-function csvRows(text: string, report: Diagnostics): TableRow[] {
+function csvRows(
+  text: string,
+  report: Diagnostics,
+  headerNames: 'original' | 'dataset' = 'original',
+): TableRow[] {
   const records: { values: string[]; line: number }[] = [];
   let row: string[] = [],
     field = '',
@@ -302,11 +332,12 @@ function csvRows(text: string, report: Diagnostics): TableRow[] {
     new Set(headers).size !== headers.length
   )
     fileError('CSV 表头为空或重复');
-  const columns = columnsFor(headers);
+  const keys = headerNames === 'dataset' ? headers.map(tableHeaderKey) : headers;
+  const columns = columnsFor(keys);
   if (records.length > 2000) fileError('请选择 1—2000 行样本');
   const result: TableRow[] = [];
   records.forEach((record, i) => {
-    const values = Object.fromEntries(headers.map((h, j) => [h, record.values[j]]));
+    const values = Object.fromEntries(keys.map((key, j) => [key, record.values[j]]));
     const sampleName = String(values[sampleNameHeader(values)] ?? '').trim();
     const source: Source = {
       path: 'records[' + i + ']',
@@ -447,7 +478,7 @@ export function rowsToSamples(rows: Record<string, unknown>[]): EvaluationCase[]
   return tableSamples(
     rows.map((row, i) => {
       const values = Object.fromEntries(
-        Object.entries(row).map(([key, value]) => [key.trim(), value]),
+        Object.entries(row).map(([header, value]) => [tableHeaderKey(header), value]),
       );
       return {
         values,
@@ -455,7 +486,7 @@ export function rowsToSamples(rows: Record<string, unknown>[]): EvaluationCase[]
           path: 'records[' + i + ']',
           sampleKey: 'row:' + (i + 2),
           row: i + 2,
-          columns: columnsFor(Object.keys(row)),
+          columns: columnsFor(Object.keys(row).map(tableHeaderKey)),
           invalid: new Set(),
         },
       };
@@ -592,7 +623,7 @@ export async function parseSampleFile(file: {
     if (/\.csv$/i.test(file.name)) {
       const report = diagnostics();
       return tableSamples(
-        csvRows(new TextDecoder('utf-8', { fatal: true }).decode(bytes), report),
+        csvRows(new TextDecoder('utf-8', { fatal: true }).decode(bytes), report, 'dataset'),
         report,
       );
     }
@@ -619,7 +650,8 @@ export async function parseSampleFile(file: {
       });
       if (!headers.length || new Set(headers).size !== headers.length)
         fileError('Excel 表头为空或重复');
-      const columns = columnsFor(headers),
+      const keys = headers.map(tableHeaderKey);
+      const columns = columnsFor(keys),
         report = diagnostics(),
         rows: TableRow[] = [];
       sheet.eachRow((row, number) => {
@@ -633,17 +665,16 @@ export async function parseSampleFile(file: {
           columns,
           invalid: new Set(),
         };
-        headers.forEach((header, j) => {
-          values[header.trim()] = row.getCell(j + 1).text;
+        keys.forEach((key, j) => {
+          values[key] = row.getCell(j + 1).text;
         });
         const nameHeader = sampleNameHeader(values);
         source.sampleKey = values.case_id ? 'id:' + String(values.case_id) : 'row:' + rows.length;
         const order = Number(values.turn_order);
         if (Number.isInteger(order) && order > 0) source.turn = order;
         const formulas: { field: string; column: string }[] = [];
-        headers.forEach((header, j) => {
+        keys.forEach((key, j) => {
           if (!row.getCell(j + 1).formula) return;
-          const key = header.trim();
           let field = Object.keys(fieldColumns).find((name) => fieldColumns[name] === key) ?? key;
           if (key === 'query') field = 'input';
           if (sampleNameHeaders.includes(key)) field = 'name';

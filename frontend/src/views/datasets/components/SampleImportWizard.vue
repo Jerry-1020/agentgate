@@ -418,21 +418,20 @@ function close() {
         <details>
           <summary>Excel / CSV 字段填写说明</summary>
           <p>
-            Excel 填写 Cases 表；CSV 使用 UTF-8 编码和英文逗号分列。每行一轮对话，相同 case_id
-            合并为一个样本，case_name 必须一致；turn_order 填不重复的正整数并决定轮次顺序。
+            Excel 填写 Cases 表。CSV 使用 UTF-8 编码和英文逗号分列。模板使用中文表头，已有英文表头文件也可导入。
+            每行一轮对话，相同样本编号合并为一个样本，样本名称必须一致。轮次顺序填不重复的正整数并决定轮次顺序。
           </p>
           <p>
-            必填：case_name（样本名称）、input_json（输入对象的 JSON 文本）。case_id
-            留空时每行创建独立样本。
+            样本名称和输入内容必填，输入内容填写 JSON 对象。样本编号留空时每行创建独立样本。
           </p>
           <p>
-            测评项：expectations_json 填 JSON 数组，无规则检查时填
+            期望结果填 JSON 数组，无规则检查时填
             []。一轮可包含多个不同类型的测评项。
           </p>
           <p>
-            选填：category（positive / negative / boundary，默认 positive）、difficulty（easy /
+            可选字段包括样本分类（positive / negative / boundary，默认 positive）、难度（easy /
             medium / hard，默认
-            medium）、tags_json（标签数组）、case_notes（样本备注）、initial_state_json（初始状态对象）、turn_id（轮次标识）、turn_notes（轮次备注）。同一样本的这些样本级字段请保持一致。
+            medium）、标签（JSON 数组）、样本备注、初始状态（JSON 对象）、轮次编号和轮次备注。同一样本的样本级字段请保持一致。
           </p>
           <p>
             CSV

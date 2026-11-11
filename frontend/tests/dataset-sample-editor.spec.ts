@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page, type Route } from '@playwright/t
 import { createServer, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -181,7 +182,9 @@ function sample(kind: Kind) {
 }
 
 async function open(page: Page, kind?: Kind) {
-  const created = await page.request.post(baseUrl + '/api/datasets', { data: { name: 'Sample editor acceptance' } });
+  const created = await page.request.post(baseUrl + '/api/datasets', {
+    data: { name: 'Sample editor acceptance ' + randomUUID() },
+  });
   expect(created.status()).toBe(201);
   const datasetId = (await created.json()).data.dataset.id as string;
   if (kind) {

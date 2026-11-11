@@ -1,4 +1,4 @@
-﻿"case_id","case_name","category","difficulty","tags_json","case_notes","initial_state_json","turn_id","turn_order","input_json","expectations_json","turn_notes"
+﻿"样本编号","样本名称","样本分类","难度","标签","样本备注","初始状态","轮次编号","轮次顺序","输入内容","期望结果","轮次备注"
 "sample-001","低风险申请：状态与工具","positive","medium","[""导入模板"",""低风险"",""基础编排""]","本地贷款测试 Agent 示例；test-policy-v1；发布后在测评任务中选择基础编排 Agent 和相应评估器。","{""customer"":""test-low""}","sample-001-t1","1","{""txt"":""我要申请8万元贷款，用途是购买农机。""}","[
   {""name"":""最终状态"",""kind"":""state"",""path"":""status"",""condition"":{""kind"":""equals"",""expected"":""approved""}},
   {""name"":""必须调用 submit_application"",""kind"":""tool_call"",""tool"":""submit_application"",""mode"":""required""},

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { webcrypto } from 'node:crypto';
+import ExcelJS from 'exceljs';
 import {
   blankSample,
   parseSampleFile,
@@ -25,6 +26,11 @@ const version = {
 for (const { value: format } of sampleFileFormats)
   test('workflow initialization and typed multi-turn inputs survive ' + format, async () => {
     const sample = blankSample('Workflow business inputs');
+    sample.category = 'boundary';
+    sample.difficulty = 'hard';
+    sample.tags = ['中文', '多轮'];
+    sample.notes = '样本备注';
+    sample.turns[0].notes = '第一轮备注';
     sample.initial_state = {
       config_variables: [
         { name: 'centreId', value: '810000' },
@@ -40,6 +46,7 @@ for (const { value: format } of sampleFileFormats)
       ...structuredClone(sample.turns[0]),
       id: crypto.randomUUID(),
       input: { user_input_text: '第二轮', collected_data: {} },
+      notes: '第二轮备注',
     });
     const before = JSON.stringify(sample);
     const blob = await sampleExportBlob({ ...version, cases: [sample] }, undefined, format);
@@ -49,10 +56,33 @@ for (const { value: format } of sampleFileFormats)
       arrayBuffer: () => blob.arrayBuffer(),
     });
     expect(parsed[0].initial_state).toEqual(sample.initial_state);
+    expect(parsed[0]).toMatchObject({
+      name: sample.name, category: 'boundary', difficulty: 'hard', tags: ['中文', '多轮'],
+      notes: '样本备注',
+    });
     expect(parsed[0].turns.map((turn) => turn.input)).toEqual(
       sample.turns.map((turn) => turn.input),
     );
+    expect(parsed[0].turns.map((turn) => turn.notes)).toEqual(['第一轮备注', '第二轮备注']);
     expect(JSON.stringify(sample)).toBe(before);
+  });
+
+for (const format of ['xlsx', 'csv'] as const)
+  test(format + ' exports the same 12 Chinese headers as the downloadable templates', async () => {
+    const expected = [
+      '样本编号', '样本名称', '样本分类', '难度', '标签', '样本备注', '初始状态',
+      '轮次编号', '轮次顺序', '输入内容', '期望结果', '轮次备注',
+    ];
+    const blob = await sampleExportBlob(version, [a.id], format);
+    if (format === 'csv') {
+      const headers = (await blob.text()).replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0]
+        .split(',').map((header) => header.replace(/^"|"$/g, ''));
+      expect(headers).toEqual(expected);
+    } else {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(await blob.arrayBuffer());
+      expect((workbook.getWorksheet('Cases')!.getRow(1).values as string[]).slice(1)).toEqual(expected);
+    }
   });
 test('selected exports preserve expectations and never impersonate published version hashes', () => {
   const before = JSON.stringify(version),

@@ -16,6 +16,73 @@ const file = (name: string, bytes: Uint8Array) => ({
   size: bytes.length,
   arrayBuffer: async () => Uint8Array.from(bytes).buffer,
 });
+const chineseHeaders = [
+  '样本编号', '样本名称', '样本分类', '难度', '标签', '样本备注', '初始状态',
+  '轮次编号', '轮次顺序', '输入内容', '期望结果', '轮次备注',
+];
+const englishHeaders = [
+  'case_id', 'case_name', 'category', 'difficulty', 'tags_json', 'case_notes',
+  'initial_state_json', 'turn_id', 'turn_order', 'input_json', 'expectations_json', 'turn_notes',
+];
+async function tableFile(format: 'xlsx' | 'csv', headers: string[], rows: (string | number)[][]) {
+  if (format === 'csv') {
+    const text = [headers, ...rows]
+      .map((row) => row.map((value) => '"' + String(value).replace(/"/g, '""') + '"').join(','))
+      .join('\r\n');
+    return file('sample.csv', strToU8('\uFEFF' + text));
+  }
+  const workbook = new ExcelJS.Workbook();
+  workbook.addWorksheet('Cases').addRows([headers, ...rows]);
+  return file('sample.xlsx', new Uint8Array(await workbook.xlsx.writeBuffer()));
+}
+
+for (const format of ['xlsx', 'csv'] as const) {
+  test(format + ' Chinese headers preserve all fields and sorted multi-turn expectations', async () => {
+    const expectations = [{
+      name: '嵌套输出', kind: 'output', path: null,
+      condition: { kind: 'equals', expected: { values: [0, false, null, '中文'] } },
+    }];
+    const row = (order: number) => [
+      'case-shared', '中文样本', 'boundary', 'hard', '["中文","多轮"]', '样本备注',
+      '{"config_variables":[{"name":"enabled","value":false}]}', 'turn-' + order, order,
+      JSON.stringify({ txt: '第' + order + '轮', nested: { amount: 0, enabled: false } }),
+      JSON.stringify(expectations), '轮次备注' + order,
+    ];
+    const rows = [row(2), row(1)];
+    const english = await parseSampleFile(await tableFile(format, englishHeaders, rows));
+    const chinese = await parseSampleFile(await tableFile(format, chineseHeaders, rows));
+    const content = (samples: typeof english) => samples.map(toApiCase).map(({ id, turns, ...sample }) => ({
+      ...sample,
+      turns: turns.map(({ id, expectations, ...turn }) => ({
+        ...turn,
+        expectations: expectations.map(({ id, ...expectation }) => expectation),
+      })),
+    }));
+    expect(content(chinese)).toEqual(content(english));
+    expect(chinese).toHaveLength(1);
+    expect(chinese[0]).toMatchObject({
+      name: '中文样本', category: 'boundary', difficulty: 'hard', tags: ['中文', '多轮'],
+      notes: '样本备注', initial_state: { config_variables: [{ name: 'enabled', value: false }] },
+    });
+    expect(chinese[0].turns.map((turn) => turn.input.txt)).toEqual(['第1轮', '第2轮']);
+    expect(chinese[0].turns.map((turn) => turn.notes)).toEqual(['轮次备注1', '轮次备注2']);
+    expect(content(chinese)[0].turns[0].expectations).toEqual(expectations);
+  });
+
+  test(format + ' rejects duplicate Chinese and English input columns', async () => {
+    const input = await tableFile(format, ['样本名称', 'input_json', '输入内容'], [
+      ['中文样本', '{"txt":"hello"}', '{"txt":"你好"}'],
+    ]);
+    await expect(parseSampleFile(input)).rejects.toThrow(/表头.*重复/);
+  });
+}
+
+test('parseCsv preserves the original trimmed Chinese headers', () => {
+  expect(parseCsv(' 样本名称 , 输入内容 \n中文样本,"{""txt"":""你好""}"')).toEqual([
+    { 样本名称: '中文样本', 输入内容: '{"txt":"你好"}' },
+  ]);
+});
+
 test('CSV handles BOM, quotes, commas, multiline and rejects malformed input', () => {
   expect(parseCsv('\uFEFFcase_name,query\r\na,"hello,\n""world"""')[0]).toEqual({
     case_name: 'a',
@@ -117,10 +184,20 @@ test('downloadable template imports single and multi-turn cases with documented 
   const data = workbook.getWorksheet('Cases')!;
   const guide = workbook.getWorksheet('填写说明')!;
   const examples = workbook.getWorksheet('测评项示例')!;
+  expect((data.getRow(1).values as string[]).slice(1)).toEqual(chineseHeaders);
   expect(guide).toBeTruthy();
   expect(examples).toBeTruthy();
   const guidance = JSON.stringify(guide.getSheetValues());
   data.getRow(1).eachCell((cell) => expect(guidance).toContain(cell.text));
+});
+
+test('downloadable CSV template uses the same 12 Chinese headers', () => {
+  const csv = readFileSync(
+    new URL('../src/assets/dataset-import-template.csv', import.meta.url), 'utf8',
+  );
+  const headers = csv.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0]
+    .split(',').map((header) => header.replace(/^"|"$/g, ''));
+  expect(headers).toEqual(chineseHeaders);
 });
 
 test('JSON and CSV templates match the complete Excel sample content', async () => {
