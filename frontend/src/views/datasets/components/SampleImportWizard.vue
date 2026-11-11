@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import SampleEditor from './SampleEditor.vue';
 import { datasetApi } from '../../../api/datasets';
 import { request } from '../../../api/evaluations';
 import { annotationTasks } from '../../../stores/review-assets';
-import { parseSampleFile, blankSample, sampleFileFormats } from '../utils/sample-import';
+import {
+  parseSampleFile,
+  blankSample,
+  sampleFileFormats,
+  SampleImportError,
+} from '../utils/sample-import';
 import importTemplateUrl from '../../../assets/dataset-import-template.xlsx?url';
 import jsonTemplateUrl from '../../../assets/dataset-import-template.json?url';
 import csvTemplateUrl from '../../../assets/dataset-import-template.csv?url';
@@ -53,6 +58,22 @@ const method = ref('manual'),
   taskId = ref(''),
   selected = ref<string[]>([]),
   saved = ref(0);
+const selectedFile = ref<{ name: string; size: number } | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const validationSummary = ref<HTMLElement | null>(null);
+const importFailure = ref<SampleImportError | null>(null);
+const fileFailure = ref('');
+const hasImportErrors = computed(() => !!importFailure.value || !!fileFailure.value);
+const importIssues = computed(() => importFailure.value?.issues ?? []);
+const totalImportIssues = computed(() => importFailure.value?.totalIssues ?? 0);
+const fileLevelFailure = computed(() => fileFailure.value || importFailure.value?.fileLevel);
+const turnCount = computed(() => items.value.reduce((n, item) => n + item.turns.length, 0));
+const fileDescription = computed(() => {
+  if (!selectedFile.value) return '';
+  const format = selectedFile.value.name.split('.').pop()?.toUpperCase() || '文件';
+  const size = Math.max(1, Math.ceil(selectedFile.value.size / 1024));
+  return format + ' · ' + size + ' KB';
+});
 const task = computed(() =>
   annotationTasks.value.find((t) => t.id === taskId.value && !t.deletedAt),
 );
@@ -81,6 +102,9 @@ function reset() {
   items.value = [];
   error.value = '';
   saved.value = 0;
+  selectedFile.value = null;
+  importFailure.value = null;
+  fileFailure.value = '';
   done.clear();
 }
 const manualItem = ref<EvaluationCase>(blankSample(''));
@@ -104,16 +128,26 @@ function previous() {
   reset();
 }
 async function fileChanged(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0];
-  reset();
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
   if (!file) return;
+  // Allow selecting a corrected file with the same name on the next attempt.
+  input.value = '';
+  reset();
+  selectedFile.value = { name: file.name, size: file.size };
   busy.value = true;
   try {
     items.value = await parseSampleFile(file);
   } catch (e) {
-    error.value = String(e);
+    if (e instanceof SampleImportError) importFailure.value = e;
+    else fileFailure.value = e instanceof Error ? e.message : String(e);
   } finally {
     busy.value = false;
+    await nextTick();
+    if (hasImportErrors.value) {
+      validationSummary.value?.focus({ preventScroll: true });
+      validationSummary.value?.scrollIntoView({ block: 'nearest' });
+    }
   }
 }
 async function readAnnotations() {
@@ -185,7 +219,7 @@ async function readAnnotations() {
   }
 }
 async function save() {
-  if (!items.value.length || busy.value) return;
+  if (!items.value.length || busy.value || hasImportErrors.value) return;
   busy.value = true;
   error.value = '';
   try {
@@ -224,7 +258,7 @@ function close() {
     :model-value="true"
     title="新增样本"
     class="sample-wizard-dialog"
-    width="min(800px,96vw)"
+    :width="method === 'file' && step === 2 ? 'min(1040px,96vw)' : 'min(800px,96vw)'"
     :close-on-click-modal="false"
     :show-close="!busy"
     :close-on-press-escape="!busy"
@@ -237,7 +271,92 @@ function close() {
         ><b :class="{ active: step === 3 }">3 完成</b>
       </div>
       <h3>{{ datasetName }} · 新增样本</h3>
-      <section v-if="method === 'file' && step === 2" class="import-template">
+      <section v-if="method === 'file' && step === 2" class="file-import">
+        <div v-if="selectedFile" class="uploaded-file">
+          <div class="uploaded-file-info">
+            <strong>{{ selectedFile.name }}</strong
+            ><span>{{ fileDescription }}</span>
+          </div>
+          <button class="secondary" :disabled="busy || saved > 0" @click="fileInput?.click()">
+            重新上传
+          </button>
+        </div>
+        <label v-show="!selectedFile" class="file-picker">
+          选择文件
+          <input
+            ref="fileInput"
+            type="file"
+            :accept="acceptedFiles"
+            aria-label="样本导入文件"
+            :disabled="busy || saved > 0"
+            @change="fileChanged"
+          />
+        </label>
+        <p v-if="!selectedFile" class="file-hint">
+          支持 Excel (.xlsx)、JSON、CSV，也可上传导出的样本文件。文件不超过 10MB，最多 1000
+          个样本；Excel / CSV 最多 2000 行数据。
+        </p>
+        <div
+          v-if="hasImportErrors || (items.length && !busy)"
+          ref="validationSummary"
+          data-testid="import-validation-summary"
+          class="import-summary"
+          tabindex="-1"
+          :class="hasImportErrors ? 'import-summary-error' : 'import-summary-success'"
+          :role="hasImportErrors ? 'alert' : 'status'"
+        >
+          <template v-if="hasImportErrors">
+            <strong v-if="fileLevelFailure">无法读取这个文件</strong>
+            <strong v-else
+              >发现 {{ totalImportIssues }} 处错误，涉及
+              {{ importFailure?.sampleCount ?? 0 }} 个样本</strong
+            >
+            <p v-if="fileLevelFailure">{{ fileFailure || importFailure?.message }}</p>
+            <p v-else>请按下方位置修正文件后重新上传，当前文件尚未写入草稿。</p>
+          </template>
+          <template v-else>
+            <strong>文件格式校验通过</strong>
+            <p>已解析 {{ items.length }} 个样本、{{ turnCount }} 轮对话，可以确认导入。</p>
+          </template>
+        </div>
+        <template v-if="importIssues.length">
+          <p class="mobile-issues-hint">左右滑动表格可查看字段和问题。</p>
+          <div class="import-issues-scroll" tabindex="0" aria-label="导入错误列表，可滚动查看更多">
+            <table aria-label="导入错误明细" class="import-issues-table">
+              <thead>
+                <tr>
+                  <th>样本错误位置</th>
+                  <th>样本及轮次</th>
+                  <th>字段</th>
+                  <th>问题与修改建议</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(issue, index) in importIssues" :key="index">
+                  <td>
+                    <code>{{ issue.location }}</code>
+                  </td>
+                  <td>
+                    <span>{{ issue.sampleName || issue.sampleKey || '未命名样本' }}</span
+                    ><small v-if="issue.turn != null">第 {{ issue.turn }} 轮</small>
+                  </td>
+                  <td>{{ issue.field }}</td>
+                  <td>{{ issue.message }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="totalImportIssues > importIssues.length" class="issue-limit">
+            共 {{ totalImportIssues }} 处错误，仅展示前
+            {{ importIssues.length }} 处。请修正后重新上传，继续查看剩余问题。
+          </p>
+          <p class="file-hint">
+            行号与原文件一致，可直接在 Excel 中定位对应单元格；JSON 使用字段路径定位。
+          </p>
+        </template>
+      </section>
+      <details v-if="method === 'file' && step === 2" class="import-template" :open="!selectedFile">
+        <summary>模板下载与填写说明</summary>
         <div class="template-downloads">
           <a
             :href="importTemplateUrl"
@@ -322,7 +441,7 @@ function close() {
           </p>
           <p>导入时会生成新的样本、轮次和测评项 ID；重复导入会新增样本。</p>
         </details>
-      </section>
+      </details>
       <div v-if="step === 1" class="methods">
         <button
           v-for="m in [
@@ -356,21 +475,7 @@ function close() {
           @save="saveManual"
           @dirty-change="manualDirty = $event"
         />
-        <template v-else-if="method === 'file'"
-          ><label
-            >选择文件<input
-              type="file"
-              :accept="acceptedFiles"
-              aria-label="样本导入文件"
-              :disabled="busy || saved > 0"
-              @change="fileChanged"
-          /></label>
-          <p>
-            支持 Excel (.xlsx)、JSON、CSV，也可直接上传导出的样本文件。文件不超过 10MB，最多 1000
-            个样本；Excel / CSV 最多 2000 行数据。
-          </p></template
-        >
-        <template v-else
+        <template v-else-if="method === 'annotation'"
           ><label
             >标注模板<select
               v-model="taskId"
@@ -459,6 +564,17 @@ function close() {
     </div>
     <template #footer
       ><div class="wizard-actions">
+        <span
+          v-if="step === 2 && method === 'file' && hasImportErrors"
+          class="import-footer-error"
+          role="status"
+        >
+          {{
+            fileLevelFailure
+              ? '请重新上传可读取的文件'
+              : '请先修正 ' + totalImportIssues + ' 处错误'
+          }}
+        </span>
         <button class="secondary" :disabled="busy" @click="close">
           {{ step === 3 ? '返回数据样本' : '取消' }}</button
         ><button v-if="step === 1" class="primary" @click="next">下一步</button
@@ -472,7 +588,12 @@ function close() {
             @click="manualEditor?.save()"
           >
             {{ busy ? '保存中…' : '保存样本' }}</button
-          ><button v-else class="primary" :disabled="busy || !items.length" @click="save">
+          ><button
+            v-else
+            class="primary"
+            :disabled="busy || !items.length || hasImportErrors"
+            @click="save"
+          >
             {{ saved ? '继续导入' : '确认导入到草稿' }}
           </button></template
         >
@@ -481,6 +602,116 @@ function close() {
   </el-dialog>
 </template>
 <style scoped>
+.file-import {
+  margin: 16px 0;
+}
+.uploaded-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid #dce4e7;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+.uploaded-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.uploaded-file strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.uploaded-file span,
+.import-issues-table small {
+  color: #7b8aa0;
+  font-size: 12px;
+}
+.uploaded-file button {
+  flex-shrink: 0;
+}
+.import-summary {
+  position: sticky;
+  top: -14px;
+  z-index: 2;
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.import-summary:focus-visible {
+  outline: 2px solid #008b76;
+  outline-offset: 2px;
+}
+.import-summary-error {
+  color: #a52f35;
+  background: #fff3f3;
+  border-color: #f1c3c6;
+}
+.import-summary-success {
+  color: #087665;
+  background: #effaf6;
+  border-color: #bde5d7;
+}
+.sample-wizard .import-summary p {
+  margin: 5px 0 0;
+  color: inherit;
+}
+.import-issues-scroll {
+  overflow: auto;
+  max-height: min(260px, 28vh);
+  border: 1px solid #e5e8ec;
+  border-radius: 8px;
+  overscroll-behavior: contain;
+}
+.mobile-issues-hint {
+  display: none;
+}
+.sample-wizard .import-issues-table {
+  margin-top: 0;
+  table-layout: fixed;
+}
+.import-issues-table th,
+.import-issues-table td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  line-height: 1.6;
+}
+.import-issues-table th {
+  position: sticky;
+  top: 0;
+  background: #f6f8fa;
+}
+.import-issues-table th:nth-child(1) {
+  width: 20%;
+}
+.import-issues-table th:nth-child(2) {
+  width: 20%;
+}
+.import-issues-table th:nth-child(3) {
+  width: 16%;
+}
+.import-issues-table small {
+  display: block;
+  margin-top: 4px;
+}
+.import-issues-table code {
+  font-size: 12px;
+}
+.sample-wizard .issue-limit,
+.import-footer-error {
+  color: #a52f35;
+  font-size: 12px;
+}
+.import-footer-error {
+  margin-right: auto;
+  text-align: left;
+  align-self: center;
+}
 .import-template {
   padding: 14px 18px;
   margin: 14px 0;
@@ -500,6 +731,12 @@ function close() {
 .import-template details {
   margin-top: 12px;
   font-size: 13px;
+}
+.import-template > summary {
+  margin: 0 0 8px;
+}
+.import-template:not([open]) > summary {
+  margin-bottom: 0;
 }
 .import-template summary {
   cursor: pointer;
@@ -618,6 +855,21 @@ td {
   padding: 30px;
 }
 @media (max-width: 760px) {
+  .mobile-issues-hint {
+    display: block;
+  }
+  .wizard-actions {
+    flex-wrap: wrap;
+  }
+  .import-footer-error {
+    flex-basis: 100%;
+  }
+  .import-issues-table {
+    min-width: 620px;
+  }
+  .uploaded-file {
+    padding: 10px;
+  }
   .wizard-actions button {
     padding: 0 10px;
   }
