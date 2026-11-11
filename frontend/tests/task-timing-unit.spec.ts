@@ -4,7 +4,7 @@ import { http } from '../src/utils/request';
 import { pinia } from '../src/stores';
 import { useAuthStore } from '../src/stores/modules/auth';
 import { useTaskTimings } from '../src/views/evaluation/composables/use-task-timings';
-import { taskTiming } from '../src/views/evaluation/utils/task-timing';
+import { formatTaskDuration, taskTiming } from '../src/views/evaluation/utils/task-timing';
 import type { TaskListSummary } from '../src/api/evaluation-summaries';
 
 const renderer = createRenderer({
@@ -204,4 +204,16 @@ test('failed supplementary reads keep historical rows and can be retried without
     if (descriptor) Object.defineProperty(globalThis, 'document', descriptor);
     else Reflect.deleteProperty(globalThis, 'document');
   }
+});
+
+test('formatTaskDuration scales durations from seconds up to hours without milliseconds', () => {
+  expect(formatTaskDuration(0)).toBe('不足 1 秒');
+  expect(formatTaskDuration(400)).toBe('不足 1 秒');
+  expect(formatTaskDuration(1400)).toBe('1 秒');
+  expect(formatTaskDuration(59400)).toBe('59 秒');
+  expect(formatTaskDuration(60000)).toBe('1 分 0 秒');
+  expect(formatTaskDuration(83456)).toBe('1 分 23 秒');
+  expect(formatTaskDuration(3599400)).toBe('59 分 59 秒');
+  expect(formatTaskDuration(3600000)).toBe('1 小时 0 分 0 秒');
+  expect(formatTaskDuration(7383400)).toBe('2 小时 3 分 3 秒');
 });

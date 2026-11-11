@@ -19,18 +19,19 @@ import {
   scoreColumns,
   columnScore,
   sampleSummary,
-  downloadCsv,
   displayValue,
   groupEvaluatorResults,
 } from '../utils/task-report';
 import ResultEvaluationCard from './ResultEvaluationCard.vue';
 import RerunDialog from './RerunDialog.vue';
+import TaskExportDialog from './TaskExportDialog.vue';
 import BaselineComparisonDialog from './BaselineComparisonDialog.vue';
 import { ElMessage } from 'element-plus';
 import TraceExplorer from './TraceExplorer.vue';
 import TaskExecutionFlow from './TaskExecutionFlow.vue';
 import { sameJson } from '../utils/report-presentation';
 import { taskTitle } from '../utils/dashboard-data';
+import { formatTaskDuration } from '../utils/task-timing';
 const detailTabs = [
   ['results', '执行结果'],
   ['flow', '执行流程'],
@@ -81,8 +82,7 @@ const sampleId = computed(() =>
   scenario = ref('');
 const traces = ref<Record<string, Trace>>({}),
   traceErrors = ref<Record<string, string>>({}),
-  exporting = ref(false),
-  exportError = ref('');
+  exportDialog = ref(false);
 const resourceItems = shallowRef<Record<string, SampleResourceUsage>>({});
 const resourceError = ref('');
 const resourceLoading = ref(false);
@@ -97,7 +97,7 @@ function resourceText(id: string, field: 'tokens' | 'duration') {
   if (resourceError.value) return '加载失败';
   if (!item) return resourceLoading.value ? '加载中…' : '未采集';
   if (field === 'duration')
-    return item.duration_ms === null ? '未记录' : `${(item.duration_ms / 1000).toFixed(3)} 秒`;
+    return item.duration_ms === null ? '未记录' : formatTaskDuration(item.duration_ms);
   return item.total_tokens === null
     ? '未采集'
     : `${item.total_tokens.toLocaleString()}${item.token_status === 'partial' ? '（部分）' : ''}`;
@@ -350,53 +350,6 @@ function visibilityChanged() {
   clearTimeout(timer);
   if (!document.hidden) void load();
 }
-async function exportRows() {
-  if (exporting.value) return;
-  exporting.value = true;
-  exportError.value = '';
-  const rows = [...filtered.value];
-  try {
-    const loaded = await loadResources();
-    if (!loaded) {
-      exportError.value = '资源统计读取失败，未导出；请重试。';
-      return;
-    }
-    if (disposed) return;
-    downloadCsv(
-      [
-        [
-          '用户输入',
-          '场景',
-          '状态',
-          '综合分',
-          ...columns.value.map((c) => c.name),
-          '总 Token',
-          'Token 完整性',
-          '总耗时（秒）',
-        ],
-        ...rows.map((c: any) => [
-          displayValue(c.turns[0]?.input),
-          c.tags.join('、'),
-          statusLabel(summary(c.id).outcome),
-          score(summary(c.id).score),
-          ...columns.value.map((col) => score(columnScore(caseResults(c.id), col))),
-          resourceItems.value[c.id]?.total_tokens ?? null,
-          resourceItems.value[c.id]?.token_status === 'partial'
-            ? '部分'
-            : resourceItems.value[c.id]?.token_status === 'available'
-              ? '已采集'
-              : '未采集',
-          resourceItems.value[c.id]?.duration_ms == null
-            ? null
-            : resourceItems.value[c.id].duration_ms! / 1000,
-        ]),
-      ],
-      `测评结果-${props.id}.csv`,
-    );
-  } finally {
-    exporting.value = false;
-  }
-}
 onMounted(() => {
   document.addEventListener('visibilitychange', visibilityChanged);
   void load();
@@ -422,6 +375,21 @@ watch(sampleId, () => {
 </script>
 <template>
   <div class="task-results">
+    <TaskExportDialog
+      v-if="exportDialog && data"
+      :request="{
+        runIds: [id],
+        taskId: associatedTask?.id,
+        taskName: associatedTask?.name,
+        runSide:
+          associatedTask?.kind === 'ab'
+            ? associatedTask.runIds[0] === id
+              ? 'A任务'
+              : 'B任务'
+            : undefined,
+      }"
+      @close="exportDialog = false"
+    />
     <div class="breadcrumbs">
       <button class="link" @click="emit('navigate', 'tasks')">测评任务</button><span>/</span
       ><button class="link" @click="back">任务详情</button
@@ -543,8 +511,13 @@ watch(sampleId, () => {
             ><select class="input" v-model="scenario" aria-label="样本场景">
               <option value="">全部场景</option>
               <option v-for="(s, rowIndex1) in scenarios" :key="rowIndex1">{{ s }}</option></select
-            ><button class="secondary export" :disabled="exporting" @click="exportRows">
-              {{ exporting ? '正在准备导出…' : '导出 CSV' }}
+            ><button
+              class="secondary export"
+              :disabled="!terminalStatus(progress.status)"
+              :title="!terminalStatus(progress.status) ? '任务结束后可导出' : undefined"
+              @click="exportDialog = true"
+            >
+              导出 Excel
             </button>
           </div>
           <p v-if="resourceError" class="notice warn" role="status">
@@ -553,7 +526,7 @@ watch(sampleId, () => {
               重试资源统计
             </button>
           </p>
-          <p v-if="exportError" class="notice error" role="alert">{{ exportError }}</p>
+
           <div
             class="table-wrap sample-results-scroll"
             role="region"

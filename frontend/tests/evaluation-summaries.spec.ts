@@ -93,15 +93,17 @@ test('overview polls every 10 seconds and resumes immediately after visibility c
   expect(calls).toHaveLength(6);
 });
 
-test('task pagination, debounce, selection, kind and local dates retain the summary query',async({page})=>{
+test('task pagination, debounce, kind and local dates retain the summary query',async({page})=>{
   const calls=await setup(page,[row()],104); await mount(page);
   await expect(page.getByText('共 104 个任务')).toBeVisible();
   expect(calls).toHaveLength(1);
-  await page.getByLabel('选择本页任务').check();
+  await expect(page.locator('.data-table').getByRole('checkbox')).toHaveCount(0);
+  await expect(page.locator('.data-table th')).toHaveText([
+    '被测Agent', '测评集', '评估方式', '进度与状态', '启动时间', '结束时间', '得分', '操作',
+  ]);
   await page.getByRole('button',{name:'下一页'}).click();
   await expect.poll(()=>calls.length).toBe(2);
   expect(calls[1].path).toContain('page=2');
-  await expect(page.getByLabel('选择本页任务')).not.toBeChecked();
   await page.getByRole('button',{name:'上一页'}).click();
   await page.getByLabel('搜索任务名称').fill('测试 %_&');
   await expect.poll(()=>calls.length).toBe(4);
@@ -121,14 +123,14 @@ test('historical tasks keep their rows when time reads fail and recover through 
   await setup(page,[{...row(),created_at:'2000-01-01T00:00:00Z'}]);
   await page.route('**/api/runs/task-1-a/samples', route=>route.fulfill({status:500,json:{detail:'Unavailable'}}));
   await mount(page);
-  await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'查看任务 task-1',exact:true})).toBeVisible();
   await expect(page.locator('.time-end')).toHaveText('读取失败');
   await expect(page.getByText('共 1 个任务')).toBeVisible();
   await page.unroute('**/api/runs/task-1-a/samples');
   await page.getByRole('button',{name:'重试时间',exact:true}).click();
   await expect(page.locator('.time-end')).toContainText('2000-01-01');
   await expect(page.locator('.time-end')).toContainText('09:05:00');
-  await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'查看任务 task-1',exact:true})).toBeVisible();
 });
 
 test('overview all-time option removes date bounds and updates historical totals', async ({ page }) => {
@@ -175,19 +177,17 @@ test('all-time tasks include older rows and preserve filters and pagination', as
   await mount(page);
   const range = page.getByRole('group', { name: '任务时间范围' });
   await expect(range.getByRole('button', { name: '近7天', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '查看任务 historical-task', exact: true })).toHaveCount(0);
   await page.getByLabel('搜索任务名称').fill('task');
   await expect.poll(() => queries.at(-1)?.get('keyword')).toBe('task');
   await page.getByRole('button', { name: 'A/B试验', exact: true }).click();
   await expect.poll(() => queries.at(-1)?.get('kind')).toBe('ab');
   await page.getByRole('button', { name: '下一页' }).click();
   await expect(page.locator('footer')).toContainText('2 / 2');
-  await page.getByLabel('选择本页任务').check();
 
   await range.getByRole('button', { name: '全部', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看任务 historical-task', exact: true })).toBeVisible();
   await expect(page.locator('footer')).toContainText('1 / 3');
-  await expect(page.getByLabel('选择本页任务')).not.toBeChecked();
   expect(Object.fromEntries(queries.at(-1)!)).toEqual({ page: '1', page_size: '20', keyword: 'task', kind: 'ab' });
   await expect(range.getByRole('button', { name: '全部', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
@@ -195,8 +195,8 @@ test('all-time tasks include older rows and preserve filters and pagination', as
   await expect(page.locator('footer')).toContainText('2 / 3');
   expect(Object.fromEntries(queries.at(-1)!)).toEqual({ page: '2', page_size: '20', keyword: 'task', kind: 'ab' });
   await range.getByRole('button', { name: '今日', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'recent-task', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'historical-task', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '查看任务 recent-task', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看任务 historical-task', exact: true })).toHaveCount(0);
   await expect(page.locator('footer')).toContainText('1 / 2');
   expect(queries.at(-1)?.has('start_at')).toBe(true);
 });
@@ -212,7 +212,7 @@ test('A/B scores, nulls, independent and stability rows preserve presentation an
   await page.locator('.ab-summary').first().hover();
   await expect(page.locator('.ab-tooltip').first()).toContainText('Agent -b');
   await expect(page.getByText('评估器异常')).toBeVisible();
-  await page.getByRole('button',{name:'stable',exact:true}).click();
+  await page.getByRole('button',{name:'查看任务 stable',exact:true}).click();
   await expect(page.getByText('Stability',{exact:true})).toBeVisible();
 });
 
@@ -265,7 +265,7 @@ test('visibility pauses polling; active rows refresh, terminal rows stop, unmoun
   await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'));});
   await expect.poll(()=>calls.length).toBe(3);
   await page.route('**/api/evaluation-task-summaries?*',r=>r.fulfill({json:envelope({items:[row()],total:1,page:1,page_size:20})}));
-  await page.clock.fastForward(5100);await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
+  await page.clock.fastForward(5100);await expect(page.getByRole('button',{name:'查看任务 task-1',exact:true})).toBeVisible();
   const count=calls.length;await page.clock.fastForward(15000);expect(calls).toHaveLength(count);
   await page.evaluate(()=>(window as any).summaryHarness.unmount());
   await page.clock.fastForward(15000);expect(calls).toHaveLength(count);
@@ -273,7 +273,7 @@ test('visibility pauses polling; active rows refresh, terminal rows stop, unmoun
 
 test('team change clears prior data and sends five headers; old delayed responses cannot overwrite',async({page})=>{
   const calls=await setup(page);await mount(page);
-  await expect(page.getByRole('button',{name:'task-1',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'查看任务 task-1',exact:true})).toBeVisible();
   await page.route('**/api/evaluation-task-summaries?*',async route=>{
     const team=route.request().headers()['x-team-id'];
     if(team==='a') await new Promise(resolve=>setTimeout(resolve,200));
@@ -284,13 +284,13 @@ test('team change clears prior data and sends five headers; old delayed response
   const sent = await teamARequest;
   expect(sent.headers()).toMatchObject({token:'fake-token','x-team-id':'a','x-team-name':encodeURIComponent('团队'),'x-user-id':'u','x-user-name':encodeURIComponent('用户')});
   await page.evaluate(()=>(window as any).summaryHarness.auth({teamId:'b'}));
-  await expect(page.getByRole('button',{name:'b',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'查看任务 b',exact:true})).toBeVisible();
   await page.waitForTimeout(300);
-  await expect(page.getByRole('button',{name:'a',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'查看任务 a',exact:true})).toHaveCount(0);
   await page.route('**/api/evaluation-task-summaries?*',r=>r.fulfill({status:503,json:{detail:'missing'}}));
   await page.evaluate(()=>(window as any).summaryHarness.auth({teamId:'c'}));
   await expect(page.getByRole('alert')).toContainText('摘要尚未就绪');
-  await expect(page.getByRole('button',{name:'b',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'查看任务 b',exact:true})).toHaveCount(0);
 });
 
 test('parent route context, A/B tabs, creation, dirty guard, logout and unknown route',async({page})=>{
@@ -420,7 +420,7 @@ test('standalone bank mode keeps the full header and logout action', async ({pag
   await expect(page.locator('.metric-value').first()).toHaveText('104');
   await expect(page.locator('.topbar')).toBeVisible();
   await expect(page.locator('.brand')).toHaveText('智能体测评中心');
-  await expect(page.locator('.mode-chip')).toContainText('Test team');
+  await expect(page.locator('.mode-chip')).toHaveCount(0);
   await expect(page.locator('.logout-btn')).toBeVisible();
   await expect(page.locator('.sidebar')).toHaveCSS('top', '64px');
 });
@@ -443,7 +443,7 @@ test('missing summaries keep task rows, real status, details and pagination', as
   await expect(task.locator('.task-score')).toHaveText('—');
   await page.getByRole('button', {name:'下一页',exact:true}).click();
   await expect(page.getByRole('button', {name:'上一页',exact:true})).toBeEnabled();
-  await page.getByRole('button', {name:'missing-summary',exact:true}).click();
+  await page.getByRole('button', {name:'查看任务 missing-summary',exact:true}).click();
   await expect(page.getByText('Detail missing-summary-a missing-summary', {exact:false})).toBeVisible();
 });
 

@@ -2,7 +2,6 @@
 withDefaults(defineProps<{
   page: string;
   online: boolean | null;
-  authLabel: string;
   hideHeader?: boolean;
 }>(), { hideHeader: false });
 defineEmits<{ logout: [] }>();
@@ -21,7 +20,6 @@ const navigation = [
     <header v-if="!hideHeader" class="topbar">
       <div class="brand">智能体测评中心</div>
       <div class="topbar-right">
-        <span class="mode-chip">{{ authLabel }}</span>
         <button type="button" class="logout-btn" @click="$emit('logout')">登出 Logout</button>
       </div>
     </header>
@@ -52,14 +50,6 @@ const navigation = [
   display: flex;
   align-items: center;
   gap: 14px;
-}
-.mode-chip {
-  background: #ffffff2b;
-  border: 1px solid #ffffff55;
-  color: #fff;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
 }
 .logout-btn {
   background: #fff;

@@ -2,7 +2,13 @@ import { test, expect, type Page } from '@playwright/test';
 import { createServer, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { fileURLToPath } from 'node:url';
-import { readFile } from 'node:fs/promises';
+import ExcelJS from 'exceljs';
+async function workbookText(path: string) {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.readFile(path);
+  return JSON.stringify(book.worksheets[0].getSheetValues());
+}
+
 
 let server: ViteDevServer;
 let url: string;
@@ -190,6 +196,7 @@ async function setup(page: Page, options: { status?: string; associationStatus?:
         created_at: now,
       });
     if (path.endsWith('/samples')) return reply({ run: run(id, status), results, complete: false });
+    if (path.endsWith('/sample-resource-usage')) return reply({items: cases.map(c => ({case_id: c.id, total_tokens: null, token_status: 'unavailable', duration_ms: 2000, duration_source: 'case_span'}))});
     if (path.includes('/traces/')) {
       const caseId = path.split('/').pop()!;
       return reply({
@@ -301,53 +308,48 @@ test('direct sample link reads only its trace and can retry an unavailable trace
   expect(state.errors).toEqual([]);
 });
 
-test('CSV waits for selected rows traces, preserves duration and does not refetch cached traces', async ({
-  page,
-}) => {
+test('full Excel automatically previews five rows and exports all executed samples regardless of the visible filter', async ({ page }) => {
   const state = await setup(page);
   await open(page);
-  await page.getByRole('button', { name: '样本详情', exact: true }).first().click();
-  await expect(page.getByText('回答 case-1', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '任务详情', exact: true }).click();
   await page.getByLabel('样本场景', { exact: true }).selectOption('A');
+  await page.getByRole('button', { name: '导出 Excel', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '导出 Excel' });
+  await expect(dialog.getByRole('table', { name: 'Excel 内容预览' }).locator('tbody tr')).toHaveCount(5);
+  await expect(dialog.getByRole('button', { name: '预览前 5 行' })).toHaveCount(0);
+  await expect(dialog).toContainText('共 7 行');
+
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出 CSV', exact: true }).click();
-  const csv = await readFile((await (await download).path())!, 'utf8');
-  expect(csv).toContain('耗时（秒）');
-  expect(csv.trim().split('\r\n')).toHaveLength(5);
-  expect(
-    csv
-      .trim()
-      .split('\r\n')
-      .slice(1)
-      .every((row) => row.endsWith(',"2"')),
-  ).toBe(true);
-  expect(
-    traces(state.calls)
-      .map((c) => c.path.split('/').pop())
-      .sort(),
-  ).toEqual(['case-1', 'case-3', 'case-5', 'case-7']);
+  await page.getByRole('button', { name: '开始导出', exact: true }).click();
+  const excel = await workbookText((await (await download).path())!);
+  expect(excel).toContain('实际输出');
+  expect(excel).toContain('样本综合得分（样本级含多轮）');
+  for (const c of cases) expect(excel).toContain(c.name);
+  expect(traces(state.calls).map((c) => c.path.split('/').pop()).sort()).toEqual(cases.map((c) => c.id));
   expect(state.errors).toEqual([]);
 });
 
-test('failed export is explicit and retry retrieves missing traces before downloading', async ({
-  page,
-}) => {
+test('missing trace is disclosed in Excel and a new export retries the evidence', async ({ page }) => {
   const state = await setup(page);
-  const downloads: string[] = [];
-  page.on('download', (d) => downloads.push(d.suggestedFilename()));
   await page.route('**/api/runs/task-run/traces/case-1', (route) =>
     route.fulfill({ status: 503, json: { detail: 'trace unavailable' } }),
   );
   await open(page);
-  await page.getByRole('button', { name: '导出 CSV', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('未导出');
-  expect(downloads).toEqual([]);
+  await page.getByRole('button', { name: '导出 Excel', exact: true }).click();
+
+  const first = page.waitForEvent('download');
+  await page.getByRole('button', { name: '开始导出', exact: true }).click();
+  const partialExcel = await workbookText((await (await first).path())!);
+  expect(partialExcel).toContain('执行轨迹读取失败');
+  await expect(page.getByText('部分证据未取得，缺失说明已写入对应行；关闭弹窗后重新导出可重试。')).toBeVisible();
   await page.unroute('**/api/runs/task-run/traces/case-1');
-  const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出 CSV', exact: true }).click();
-  await download;
-  expect(traces(state.calls)).toHaveLength(7);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  await page.getByRole('button', { name: '导出 Excel', exact: true }).click();
+
+  const retry = page.waitForEvent('download');
+  await page.getByRole('button', { name: '开始导出', exact: true }).click();
+  const completeExcel = await workbookText((await (await retry).path())!);
+  expect(completeExcel).not.toContain('执行轨迹读取失败');
+  expect(completeExcel).toContain('回答 case-1');
   expect(state.errors).toEqual([]);
 });
 

@@ -445,3 +445,21 @@ def test_historical_base_can_restore_removed_owned_child(system):
     third = publish(client, restored.json())
     assert third["definition"]["version"] == "3" and len(third["children"]) == 2
     assert third["children"][1]["definition"]["version"] == "2"
+
+
+def test_group_creation_rejects_duplicate_names_but_resave_keeps_own(system):
+    client, _, _ = system
+    draft = create(client)
+    group_id = draft["evaluator"]["id"]
+
+    duplicate = client.post("/api/evaluators/llm-groups", json=payload())
+    assert duplicate.status_code == 409
+    assert "评估器名称已存在" in duplicate.json()["detail"]
+
+    renamed = create(client, payload() | {"name": "Answer quality group 2"})
+    assert renamed["evaluator"]["id"] != group_id
+
+    resaved = client.put(
+        f"/api/evaluators/{group_id}/llm-group/draft", json=edit_payload(draft)
+    )
+    assert resaved.status_code == 200, resaved.text

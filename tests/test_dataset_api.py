@@ -102,6 +102,48 @@ def test_publish_returns_domain_validation_message(tmp_path):
         assert "requires at least one Case" in response.json()["message"]
 
 
+def test_create_and_copy_reject_duplicate_dataset_names(tmp_path):
+    with TestClient(create_app(tmp_path / "duplicate-names.db")) as client:
+        created = client.post("/api/datasets", json={"name": "同名测评集"})
+        assert created.status_code == 201
+        dataset_id = created.json()["data"]["dataset"]["id"]
+
+        duplicate = client.post("/api/datasets", json={"name": " 同名测评集 "})
+        assert duplicate.status_code == 422
+        assert "测评集名称已存在" in duplicate.json()["message"]
+        assert "同名测评集" in duplicate.json()["message"]
+
+        renamed = client.post("/api/datasets", json={"name": "同名测评集 2"})
+        assert renamed.status_code == 201
+
+        case = Case(
+            id="duplicate-case",
+            name="Duplicate Case",
+            turns=(CaseTurn(id="duplicate-turn", input={"message": "hello"}),),
+        )
+        assert (
+            client.post(
+                f"/api/datasets/{dataset_id}/drafts/cases",
+                json=case.model_dump(mode="json"),
+            ).status_code
+            == 201
+        )
+        assert (
+            client.post(f"/api/datasets/{dataset_id}/drafts/publish").status_code == 200
+        )
+
+        copied = client.post(
+            f"/api/datasets/{dataset_id}/copy", json={"name": "同名测评集"}
+        )
+        assert copied.status_code == 422
+        assert "测评集名称已存在" in copied.json()["message"]
+
+        copied_renamed = client.post(
+            f"/api/datasets/{dataset_id}/copy", json={"name": "同名测评集 副本"}
+        )
+        assert copied_renamed.status_code == 201
+
+
 def test_json_export_and_import_routes_round_trip(tmp_path):
     with TestClient(create_app(tmp_path / "exchange-source.db")) as source:
         created = source.post("/api/datasets", json={"name": "Exchange"}).json()["data"]

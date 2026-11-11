@@ -25,8 +25,7 @@ const days = ref(7),
   taskTab = ref<TaskKind | ''>(''),
   query = ref(''),
   keyword = ref(''),
-  page = ref(1),
-  checked = ref<string[]>([]);
+  page = ref(1);
 let debounce: ReturnType<typeof setTimeout> | undefined;
 watch(query, (value) => {
   clearTimeout(debounce);
@@ -38,7 +37,6 @@ watch(
   [days, taskTab, keyword],
   () => {
     page.value = 1;
-    checked.value = [];
   },
   { flush: 'sync' },
 );
@@ -46,13 +44,9 @@ watch(
   () => [auth.loginMode, auth.teamId, auth.userId, auth.token, auth.platformReady],
   () => {
     page.value = 1;
-    checked.value = [];
   },
   { flush: 'sync' },
 );
-watch(page, () => {
-  checked.value = [];
-});
 const queryState = useSummaryQuery({
   source: () => [days.value, taskTab.value, keyword.value, page.value, props.refreshToken],
   identity: () => [auth.loginMode, auth.teamId, auth.userId, auth.token, auth.platformReady],
@@ -105,7 +99,6 @@ watch(data, (value) => {
   if (!value) return;
   const last = Math.max(1, Math.ceil(value.total / 20));
   if (page.value > last) page.value = last;
-  checked.value = checked.value.filter((id) => value.items.some((row) => row.id === id));
 });
 const identityColumns = ['target', 'dataset'] as const;
 function comparisonSides(row: TaskListSummary, column: (typeof identityColumns)[number]) {
@@ -197,32 +190,17 @@ onUnmounted(() => clearTimeout(debounce));
       <div class="table-wrap">
         <table class="data-table">
           <colgroup>
-            <col style="width: 3%" />
-            <col style="width: 17%" />
-            <col style="width: 11%" />
-            <col style="width: 12%" />
+            <col style="width: 20%" />
+            <col style="width: 20%" />
+            <col style="width: 10%" />
+            <col style="width: 14%" />
             <col style="width: 10%" />
             <col style="width: 10%" />
-            <col style="width: 11%" />
-            <col style="width: 11%" />
-            <col style="width: 8%" />
-            <col style="width: 7%" />
+            <col style="width: 6%" />
+            <col style="width: 10%" />
           </colgroup>
           <thead>
             <tr>
-              <th>
-                <input
-                  type="checkbox"
-                  aria-label="选择本页任务"
-                  :checked="!!rows.length && rows.every((r) => checked.includes(r.id))"
-                  @change="
-                    checked = ($event.target as HTMLInputElement).checked
-                      ? rows.map((r) => r.id)
-                      : []
-                  "
-                />
-              </th>
-              <th>任务名称</th>
               <th>被测Agent</th>
               <th>测评集</th>
               <th>评估方式</th>
@@ -237,28 +215,6 @@ onUnmounted(() => clearTimeout(debounce));
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.id">
-              <td class="selection-cell">
-                <input
-                  type="checkbox"
-                  v-model="checked"
-                  :value="r.id"
-                  :aria-label="'选择任务 ' + r.id"
-                />
-              </td>
-              <td class="name-cell">
-                <span class="task-kind"
-                  >{{
-                    r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
-                  }}</span
-                >
-                <button class="link" :title="r.name" @click="emit('navigate', taskPath(r))">
-                  {{ r.name }}
-                </button>
-                <small v-if="r.summary_pending" role="status">{{
-                  r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新'
-                }}</small>
-                <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
-              </td>
               <td
                 v-for="column in identityColumns"
                 :key="column"
@@ -340,7 +296,17 @@ onUnmounted(() => clearTimeout(debounce));
                     :value="done(r)!.done"
                     :max="done(r)!.total || 1"
                     :class="{ failed: r.status === 'failed' }" /></template
-                ><span v-else>—</span><small>{{ statusLabel(r.status) }}</small>
+                ><span v-else>—</span>
+                <div class="status-line">
+                  <span class="task-kind">{{
+                    r.kind === 'ab' ? 'A/B试验' : r.kind === 'stability' ? '稳定性测试' : '单任务'
+                  }}</span>
+                  <small>{{ statusLabel(r.status) }}</small>
+                </div>
+                <small v-if="r.summary_pending" role="status">{{
+                  r.runs.length > 1 ? '部分摘要待更新' : '摘要待更新'
+                }}</small>
+                <small v-if="r.previous_run_count">已重跑 {{ r.previous_run_count }} 次</small>
               </td>
               <td
                 v-for="column in timeColumns"
@@ -380,7 +346,14 @@ onUnmounted(() => clearTimeout(debounce));
                   >评估器异常</small
                 >
               </td>
-              <td class="row-actions">
+              <td class="row-actions" data-label="操作">
+                <button
+                  class="link"
+                  :aria-label="'查看任务 ' + r.name"
+                  @click="emit('navigate', taskPath(r))"
+                >
+                  查看
+                </button>
                 <button
                   v-if="
                     (r.kind ?? 'single') === 'single' &&
@@ -528,18 +501,12 @@ onUnmounted(() => clearTimeout(debounce));
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.primary-text,
-.name-cell .link {
+.primary-text {
   display: block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.name-cell .link {
-  text-align: left;
-  font-weight: 500;
-  line-height: inherit;
 }
 .data-table small {
   display: block;
@@ -621,12 +588,15 @@ onUnmounted(() => clearTimeout(debounce));
   white-space: normal;
 }
 .row-actions button {
-  margin: 0 8px 0 0;
+  margin: 0 6px 0 0;
   height: auto;
   padding: 0;
   border: 0;
   font-size: 12px;
   line-height: inherit;
+}
+.row-actions button:last-child {
+  margin-right: 0;
 }
 .progress-cell {
   min-width: 0;
@@ -635,6 +605,19 @@ onUnmounted(() => clearTimeout(debounce));
   display: flex;
   justify-content: space-between;
   font-size: 12px;
+}
+.progress-cell .status-line {
+  justify-content: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 8px;
+}
+.status-line .task-kind {
+  margin-bottom: 0;
+}
+.status-line small {
+  margin-top: 0;
 }
 .progress-cell progress {
   width: 100%;
@@ -697,7 +680,7 @@ footer > span:first-child {
   }
   .data-table tbody tr {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 42px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     padding: 14px 0;
     border-bottom: 1px solid #e3ebe7;
@@ -715,35 +698,29 @@ footer > span:first-child {
     font-size: 11px;
     font-weight: 400;
   }
-  .selection-cell {
-    grid-area: 1 / 1;
-  }
-  .name-cell {
-    grid-area: 1 / 2 / 2 / 4;
-  }
   .row-actions {
-    grid-area: 1 / 4;
+    grid-area: 4 / 2;
   }
   .identity-target {
-    grid-area: 2 / 1 / 3 / 3;
+    grid-area: 1 / 1;
   }
   .identity-dataset {
-    grid-area: 2 / 3 / 3 / 5;
+    grid-area: 1 / 2;
   }
   .method-cell {
-    grid-area: 3 / 1 / 4 / 3;
+    grid-area: 2 / 1;
   }
   .progress-cell {
-    grid-area: 3 / 3 / 4 / 5;
+    grid-area: 2 / 2;
   }
   .time-start {
-    grid-area: 4 / 1 / 5 / 3;
+    grid-area: 3 / 1;
   }
   .time-end {
-    grid-area: 4 / 3 / 5 / 5;
+    grid-area: 3 / 2;
   }
   .task-score {
-    grid-area: 5 / 1 / 6 / 5;
+    grid-area: 4 / 1;
   }
   .task-score p {
     display: inline-block;

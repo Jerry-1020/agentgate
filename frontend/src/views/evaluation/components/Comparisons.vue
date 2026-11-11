@@ -4,6 +4,8 @@ import NewComparison from './NewComparison.vue';
 import RunChoice from './RunChoice.vue';
 import ComparisonRunSummary from './ComparisonRunSummary.vue';
 import ConfigurationDiff from './ConfigurationDiff.vue';
+import TaskExportDialog from './TaskExportDialog.vue';
+import { readTaskLinks } from '../utils/task-links';
 import {
   api,
   request,
@@ -59,7 +61,9 @@ async function checkPair(ticket: number) {
   if (
     ticket === pairTicket &&
     !document.hidden &&
-    !Object.values(pairStatus.value).some((s) => ['failed', 'cancelled'].includes(s)) &&
+    ![submitted.value.a, submitted.value.b].every((id) =>
+      ['completed', 'failed', 'cancelled'].includes(pairStatus.value[id]),
+    ) &&
     !pairReady.value
   )
     pairTimer = setTimeout(() => void checkPair(ticket), 5000);
@@ -251,6 +255,32 @@ async function compare() {
     if (ticket === comparisonTicket) busy.value = false;
   }
 }
+const exportDialog = ref(false);
+const exportPair = computed(() =>
+  mode.value === 'history' && baseline.value && candidate.value
+    ? { a: baseline.value, b: candidate.value }
+    : submitted.value,
+);
+const exportTask = computed(() =>
+  readTaskLinks().find(
+    (t) =>
+      t.kind === 'ab' &&
+      (props.historyTaskId
+        ? t.id === props.historyTaskId
+        : !t.historicalComparison &&
+          t.runIds[0] === exportPair.value?.a &&
+          t.runIds[1] === exportPair.value?.b),
+  ),
+);
+const canExport = computed(
+  () =>
+    !!exportPair.value &&
+    [exportPair.value.a, exportPair.value.b].every((id) =>
+      ['completed', 'failed', 'cancelled'].includes(
+        pairStatus.value[id] ?? snapshots.value[id]?.run.status,
+      ),
+    ),
+);
 const changes = computed(() => ({
   improvement: caseRows.value.filter((d) => d.change === 'improvement').length,
   regression: caseRows.value.filter((d) => d.change === 'regression').length,
@@ -283,6 +313,26 @@ const templateLabels2: Record<string, string> = {
 };
 </script>
 <template>
+  <div v-if="exportPair" class="comparison-export">
+    <button
+      class="secondary"
+      :disabled="!canExport"
+      :title="!canExport ? '两侧任务结束后可导出' : undefined"
+      @click="exportDialog = true"
+    >
+      导出 Excel
+    </button>
+  </div>
+  <TaskExportDialog
+    v-if="exportDialog && exportPair"
+    :request="{
+      runIds: [exportPair.a, exportPair.b],
+      taskId: exportTask?.id,
+      taskName: exportTask?.name || 'A/B试验',
+      historyTaskId,
+    }"
+    @close="exportDialog = false"
+  />
   <div v-if="!embedded" class="page-head">
     <div>
       <h1 class="page-title">A/B试验</h1>
@@ -464,9 +514,7 @@ const templateLabels2: Record<string, string> = {
                 <td>{{ score(group.candidate) }}</td>
                 <td :class="group.delta != null && group.delta < 0 ? 'down' : 'up'">
                   {{ delta(group.delta) }}
-                  <small v-if="group.reasons" class="comparison-reason"
-                    >{{ group.reasons }}</small
-                  >
+                  <small v-if="group.reasons" class="comparison-reason">{{ group.reasons }}</small>
                 </td>
               </tr>
               <template v-if="group.key !== 'overall' && expandedScores[group.key]">
@@ -476,9 +524,9 @@ const templateLabels2: Record<string, string> = {
                   <td>{{ score(child.candidate) }}</td>
                   <td :class="child.delta != null && child.delta < 0 ? 'down' : 'up'">
                     {{ delta(child.delta) }}
-                    <small v-if="child.reasons" class="comparison-reason"
-                      >{{ child.reasons }}</small
-                    >
+                    <small v-if="child.reasons" class="comparison-reason">{{
+                      child.reasons
+                    }}</small>
                   </td>
                 </tr>
               </template>
@@ -542,6 +590,11 @@ const templateLabels2: Record<string, string> = {
   </template>
 </template>
 <style scoped>
+.comparison-export {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0;
+}
 .comparison-reason {
   display: block;
   max-width: 320px;

@@ -84,11 +84,11 @@ def _judge_definition():
     }
 
 
-def _published_judge(client):
+def _published_judge(client, name="Saved judge"):
     response = client.post(
         "/api/evaluators",
         json={
-            "name": "Saved judge",
+            "name": name,
             "draft": _judge_definition(),
         },
     )
@@ -137,7 +137,7 @@ def test_archived_judge_stays_hidden_after_restart_and_retains_exact_history(tmp
     database_path = tmp_path / "restart.db"
     with _system(database_path) as (client, _):
         evaluator_id, version = _published_judge(client)
-        other_id, _ = _published_judge(client)
+        other_id, _ = _published_judge(client, "Surviving judge")
         assert client.delete(f"/api/evaluators/{evaluator_id}").status_code == 204
         assert client.delete(f"/api/evaluators/{evaluator_id}").status_code == 204
 

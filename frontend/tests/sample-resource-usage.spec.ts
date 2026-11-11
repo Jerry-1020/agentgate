@@ -1,5 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import ExcelJS from 'exceljs';
+async function workbookText(path: string) {
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.readFile(path);
+  return JSON.stringify(book.worksheets[0].getSheetValues());
+}
+
 const envelope = (data: unknown) => ({code:'0',message:'success',data});
 async function setup(page: Page, fail = false) {
   page.on('pageerror', error => console.error('PAGE ERROR', error.message));
@@ -29,18 +35,20 @@ async function setup(page: Page, fail = false) {
 async function mount(page: Page) {
   await page.evaluate(() => (window as any).summaryHarness.mount('/tasks/run-1','results',{id:'run-1'}));
 }
-test('resource columns and CSV use one summary, never per-sample Trace',async({page})=>{
+test('resource columns use summaries and full Excel also reads turn evidence',async({page})=>{
   const {calls}=await setup(page); await mount(page);
   await expect(page.getByRole('columnheader',{name:'总 Token'})).toBeVisible();
   await expect(page.getByRole('cell',{name:'14,351（部分）',exact:true})).toBeVisible();
   await expect(page.getByRole('cell',{name:'5.850 秒',exact:true})).toBeVisible();
   const download=page.waitForEvent('download');
-  await page.getByRole('button',{name:'导出 CSV',exact:true}).click();
+  await page.getByRole('button',{name:'导出 Excel',exact:true}).click();
+
+  await page.getByRole('button',{name:'开始导出',exact:true}).click();
   const file=await (await download).path();
-  const csv=await readFile(file!,'utf8');
-  expect(csv).toContain('14351'); expect(csv).toContain('5.85'); expect(csv).toContain('部分');
-  expect(calls.filter(p=>p.endsWith('/sample-resource-usage'))).toHaveLength(1);
-  expect(calls.some(p=>p.includes('/traces/'))).toBe(false);
+  const excel=await workbookText(file!);
+  expect(excel).toContain('14351'); expect(excel).toContain('5.85'); expect(excel).toContain('部分');
+  expect(calls.filter(p=>p.endsWith('/sample-resource-usage'))).toHaveLength(2);
+  expect(calls.some(p=>p.includes('/traces/'))).toBe(true);
 });
 test('summary failure leaves scores visible and supports independent retry',async({page})=>{
   const {state}=await setup(page,true); await mount(page);

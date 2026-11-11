@@ -227,6 +227,9 @@ class HistoryComparisonRepository:
     def get_evaluation_task(self, task_id):
         return self.tasks.get(task_id)
 
+    def list_evaluation_tasks(self):
+        return list(self.tasks.values())
+
     def get_run(self, run_id, *, user_team_id):
         run = self.runs.get(run_id)
         return run if run is not None and run.user_team_id == user_team_id else None
@@ -609,3 +612,23 @@ def test_history_result_read_reports_missing_records_instead_of_following_latest
     with pytest.raises(LookupError):
         EvaluationTaskManagement(repository).compare_task_results(task.id)
     assert "new-baseline" not in repository.result_reads
+
+
+def test_history_rejects_duplicate_names_but_allows_idempotent_resubmission():
+    repository = HistoryComparisonRepository()
+    with history_user(""):
+        task = create_history(repository, name="重复对比名称")
+        resubmitted = create_history(repository, name="重复对比名称")
+        assert resubmitted == task
+        with pytest.raises(ValueError, match="任务名称已存在"):
+            create_history(
+                repository,
+                comparison_id="history-ab-2",
+                name="重复对比名称",
+            )
+        renamed = create_history(
+            repository,
+            comparison_id="history-ab-2",
+            name="重复对比名称 2",
+        )
+        assert renamed.id == "history-ab-2"

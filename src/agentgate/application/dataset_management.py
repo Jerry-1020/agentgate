@@ -49,8 +49,10 @@ class DatasetManagement:
 
     def create_dataset(self, name: str, description: str = "") -> Dataset:
         user_team_id, user_id, user_name = _user_context()
+        cleaned = name.strip()
+        self._reject_duplicate_name(cleaned, user_team_id)
         dataset = Dataset(
-            name=name.strip(),
+            name=cleaned,
             description=description.strip(),
             user_team_id=user_team_id,
             user_id=user_id,
@@ -58,6 +60,15 @@ class DatasetManagement:
         )
         self.repository.save_dataset(dataset)
         return dataset
+
+    def _reject_duplicate_name(self, name: str, user_team_id: str) -> None:
+        if not name:
+            return
+        for dataset in self.repository.list_datasets(
+            include_archived=True, user_team_id=user_team_id
+        ):
+            if dataset.name == name:
+                raise ValueError(f"测评集名称已存在：{name}，请修改名称后重试。")
 
     def update_dataset(
         self,
@@ -246,6 +257,7 @@ class DatasetManagement:
             else self.latest_published(source_dataset_id)
         )
         user_team_id, user_id, user_name = _user_context()
+        self._reject_duplicate_name(name.strip(), user_team_id)
         dataset = Dataset(
             name=name.strip(),
             user_team_id=user_team_id,
@@ -273,6 +285,7 @@ class DatasetManagement:
     ) -> tuple[Dataset, DatasetVersion]:
         dataset, version = load_dataset(source, "json")
         user_team_id, user_id, user_name = _user_context()
+        self._reject_duplicate_name(dataset.name.strip(), user_team_id)
         dataset = dataset.model_copy(update={
             "user_team_id": user_team_id,
             "user_id": user_id,
@@ -293,6 +306,7 @@ class DatasetManagement:
     ) -> tuple[Dataset, DatasetVersion]:
         cases = load_cases(source, "xlsx")
         user_team_id, user_id, user_name = _user_context()
+        self._reject_duplicate_name(name.strip(), user_team_id)
         dataset = Dataset(
             name=name.strip(),
             description=description.strip(),

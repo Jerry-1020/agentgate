@@ -195,6 +195,23 @@ class EvaluatorManagement:
             raise EvaluatorNotFound(f"unknown Evaluator: {evaluator_id}")
         return evaluator
 
+    def _reject_duplicate_evaluator_name(self, name: str) -> None:
+        cleaned = name.strip()
+        if not cleaned:
+            return
+        info = get_user_info()
+        user_team_id = info.user_team_id if info else ""
+        existing = {evaluator.name for evaluator in self._builtin_evaluators.values()}
+        existing.update(
+            evaluator.name
+            for evaluator in self.repository.list_evaluators(
+                include_disabled=True, user_team_id=user_team_id
+            )
+            if evaluator.owner_evaluator_id is None
+        )
+        if cleaned in existing:
+            raise EvaluatorCatalogConflict(f"评估器名称已存在：{cleaned}，请修改名称后重试。")
+
     def create_evaluator(
         self,
         name: str,
@@ -212,6 +229,7 @@ class EvaluatorManagement:
     ) -> tuple[Evaluator, EvaluatorDraft]:
         if kind == EvaluatorKind.LLM_GROUP:
             raise EvaluatorCatalogConflict("use the LLM group workflow to create a group")
+        self._reject_duplicate_evaluator_name(name)
         created_at = utcnow()
         info = get_user_info()
         user_team_id = info.user_team_id if info else ""

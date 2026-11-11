@@ -1,6 +1,307 @@
 # AgentGate Project Progress
 
-Last updated: 2026-11-05
+Last updated: 2026-11-11
+
+## 2026-11-11 — Prepare local changes for release_20261116
+
+Delivery includes removing unused task-list checkboxes/name column and adjusting
+column widths, constraining long dataset/evaluator card text with full-text tooltips,
+adding duplicate-name checks for datasets/tasks/evaluators, removing mode/source
+labels from the task form/header, and detailed single-task/A/B Excel exports with
+automatic preview, fixed-height bordered rows and hyphens for missing values.
+Existing local duration-label improvements are included. Naming checks change the
+application validation only; no database structure, BJS submission contract or Agent
+execution flow changes are introduced by this delivery.
+
+Pre-integration validation: frontend stack/lint/type checks, 191 unit tests and
+production build passed; eight related backend modules passed 134 tests. Focused
+Ruff found three import-order findings, all confirmed identical to the existing
+baseline. Remote release_20261116 includes evaluator-catalog performance and old-browser
+dataset compatibility fixes; both are preserved in the final integration.
+
+Release-base validation: frontend stack/lint/type checks, **193 unit tests** and
+production build passed. Backend regression recorded **3267 passed / 128 skipped**
+and nine shell-entry failures caused solely by the isolated checkout's missing
+`.venv` link; after adding the existing environment link, all nine failed tests
+passed on rerun (**3276 passed total / 128 skipped**, no remaining failures).
+Skipped infrastructure/environment cases, including unconfigured MySQL checks,
+are not claimed as verified. No BJS, schema or Agent execution files are modified
+relative to the release base. Whitespace checks passed; the original working tree
+is committed and clean.
+
+## 2026-11-11 — Hyphens for empty export values
+
+Single-task and A/B previews and Excel exports now show `-` for missing values,
+empty/whitespace-only text, empty arrays/objects and empty continuation cells.
+Later-turn sample-level scores/resources also use `-`; real zero scores remain
+numeric zero and display as 0.0. Explicit evidence-unavailable explanations remain.
+Export utility/dialog ESLint, type checking and all 27 focused export tests passed.
+The real multi-turn workbook was regenerated (3 rows / 26 columns), reopened and
+rendered with Artifact Tool; later-turn placeholders, original numeric scores and
+single-line bordered rows were verified. No backend changes or commit/push.
+
+## 2026-11-11 — Direct A/B sample-result export preview
+
+The A/B export dialog now always selects 样本结果对比 (`ab_items`) and automatically
+loads its first five rows on opening, matching the single-task flow. Removed all
+export-category controls and their styles; no 指标对比 or 执行条件差异 choices are
+presented. Empty-result feedback no longer asks the user to select another category.
+Excel formatting and both historical/run-based comparison data paths are preserved.
+Component ESLint, type checking, all 27 export tests and whitespace checks passed.
+Live Chrome verification opened a historical A/B task and immediately displayed
+样本结果对比预览 with 4 rows / 9 columns, no category controls, no task-name banner
+or success sentence. The browser is left on that preview. No backend changes or push.
+
+## 2026-11-11 — Remove redundant export-dialog text
+
+Removed the standalone task name (for example, “你好”) and the post-download success
+sentence from the export dialog. Retained the preview heading with row/column counts
+and the first-five-row description. Download behavior, exported data and error/loading
+messages are unchanged. Component ESLint, type checking and whitespace checks passed.
+
+## 2026-11-11 — Cell borders in task Excel exports
+
+Added thin light-gray borders on all four sides of every header/data cell in the
+exported table, including intentionally blank later-turn scores. This applies to
+single-task and A/B Excel exports through their shared formatter. Fixed 22 pt row
+heights and existing values/formats are preserved. Type checking and all 27 export
+unit tests passed. The real multi-turn sample was regenerated; its saved XLSX XML
+confirms four-sided thin borders on all 104 cells, blank second-turn scores and fixed
+heights. Artifact Tool rendering was reviewed. No backend changes or commit/push.
+
+## 2026-11-11 — Excel export with fixed rows and explicit sample-level labels
+
+Replaced task CSV downloads with native `.xlsx` using the existing frontend ExcelJS
+dependency. Single tasks still export one full sample/turn table; A/B retains its three
+content choices and now downloads Excel as well. All “仅首轮” headings now read
+“样本级含多轮”. Sample scores and aggregate fields remain populated only on the first
+turn; later turns contain genuine blank Excel cells. Per-turn checks and the check-only
+evaluator detail format remain intact. The earlier proposed repetition on every row
+was not implemented, following the user's superseding instruction.
+
+Excel headers and data rows have fixed **22 pt** height, no automatic wrapping or
+shrink-to-fit. Scores stay numeric with one decimal; timestamps are typed dates displayed
+in UTC. Header/identity columns are frozen and filters are enabled. Empty text becomes
+an actual blank cell for reader compatibility. Text longer than Excel's cell limit is
+continued in adjacent columns on the same sample/turn row, without discarding content
+or splitting it into extra sample rows. The preview uses the same columns and fixed
+single-line cells with full text on hover; automatic first-five-row preview is retained.
+
+Validation: frontend stack check, ESLint, type checking, **191 unit tests** (including
+27 export tests), production build and whitespace checks passed. Tests reopen native
+workbooks to verify numbers, blanks, fixed heights, panes/filters, formula-like literal
+text and lossless long-text continuation. Live Chrome validation observed automatic
+preview, the new headings, fixed preview rows and successful `.xlsx` download for the
+real multi-turn task (3 rows / 26 columns). Reopened XML and Artifact Tool inspection/
+rendering verified the final sample's first-turn 100-point scores, blank second-turn
+scores, all three checks and fixed heights. The final blank-cell compatibility adjustment
+was verified through the application's export function; a further native UI pass was
+unavailable because the Mac was locked. No native Excel desktop-app validation claimed.
+
+Recovered a stale local Vite dependency cache with a frontend restart and restored the
+local API after its port stopped listening, using the existing script/configuration.
+No backend source, database schema, BJS submission or Agent execution changes. Work is
+in `/Users/baibo/agentgate-refactor-1` on `feature/task-detail-export`. No commit or push.
+The final sample is `outputs/task-excel-export/多轮任务-完整测评结果.xlsx` under the thread
+visualization directory.
+
+## 2026-11-11 — Automatic CSV preview and check-only evaluator details
+
+Opening 导出 CSV now loads and displays the first five rows automatically; removed
+its separate preview button. Switching A/B export categories automatically refreshes
+the preview. Download continues to reuse the prepared data and includes every row.
+Exported 评估详情 cells now contain only 检查详情: check scope, expected/actual evidence,
+score, outcome and reason, plus existing missing-check messages. Removed the duplicated
+sample-level conclusion, scoring basis/source/threshold and evaluator metadata blocks.
+LLM checks no longer refer to the removed first-turn scoring-basis block. Per-turn check
+placement, sample-level numeric columns, and A/B comparison content are preserved.
+
+Validation: frontend stack check, ESLint, type checking, all **190 unit tests** and
+production build passed. Existing full-export browser acceptance now asserts that five
+preview rows appear without clicking another button; that browser suite was not run.
+Actual local multi-turn, LLM/rule/composite and failed-task CSVs still contain 3/2/5 rows;
+all three/32 saved checks were preserved, and evaluator detail cells contain checks only.
+Updated acceptance files are under `csv-check-details-20261111` in the thread visualization
+directory. Browser-control inventory timed out, so live UI click validation remains
+unverified. No backend, database, BJS or Agent execution changes. No commit or push.
+
+## 2026-11-11 — One complete single-task CSV keyed by sample and turn
+
+Replaced the single-task category selector with one complete CSV. Each selected sample
+and configured turn occupies one row, identified by sample ordinal and turn ordinal;
+duplicate sample names do not collapse records. The file merges dialogue, sample summary,
+resource usage, and every evaluator's results and checks. Each evaluator contributes a
+numeric sample-score column and a readable detail column. Sample-level scores, totals,
+basis, thresholds and overall conclusions appear only on the sample's first row, with
+explicit first-turn column labels. Turn-specific checks stay on the matching row;
+sample-level and unmatched historical checks remain on the first row with scope labels.
+Sample-level LLM judgments are never presented as independent per-turn scores.
+
+Added configured input, per-turn expectations and frozen task/Agent/dataset context.
+Actual input still comes only from saved outcomes or a uniquely matching turn span;
+missing execution evidence stays explicit. Failed/cancelled tasks retain planned rows
+and evaluator columns with blank missing scores. Historical samples without turn
+definitions retain one marked row. A/B comparison's three export types are unchanged;
+an independently opened A or B run uses the full single-run export and retains its side.
+
+Validation: frontend stack check, ESLint, type checking, **190 unit tests** (including
+26 export tests), production build and whitespace checks passed. Real existing tasks,
+read through the current APIs and exported through the application functions, produced:
+- Multi-turn mock task: **3 rows / 26 columns**, two samples, all three checks.
+- Loan workflow with LLM/rule/composite evaluators: **2 rows / 38 columns**, all 32 checks.
+- Failed task: **5 rows / 34 columns**, three samples, missing scores and errors preserved.
+
+Parsed all three CSVs to verify unique sample/turn keys, fixed column counts, UTF-8 BOM,
+one-decimal scores, complete check counts and non-duplicated sample-level aggregates.
+Acceptance files are under `csv-full-turn-20261111` in the thread visualization directory.
+Live browser verification was blocked by a browser-control connection timeout; no
+successful live click/download or screenshot is claimed for this revision. Existing
+browser-test selectors were updated; their full suites were not rerun. Implementation
+is in `/Users/baibo/agentgate-refactor-1` on `feature/task-detail-export`. This change
+only edits frontend export logic, tests and documentation; no backend code, database
+schema, BJS submission or Agent execution flow changes. No commit or push performed.
+
+## 2026-11-11 — Consolidate CSV exports by task type
+
+Implemented the approved three-option menus: single tasks offer 样本汇总 / 评估明细 /
+对话明细; A/B tasks offer 指标对比 / 样本结果对比 / 执行条件差异. A/B source details
+remain available after entering experiment A or B. Cards use three desktop columns
+and one narrow-screen column. Removed the separate checks export type and merged its
+contents into the last 检查详情 column of evaluator details. Each sample/evaluator
+still occupies one row; every check retains its numbered name, turn/sample scope,
+expected value, observed evidence, score, outcome and reason. Missing evidence and
+missing check results are explicit. LLM judgments retain their saved sample/turn scope;
+composite evidence resolves names without exposing internal result references.
+
+Validation: stack check, ESLint, type checking, **189 frontend unit tests** (including
+25 export tests), production build and whitespace checks passed. Existing browser-test
+selectors were updated for the renamed dialogue option. The live single-task dialog
+was observed with exactly three choices. Further browser control timed out before the
+download/A-B dialog checks completed; no successful live browser download is claimed
+for this revision. Instead, the existing read APIs and the application's unchanged CSV
+entry function produced real-report acceptance samples. The loan workflow export has
+**14 rows / 15 columns**, with all **32 checks** verified against the saved report.
+Run-based A/B metrics/items/conditions have **6/3/8 rows** and **5/9/6 columns**. Samples
+are in `csv-merged-20261111` under the thread visualization directory. No new evaluation
+tasks were needed. No backend code, schema, BJS interface or execution-flow changes.
+No commit or push performed.
+
+## 2026-11-11 — Simplify CSV export options
+
+Removed the sample-range selector and the two explanatory paragraphs from the CSV
+export dialog, as requested. Export always includes all executed samples, independent
+of filters on the result page. Removed the now-unused filter props/state/styles and
+updated existing browser-test expectations. Export-type choices, preview and download
+remain available. No backend, database or BJS changes. Type checking, ESLint and
+whitespace checks passed. Live UI verification confirmed the removed text is absent
+and a result-page filter showing one sample still exports both executed samples.
+
+## 2026-11-10 — CSV review redesign: one row meaning per file
+
+Implemented the user's approved review direction in `/Users/baibo/agentgate-refactor-1`
+on `feature/task-detail-export`. This replaces the mixed record-type export described
+in the earlier phase-1 entry below.
+
+**执行结果 → 导出 CSV** now offers four single-run files: evaluation conclusions,
+sample summary, per-turn conversations and individual checks. A/B views add three
+separate files: metric differences, item results and execution-condition differences.
+Each CSV has one header and one fixed row meaning. The dialog describes that meaning,
+previews five rows, expands long cells, reports row/column counts and reuses the loaded
+terminal report for download. The default is evaluator conclusions for single tasks
+and metric differences for A/B tasks. Single views retain the current-filter option.
+
+Scores/deltas use 0–100 points with one decimal; absent scores stay blank. Task/sample
+names and frozen business labels replace default internal identifiers/configuration
+JSON. Complete scoring criteria and LLM reasons remain available. Composite check
+records resolve child names and explain outcomes/weights in readable text. Failed
+runs retain planned evaluator rows with their actual task error. Multi-turn inputs
+come from saved outcomes or the uniquely matching turn span; configured prompts
+never masquerade as observed inputs. Sample-level LLM judgments are not copied to
+individual turns. Eight A/B condition categories match the existing comparison page,
+with changed fields in separate rows. CSV escaping, formula neutralization, existing
+session routing and at most three concurrent trace reads are preserved.
+
+Live validation on port 5197 downloaded and parsed ten CSV files covering all seven
+export types: workflow evaluation conclusions **14 rows / 14 columns**, summary
+**2 / 12**, checks **32 / 12**; multi-turn dialogue **3 / 7**; failed results **15 / 14**;
+run-based A/B metrics **6 / 5** and items **3 / 9**; historical A/B metrics **3 / 5**,
+items **4 / 9**, and conditions **65 / 6**. Verified UTF-8 BOM, fixed row widths,
+one-decimal numeric score fields, full turn inputs/outputs, missing-score blanks and
+readable composite checks. Actual CSVs and screenshots are under
+`/Users/baibo/.codex/visualizations/2026/10/30/01a18bea-18cd-7051-8f15-8efa5be8e80d/csv-review-20261110`.
+
+Additional tasks created through existing APIs for coverage:
+- `0692556b-576f-42ec-9e45-1e76a60ea964`: CSV验收 · 多轮对话 · 本地模拟;
+  completed, two samples/three turns, score 100.
+- `6b9c580a-bb01-4eb7-8b08-6e74b87e645e`: CSV验收 · 历史A/B · 工作流与基础编排;
+  completed historical result comparison, without executing the source Agents again.
+- `9d066231-4c28-4ef6-89d7-95edc1964857`: CSV验收 · 多轮贷款工作流 · 规则评估;
+  failed before producing evaluator results because the Agent returned
+  `rejected: customer chat returned an error event`. Kept to verify failure export;
+  existing successful reports supply genuine LLM/rule/composite evidence.
+
+Validation: final ESLint, type checking, production build and all **188 frontend unit
+tests** (including 24 focused export tests) passed. The export tests include actual
+turn-span input routing and reject evidence from another turn. Existing browser-test selectors were updated; their
+full mocked browser suites were not rerun. Live browser acceptance above used the
+running project. No backend code, database structure, BJS submission or Agent execution
+flow changed for this feature. No commit or push performed.
+
+## 2026-11-10 — Phase 1 task detail CSV export
+
+Implemented in the user-confirmed checkout `/Users/baibo/agentgate-refactor-1`,
+on `feature/task-detail-export`, based on `refactor-1` at `7b17107`. Existing
+uncommitted changes are preserved. The user's final format choice is CSV.
+
+Use **执行结果 → 导出 CSV → 详细报告 → 开始导出**. The default exports all executed
+samples; single-run views also offer the current filtered samples. Summary CSV
+keeps one row per sample with the original score/resource columns plus task and
+sample identity. A/B summaries also include metric differences and change counts.
+Detailed CSV uses a record-type column for task metadata/metrics, sample summaries,
+actual per-turn inputs/outputs, evaluator conclusions, frozen scoring criteria,
+thresholds, rule checks, LLM dimensions and composite-child weights/configuration.
+A/B detail exports add both sides, numeric score differences, item changes and the
+same eight condition categories shown on the comparison page. A separately opened
+A/B side is labelled A or B rather than a single task.
+
+The export reader uses existing read endpoints and current session identity for
+external, in-bank and integrated modes. It supports completed/failed/cancelled
+runs; incomplete runs retain saved results without fabricating final scores.
+Trace reads are bounded to three concurrent requests. Missing optional evidence
+is disclosed in the CSV; authorization failures stop export. Cancellation, task
+changes, logout and identity changes abort reads. No database, backend endpoint,
+BJS submission or Agent execution changes were made for this export feature.
+Existing scoring/presentation helpers were reused; the CSV reader/row builder and
+export options dialog were added. No dependency was added.
+
+Validation: stack consistency, ESLint, type checking, **182 frontend unit tests**
+(including 18 new export tests), production build and whitespace checks passed.
+Live UI downloads on port 5197 were parsed as UTF-8 BOM CSV: a loan workflow report
+contained 76 records (2 samples, 14 evaluator conclusions, 32 checks), a filtered
+summary contained exactly 1 sample, and a run-based A/B report contained 89 records
+including 8 condition differences and the expected 83.333333-point overall delta.
+The existing three browser-test files were adapted to the dialog; those full
+browser suites were not rerun. Historical A/B, failed/cancelled, multi-turn,
+missing evidence and mode routing were covered with focused unit fixtures.
+No commit or push performed.
+
+## 2026-11-10 — Simplify task-list columns
+
+Removed the task-name column and row/select-all checkboxes. The remaining eight
+columns give more space to Agent and dataset identities; task-kind badges and
+summary/retry hints move beside progress and status. An explicit “查看” action
+uses the existing detail route. Name/ID search, time display, other row actions,
+and the responsive layout are preserved.
+
+Applied to the user-confirmed checkout `/Users/baibo/agentgate-refactor-1` on
+`feature/task-list-compact-columns`, based on current `refactor-1` (`7b17107`).
+Validation: ESLint, type checking, production build and all 163 frontend unit tests
+passed. The live page on port 5197 displays five existing tasks, eight columns,
+no row checkboxes and no horizontal overflow. API, frontend, local directory,
+loan Agent and Trace service health checks return HTTP 200. Existing database
+and backend services remain in use; no backend/API/schema changes. Browser-test
+selectors were updated, but those complete browser suites were not rerun.
+No commit or push performed for this change.
 
 ## 2026-11-05 — Historical comparison release verification
 
