@@ -4,7 +4,7 @@ import {defineConfig} from '@playwright/test'
 export default defineConfig({
   testDir: './tests',
   // Include historical score presentation contracts alongside existing unit coverage.
-  testMatch: ['code-rule-templates-unit.spec.ts', 'historical-comparison-unit.spec.ts', 'task-timing-unit.spec.ts', 'evaluation-summaries-unit.spec.ts', 'architecture-unit.spec.ts', 'dataset-export-unit.spec.ts', 'dataset-import-unit.spec.ts', 'review-merge-unit.spec.ts', 'task-report-unit.spec.ts', 'annotation-progress-unit.spec.ts', 'annotation-template-store-unit.spec.ts', 'annotation-feedback-unit.spec.ts', 'annotation-v2-editor-unit.spec.ts', 'annotation-v2-list-unit.spec.ts', 'sample-output-unit.spec.ts', 'sample-expectations-unit.spec.ts', 'trace-presentation-unit.spec.ts', 'dashboard-unit.spec.ts', 'evaluator-design-unit.spec.ts', 'evaluator-templates-unit.spec.ts', 'evaluator-group-unit.spec.ts'],
+  testMatch: ['code-rule-templates-unit.spec.ts', 'historical-comparison-unit.spec.ts', 'task-timing-unit.spec.ts', 'evaluation-summaries-unit.spec.ts', 'architecture-unit.spec.ts', 'dataset-export-unit.spec.ts', 'dataset-import-unit.spec.ts', 'dataset-import-errors-unit.spec.ts', 'review-merge-unit.spec.ts', 'task-report-unit.spec.ts', 'annotation-progress-unit.spec.ts', 'annotation-template-store-unit.spec.ts', 'annotation-feedback-unit.spec.ts', 'annotation-v2-editor-unit.spec.ts', 'annotation-v2-list-unit.spec.ts', 'sample-output-unit.spec.ts', 'sample-expectations-unit.spec.ts', 'trace-presentation-unit.spec.ts', 'dashboard-unit.spec.ts', 'evaluator-design-unit.spec.ts', 'evaluator-templates-unit.spec.ts', 'evaluator-group-unit.spec.ts'],
   workers: 1,
   outputDir: '../runtime/unit-tests',
 })
